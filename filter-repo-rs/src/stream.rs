@@ -132,12 +132,10 @@ fn parse_sha_line(line: &str) -> Option<ShaBytes> {
 fn parse_sha_bytes(bytes: &[u8]) -> Option<ShaBytes> {
   if bytes.len() != SHA_HEX_LEN { return None; }
   let mut out = [0u8; SHA_BIN_LEN];
-  let mut i = 0;
-  while i < SHA_BIN_LEN {
-    let hi = hex_val(bytes[2 * i])?;
-    let lo = hex_val(bytes[2 * i + 1])?;
+  for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+    let hi = hex_val(chunk[0])?;
+    let lo = hex_val(chunk[1])?;
     out[i] = (hi << 4) | lo;
-    i += 1;
   }
   Some(out)
 }
@@ -443,7 +441,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
             let path_bytes = &bytes[path_start..].to_vec();
             if samples_modified.len() < REPORT_SAMPLE_LIMIT && !samples_modified.iter().any(|p| p == path_bytes) { samples_modified.push(path_bytes.clone()); }
           }
-        } else if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
+        } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
+        // } else if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
           // sha1
           let sha = id.to_vec();
           if strip_sha_lookup.contains_hex(&sha)? { drop_path = true; reason_sha = true; suppressed_shas_by_sha.insert(sha.clone()); }
