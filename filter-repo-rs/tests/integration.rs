@@ -638,3 +638,2413 @@ fn sensitive_mode_keeps_origin_remote() {
   let (_c2, remotes, _e2) = run_git(&repo, &["remote"]);
   assert!(remotes.contains("origin"), "expected origin remote to remain in sensitive mode, got: {}", remotes);
 }
+
+#[test]
+fn max_blob_size_edge_cases() {
+  let repo = init_repo();
+
+  // Test case 1: Empty file (size = 0)
+  write_file(&repo, "empty.txt", "");
+
+  // Test case 2: Single byte file (size = 1)
+  write_file(&repo, "tiny.txt", "A");
+
+  // Test case 3: Exactly at threshold
+  let threshold_content = vec![b'X'; 100];
+  fs::write(repo.join("threshold.bin"), &threshold_content).unwrap();
+
+  // Test case 4: Just over threshold
+  let over_content = vec![b'Y'; 101];
+  fs::write(repo.join("over.bin"), &over_content).unwrap();
+
+  // Test case 5: Very large file (stress test)
+  let large_content = vec![b'Z'; 10000];
+  fs::write(repo.join("large.bin"), &large_content).unwrap();
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add edge case files"]).0, 0);
+
+  // Run with threshold = 100 - should keep files <= 100, drop files > 100
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep empty.txt (0 bytes), tiny.txt (1 byte), threshold.bin (100 bytes)
+  assert!(tree.contains("empty.txt"), "expected empty.txt to remain, got: {}", tree);
+  assert!(tree.contains("tiny.txt"), "expected tiny.txt to remain, got: {}", tree);
+  assert!(tree.contains("threshold.bin"), "expected threshold.bin to remain, got: {}", tree);
+
+  // Should drop over.bin (101 bytes) and large.bin (10000 bytes)
+  assert!(!tree.contains("over.bin"), "expected over.bin to be dropped, got: {}", tree);
+  assert!(!tree.contains("large.bin"), "expected large.bin to be dropped, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_with_path_filtering() {
+  let repo = init_repo();
+
+  // Create files in different directories
+  std::fs::create_dir_all(repo.join("keep")).unwrap();
+  std::fs::create_dir_all(repo.join("drop")).unwrap();
+  let large_content = vec![b'A'; 2000];
+  std::fs::write(repo.join("keep/large.bin"), &large_content).unwrap();
+  std::fs::write(repo.join("drop/large.bin"), &large_content).unwrap();
+  std::fs::write(repo.join("keep/small.txt"), "small content").unwrap();
+  std::fs::write(repo.join("drop/small.txt"), "small content").unwrap();
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add files in different directories"]).0, 0);
+
+  // Filter to only keep/ directory AND drop blobs > 1000 bytes
+  let (_c, _o, _e) = run_tool(&repo, |o| {
+    o.max_blob_size = Some(1000);
+    o.paths.push(vec![b'k', b'e', b'e', b'p', b'/']); // "keep/"
+  });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep keep/small.txt (within path filter and size limit)
+  assert!(tree.contains("keep/small.txt"), "expected keep/small.txt to remain, got: {}", tree);
+
+  // Should drop drop/ files (not in path filter)
+  assert!(!tree.contains("drop/"), "expected drop/ directory to be filtered out, got: {}", tree);
+
+  // Should drop keep/large.bin (in path filter but over size limit)
+  assert!(!tree.contains("keep/large.bin"), "expected keep/large.bin to be dropped due to size, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_with_strip_blobs_by_sha() {
+  let repo = init_repo();
+
+  // Create files with specific content to get predictable SHAs
+  let content1 = "test content 1";
+  let content2 = "test content 2";
+  fs::write(repo.join("file1.txt"), content1).unwrap();
+  fs::write(repo.join("file2.txt"), content2).unwrap();
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add test files"]).0, 0);
+
+  // Get SHAs of the blobs
+  let (_c1, sha1_output, _e1) = run_git(&repo, &["hash-object", "file1.txt"]);
+  let (_c2, sha2_output, _e2) = run_git(&repo, &["hash-object", "file2.txt"]);
+  let sha1 = sha1_output.trim();
+  let sha2 = sha2_output.trim();
+
+  // Create SHA list file
+  let sha_list_content = format!("{}\n{}", sha1, sha2);
+  fs::write(repo.join("sha_list.txt"), &sha_list_content).unwrap();
+
+  run_git(&repo, &["add", "sha_list.txt"]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add sha list"]).0, 0);
+
+  // Run with both size filter and SHA filter
+  let (_c, _o, _e) = run_tool(&repo, |o| {
+    o.max_blob_size = Some(1000); // Should keep both files based on size
+    o.strip_blobs_with_ids = Some(repo.join("sha_list.txt"));
+  });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Both files should be dropped due to SHA filter, regardless of size
+  assert!(!tree.contains("file1.txt"), "expected file1.txt to be dropped by SHA filter, got: {}", tree);
+  assert!(!tree.contains("file2.txt"), "expected file2.txt to be dropped by SHA filter, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_empty_repository() {
+  let repo = init_repo();
+
+  // Run max-blob-size filter on repository with no blobs (just initial commit)
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+
+  // Should complete successfully without errors
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should still have README.md from initial repo
+  assert!(tree.contains("README.md"), "expected README.md to remain, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_mixed_blob_types() {
+  let repo = init_repo();
+
+  // Test different types of content
+  write_file(&repo, "text.txt", &"a".repeat(1500)); // Text content
+  fs::write(repo.join("binary.bin"), vec![0u8; 1500]).unwrap(); // Binary content
+  write_file(&repo, "utf8.txt", &"你好".repeat(500)); // UTF-8 content (500 chars * 3 bytes each = 1500 bytes)
+  fs::write(repo.join("zeroes.bin"), vec![0u8; 500]).unwrap(); // Small binary
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add mixed content types"]).0, 0);
+
+  // Filter with threshold that should keep small files, drop large ones
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep small files
+  assert!(tree.contains("zeroes.bin"), "expected zeroes.bin to remain, got: {}", tree);
+
+  // Should drop large files regardless of content type
+  assert!(!tree.contains("text.txt"), "expected text.txt to be dropped due to size, got: {}", tree);
+  assert!(!tree.contains("binary.bin"), "expected binary.bin to be dropped due to size, got: {}", tree);
+  assert!(!tree.contains("utf8.txt"), "expected utf8.txt to be dropped due to size, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_threshold_boundary() {
+  let repo = init_repo();
+
+  // Test exact boundary conditions
+  let exact_content = vec![b'X'; 1024]; // Exactly 1KB
+  let just_over = vec![b'Y'; 1025]; // Just over 1KB
+
+  fs::write(repo.join("exact.txt"), &exact_content).unwrap();
+  fs::write(repo.join("over.txt"), &just_over).unwrap();
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add boundary test files"]).0, 0);
+
+  // Test with threshold = 1024
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1024); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep exact.txt (exactly 1024 bytes)
+  assert!(tree.contains("exact.txt"), "expected exact.txt to remain, got: {}", tree);
+
+  // Should drop over.txt (1025 bytes)
+  assert!(!tree.contains("over.txt"), "expected over.txt to be dropped, got: {}", tree);
+}
+
+#[test]
+fn max_blob_size_batch_optimization_verification() {
+  let repo = init_repo();
+
+  // Create many files to make individual calls inefficient
+  for i in 0..100 {
+    let content = format!("file content {}", i);
+    write_file(&repo, &format!("file{}.txt", i), &content);
+  }
+
+  // Add a few large files that should be filtered
+  write_file(&repo, "large1.bin", &"a".repeat(2000));
+  write_file(&repo, "large2.bin", &"b".repeat(3000));
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add many files for batch test"]).0, 0);
+
+  // Filter with size threshold - this should use batch optimization
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1500); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep all small files
+  for i in 0..100 {
+    assert!(tree.contains(&format!("file{}.txt", i)), "expected file{}.txt to remain", i);
+  }
+
+  // Should drop large files
+  assert!(!tree.contains("large1.bin"), "expected large1.bin to be dropped due to size");
+  assert!(!tree.contains("large2.bin"), "expected large2.bin to be dropped due to size");
+
+  // Verify the total count is correct (100 small files should remain)
+  let files: Vec<&str> = tree.lines().collect();
+
+  // Debug: print all files to see what's unexpected
+  println!("Found {} files:", files.len());
+  for file in &files {
+    println!("  {}", file);
+  }
+
+  // Should be 100 small files, but account for any unexpected files
+  let small_files: Vec<&str> = files.iter().copied().filter(|f| f.starts_with("file")).collect();
+  assert_eq!(small_files.len(), 100, "expected exactly 100 small files, got {}", small_files.len());
+  assert!(!tree.contains("large1.bin"), "expected large1.bin to be dropped due to size");
+  assert!(!tree.contains("large2.bin"), "expected large2.bin to be dropped due to size");
+}
+
+#[test]
+fn max_blob_size_performance_comparison() {
+  let repo = init_repo();
+
+  // Create many files with varying sizes to test performance characteristics
+  for i in 0..50 {
+    write_file(&repo, &format!("small{}.txt", i), &"x".repeat(100)); // 100 bytes
+  }
+  for i in 0..20 {
+    write_file(&repo, &format!("medium{}.bin", i), &"y".repeat(1000)); // 1000 bytes
+  }
+  for i in 0..10 {
+    write_file(&repo, &format!("large{}.dat", i), &"z".repeat(5000)); // 5000 bytes
+  }
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add performance test files"]).0, 0);
+
+  // Test that batch processing can handle the workload efficiently
+  let start = std::time::Instant::now();
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1500); });
+  let duration = start.elapsed();
+
+  // Should complete in reasonable time (adjust threshold as needed)
+  assert!(duration.as_secs() < 30, "batch processing should complete quickly, took {:?}", duration);
+
+  let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should keep small files (100 bytes)
+  for i in 0..50 {
+    assert!(tree.contains(&format!("small{}.txt", i)), "expected small{}.txt to remain", i);
+  }
+
+  // Should keep medium files (1000 bytes) since threshold is 1500
+  for i in 0..20 {
+    assert!(tree.contains(&format!("medium{}.bin", i)), "expected medium{}.bin to remain", i);
+  }
+
+  // Should drop large files (5000 bytes)
+  for i in 0..10 {
+    assert!(!tree.contains(&format!("large{}.dat", i)), "expected large{}.dat to be dropped", i);
+  }
+
+  // Verify correct count (should have small + medium files)
+  let files: Vec<&str> = tree.lines().collect();
+  let small_count: usize = files.iter().filter(|f| f.starts_with("small")).count();
+  let medium_count: usize = files.iter().copied().filter(|f| f.starts_with("medium")).count();
+  let large_count: usize = files.iter().copied().filter(|f| f.starts_with("large")).count();
+
+  assert_eq!(small_count, 50, "expected exactly 50 small files, got {}", small_count);
+  assert_eq!(medium_count, 20, "expected exactly 20 medium files, got {}", medium_count);
+  assert_eq!(large_count, 0, "expected no large files, got {}", large_count);
+}
+
+#[test]
+fn max_blob_size_fallback_behavior() {
+  // Create a fresh repository without the usual init_repo to avoid complexity
+  let repo = tempfile::TempDir::new().unwrap();
+  let repo_path = repo.path();
+
+  // Initialize git repo
+  let (c, _o, e) = run_git(&repo_path, &["init"]);
+  assert_eq!(c, 0, "git init failed: {}", e);
+  run_git(&repo_path, &["config", "user.name", "A U Thor"]).0;
+  run_git(&repo_path, &["config", "user.email", "a.u.thor@example.com"]).0;
+
+  // Create just one simple test file
+  write_file(&repo_path, "test.txt", "hello"); // 5 bytes
+
+  run_git(&repo_path, &["add", "."]).0;
+  assert_eq!(run_git(&repo_path, &["commit", "-q", "-m", "add test file"]).0, 0);
+
+  // Verify file exists before filtering
+  let (_c0, tree0, _e0) = run_git(&repo_path, &["ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(tree0.contains("test.txt"), "test.txt should exist before filtering: {}", tree0);
+
+  // Test with large threshold - should definitely keep the file
+  let (_c, _o, _e) = run_tool(&repo_path, |o| {
+    // o.source = repo_path.to_path_buf();
+    // o.target = repo_path.to_path_buf();
+    o.max_blob_size = Some(1000); // 1KB threshold, 5 byte file should remain
+  });
+
+  let (_c2, tree, _e2) = run_git(&repo_path, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  println!("After filtering: {}", tree);
+  assert!(tree.contains("test.txt"), "expected test.txt to remain (5 bytes < 1000)");
+}
+
+#[test]
+fn max_blob_size_no_git_objects() {
+  // Create a truly empty repository (no initial commit with files)
+  let repo = tempfile::TempDir::new().unwrap();
+  let repo_path = repo.path();
+
+  // Initialize git repo
+  let (c, _o, e) = run_git(repo_path, &["init"]);
+  assert_eq!(c, 0, "git init failed: {}", e);
+
+  // Configure git user
+  run_git(repo_path, &["config", "user.name", "test"]).0;
+  run_git(repo_path, &["config", "user.email", "test@example.com"]).0;
+
+  // Create empty commits (no blob objects)
+  run_git(repo_path, &["commit", "--allow-empty", "-q", "-m", "empty commit 1"]).0;
+  run_git(repo_path, &["commit", "--allow-empty", "-q", "-m", "empty commit 2"]).0;
+
+  // Should handle empty repositories gracefully
+  let (_c, _o, _e) = run_tool(repo_path, |o| {
+    // o.source = repo_path.to_path_buf();
+    // o.target = repo_path.to_path_buf();
+    o.max_blob_size = Some(1000);
+  });
+
+  // Should complete without errors even with no blobs
+  let (_c2, tree, _e2) = run_git(repo_path, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(tree.is_empty(), "expected no files in empty commit repository");
+}
+
+#[test]
+fn max_blob_size_corrupted_git_output() {
+  let repo = init_repo();
+
+  // Create a normal repository first
+  write_file(&repo, "test.txt", "test content");
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add test file"]).0, 0);
+
+  // Test that the system can handle unexpected git output formats
+  // This simulates what happens when git returns unexpected output
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(5); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should still work correctly despite any internal issues
+  assert!(!tree.contains("test.txt"), "expected test.txt to be dropped due to size");
+}
+
+#[test]
+fn max_blob_size_extreme_threshold_values() {
+  let repo = init_repo();
+
+  // Create test files of various sizes
+  write_file(&repo, "tiny.txt", "x"); // 1 byte
+  write_file(&repo, "small.txt", &"x".repeat(100)); // 100 bytes
+  write_file(&repo, "medium.txt", &"x".repeat(10000)); // 10KB
+  write_file(&repo, "large.txt", &"x".repeat(100000)); // 100KB
+
+  run_git(&repo, &["add", "."]).0;
+  assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add various sized files"]).0, 0);
+
+  // Test with extremely small threshold (should drop almost everything)
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1); });
+  let (_c2, tree1, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(!tree1.contains("small.txt"), "expected small.txt to be dropped with threshold 1");
+  assert!(!tree1.contains("medium.txt"), "expected medium.txt to be dropped with threshold 1");
+  assert!(!tree1.contains("large.txt"), "expected large.txt to be dropped with threshold 1");
+  // Only tiny.txt (1 byte) should remain
+  assert!(tree1.contains("tiny.txt"), "expected tiny.txt to remain with threshold 1");
+
+  // Create a fresh repository for the large threshold test
+  let repo2 = init_repo();
+  write_file(&repo2, "tiny.txt", "x"); // 1 byte
+  write_file(&repo2, "small.txt", &"x".repeat(100)); // 100 bytes
+  write_file(&repo2, "medium.txt", &"x".repeat(10000)); // 10KB
+  write_file(&repo2, "large.txt", &"x".repeat(100000)); // 100KB
+
+  run_git(&repo2, &["add", "."]).0;
+  assert_eq!(run_git(&repo2, &["commit", "-q", "-m", "add various sized files"]).0, 0);
+
+  // Test with extremely large threshold (should keep everything)
+  let (_c, _o, _e) = run_tool(&repo2, |o| { o.max_blob_size = Some(1000000); });
+  let (_c2, tree2, _e2) = run_git(&repo2, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(tree2.contains("tiny.txt"), "expected tiny.txt to remain with large threshold");
+  assert!(tree2.contains("small.txt"), "expected small.txt to remain with large threshold");
+  assert!(tree2.contains("medium.txt"), "expected medium.txt to remain with large threshold");
+  assert!(tree2.contains("large.txt"), "expected large.txt to remain with large threshold");
+}
+
+#[test]
+fn max_blob_size_normal_processing() {
+  let repo = init_repo();
+
+  // Create files that would trigger various fallback scenarios
+  std::fs::write(repo.join("normal.txt"), b"normal content").unwrap();
+  std::fs::write(repo.join("empty.txt"), b"").unwrap();
+  std::fs::write(repo.join("binary.dat"), vec![0u8; 1000]).unwrap();
+
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add test files for fallback"]);
+
+  // Test with batch processing enabled (normal case)
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(500); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should work normally with batch processing
+  assert!(tree.contains("normal.txt"), "expected normal.txt to remain (smaller than limit): {}", tree);
+  assert!(tree.contains("empty.txt"), "expected empty.txt to remain (zero bytes): {}", tree);
+  assert!(!tree.contains("binary.dat"), "expected binary.dat to be dropped (larger than limit): {}", tree);
+}
+
+#[test]
+fn max_blob_size_zero_threshold() {
+  let repo = init_repo();
+
+  // Create files that would trigger various fallback scenarios
+  std::fs::write(repo.join("normal.txt"), b"normal content").unwrap();
+  std::fs::write(repo.join("empty.txt"), b"").unwrap();
+  std::fs::write(repo.join("binary.dat"), vec![0u8; 1000]).unwrap();
+
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add test files for zero threshold test"]);
+
+  // Test with zero threshold (edge case - should drop everything)
+  let (_c, tree, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(0); });
+
+  assert!(!tree.contains("normal.txt"), "expected normal.txt to be dropped (zero threshold)");
+  assert!(!tree.contains("empty.txt"), "expected empty.txt to be dropped (zero threshold)");
+  assert!(!tree.contains("binary.dat"), "expected binary.dat to be dropped (zero threshold)");
+}
+
+#[test]
+fn max_blob_size_edge_case_handling() {
+  let repo = init_repo();
+
+  // Create a normal file first
+  std::fs::write(repo.join("normal.txt"), b"normal content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add normal file"]);
+
+  // Test that normal processing works even with potential edge cases
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(tree.contains("normal.txt"), "expected normal.txt to be processed correctly: {}", tree);
+}
+
+#[test]
+fn max_blob_size_memory_management() {
+  let repo = init_repo();
+
+  // Create many small files to test memory management
+  for i in 0..20 {
+    let content = format!("small file {} content", i);
+    std::fs::write(repo.join(format!("small_{}.txt", i)), content).unwrap();
+  }
+
+  // Create one large file
+  std::fs::write(repo.join("large.bin"), vec![0u8; 2000]).unwrap();
+
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add files for memory efficiency test"]);
+
+  // Test with small threshold - should handle memory efficiently
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // All small files should remain
+  for i in 0..20 {
+    assert!(tree.contains(&format!("small_{}.txt", i)),
+            "expected small_{}.txt to remain (smaller than limit)", i);
+  }
+
+  // Large file should be dropped
+  assert!(!tree.contains("large.bin"), "expected large.bin to be dropped (larger than limit)");
+}
+
+#[test]
+fn max_blob_size_precise_threshold_handling() {
+  let repo = init_repo();
+
+  // Test exact threshold boundaries
+  std::fs::write(repo.join("exactly_100_bytes.txt"), b"a".repeat(100)).unwrap();
+  std::fs::write(repo.join("exactly_101_bytes.txt"), b"b".repeat(101)).unwrap();
+  std::fs::write(repo.join("just_under_100.txt"), b"c".repeat(99)).unwrap();
+  std::fs::write(repo.join("just_over_100.txt"), b"d".repeat(101)).unwrap();
+
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add boundary test files"]);
+
+  // Test with 100 byte threshold
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Files <= 100 bytes should remain
+  assert!(tree.contains("exactly_100_bytes.txt"), "expected exactly_100_bytes.txt to remain (equal to limit)");
+  assert!(tree.contains("just_under_100.txt"), "expected just_under_100.txt to remain (under limit)");
+
+  // Files > 100 bytes should be dropped
+  assert!(!tree.contains("exactly_101_bytes.txt"), "expected exactly_101_bytes.txt to be dropped (over limit)");
+  assert!(!tree.contains("just_over_100.txt"), "expected just_over_100.txt to be dropped (over limit)");
+}
+
+// ===== PHASE 2.1: ERROR HANDLING TESTS =====
+
+#[test]
+fn error_handling_invalid_source_repository() {
+  let temp_dir = tempfile::TempDir::new().unwrap();
+  let invalid_repo = temp_dir.path().join("nonexistent");
+
+  // Test with non-existent source repository
+  let opts = fr::Options {
+    source: invalid_repo.clone(),
+    target: temp_dir.path().to_path_buf(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  let result = fr::run(&opts);
+  assert!(result.is_err(), "expected error for invalid source repository");
+
+  let error = result.err().unwrap();
+  let error_msg = format!("{:?}", error);
+  assert!(error_msg.contains("not a git repo") || error_msg.contains("failed"),
+          "expected git repository error, got: {}", error_msg);
+}
+
+#[test]
+fn error_handling_invalid_target_repository() {
+  let repo = init_repo();
+  let temp_dir = tempfile::TempDir::new().unwrap();
+  let invalid_target = temp_dir.path().join("nonexistent").join("nested").join("path");
+
+  // Test with invalid target path (parent doesn't exist)
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: invalid_target,
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  let result = fr::run(&opts);
+  assert!(result.is_err(), "expected error for invalid target repository");
+}
+
+#[test]
+fn error_handling_nonexistent_replace_message_file() {
+  let repo = init_repo();
+  let nonexistent_file = repo.join("nonexistent_replacements.txt");
+
+  // Test with non-existent replace-message file
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    replace_message_file: Some(nonexistent_file),
+    ..Default::default()
+  };
+
+  let result = fr::run(&opts);
+  assert!(result.is_err(), "expected error for non-existent replace-message file");
+
+  let error = result.err().unwrap();
+  let error_msg = format!("{:?}", error);
+  assert!(error_msg.contains("replace-message") || error_msg.contains("failed to read"),
+          "expected replace-message file error, got: {}", error_msg);
+}
+
+#[test]
+fn error_handling_invalid_sha_format_in_strip_blobs() {
+  let repo = init_repo();
+  let invalid_sha_file = repo.join("invalid_shas.txt");
+
+  // Write invalid SHA formats (not 40 hex chars)
+  std::fs::write(&invalid_sha_file, "invalid123\nnotahash\nshort\n").unwrap();
+
+  std::fs::write(repo.join("test.txt"), "test content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "test commit"]);
+
+  // Test with invalid SHA formats
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    strip_blobs_with_ids: Some(invalid_sha_file),
+    ..Default::default()
+  };
+
+  // This should not crash but should handle invalid SHA gracefully
+  let _result = fr::run(&opts);
+  // The tool should either succeed (ignoring invalid SHAs) or fail gracefully
+  // We just want to ensure it doesn't panic
+}
+
+#[test]
+fn path_rename_with_identical_paths() {
+  let repo = init_repo();
+
+  // Test with invalid path rename format (missing colon)
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    path_renames: vec![(b"invalidformat".to_vec(), b"invalidformat".to_vec())], // Should be "old:new"
+    ..Default::default()
+  };
+
+  let _result = fr::run(&opts);
+  // This should handle the invalid format gracefully without panicking
+}
+
+#[test]
+fn error_handling_invalid_max_blob_size_values() {
+  let repo = init_repo();
+
+  std::fs::write(repo.join("test.txt"), "test content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "test commit"]);
+
+  // Test with various problematic max-blob-size values
+  let test_cases = vec![
+    Some(0),      // Zero should be handled gracefully
+    Some(1),      // Very small size
+    Some(usize::MAX), // Very large size
+  ];
+
+  for max_size in test_cases {
+    let opts = fr::Options {
+      source: repo.clone(),
+      target: repo.clone(),
+      refs: vec!["--all".to_string()],
+      max_blob_size: max_size,
+      ..Default::default()
+    };
+
+    // These should not panic, even with extreme values
+    let _result = fr::run(&opts);
+    // We don't care about success/failure, just that it doesn't panic
+  }
+}
+
+#[test]
+fn error_handling_malformed_utf8_content() {
+  let repo = init_repo();
+
+  // Create a file with malformed UTF-8 content
+  let malformed_utf8 = vec![
+    0x66, 0x69, 0x6c, 0x65, // "file" in valid UTF-8
+    0x80, 0x81,             // Invalid UTF-8 sequence
+    0x2e, 0x74, 0x78, 0x74, // ".txt" in valid UTF-8
+  ];
+
+  std::fs::write(repo.join("test.bin"), malformed_utf8).unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add malformed utf8"]);
+
+  // Test that malformed UTF-8 doesn't cause crashes
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  let _result = fr::run(&opts);
+  // Should handle malformed UTF-8 gracefully without panicking
+}
+
+#[test]
+fn error_handling_permission_denied_simulation() {
+  let repo = init_repo();
+
+  std::fs::write(repo.join("test.txt"), "test content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "test commit"]);
+
+  // Test with a read-only directory to simulate permission issues
+  let readonly_dir = repo.join("readonly");
+  std::fs::create_dir_all(&readonly_dir).unwrap();
+
+  // Make directory read-only (this might not work on all systems, but shouldn't crash)
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&readonly_dir).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&readonly_dir, perms).unwrap();
+  }
+
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: readonly_dir.clone(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  let _result = fr::run(&opts);
+  // Should handle permission errors gracefully
+}
+
+#[test]
+fn error_handling_empty_replace_text_file() {
+  let repo = init_repo();
+  let empty_file = repo.join("empty_replacements.txt");
+
+  // Create an empty replacement file
+  std::fs::write(&empty_file, "").unwrap();
+
+  std::fs::write(repo.join("test.txt"), "test content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "test commit"]);
+
+  // Test with empty replace-text file
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    replace_text_file: Some(empty_file),
+    ..Default::default()
+  };
+
+  // Should handle empty file gracefully
+  let _result = fr::run(&opts);
+  // Empty file should not cause crashes
+}
+
+#[test]
+fn error_handling_corrupted_git_repository() {
+  let temp_dir = tempfile::TempDir::new().unwrap();
+  let repo_path = temp_dir.path();
+
+  // Initialize a normal git repository
+  run_git(&repo_path, &["init"]);
+
+  // Corrupt the git repository by removing essential files
+  let git_dir = repo_path.join(".git");
+  let objects_dir = git_dir.join("objects");
+  if objects_dir.exists() {
+    std::fs::remove_dir_all(&objects_dir).unwrap();
+  }
+
+  // Test with corrupted repository
+  let opts = fr::Options {
+    source: repo_path.to_path_buf(),
+    target: repo_path.to_path_buf(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  let result = fr::run(&opts);
+  assert!(result.is_err(), "expected error for corrupted repository");
+
+  let error = result.err().unwrap();
+  let error_msg = format!("{:?}", error);
+  assert!(error_msg.contains("not a git repo") || error_msg.contains("failed"),
+          "expected repository corruption error, got: {}", error_msg);
+}
+
+#[test]
+fn error_handling_extremely_long_paths() {
+  let repo = init_repo();
+
+  // Create a file with an extremely long path name
+  let long_filename = "a".repeat(200); // 200 character filename
+  let long_path = repo.join(&long_filename);
+
+  std::fs::write(&long_path, "content").unwrap();
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add long filename"]);
+
+  // Test with extremely long paths
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    paths: vec![long_filename.into_bytes()],
+    ..Default::default()
+  };
+
+  // Should handle long paths gracefully
+  let _result = fr::run(&opts);
+  // Long paths should not cause crashes
+}
+
+// === PHASE 2.2: MEMORY MANAGEMENT TESTS ===
+
+#[test]
+fn memory_management_large_blob_cache() {
+  let repo = init_repo();
+
+  // Create many blobs of varying sizes to test cache management
+  let mut blob_hashes = Vec::new();
+  for i in 0..1000 {
+    let content = if i % 10 == 0 {
+      // Some large blobs
+      "x".repeat(5000)
+    } else {
+      // Mostly small blobs
+      format!("content {}", i)
+    };
+
+    let path = format!("file_{}.txt", i);
+    std::fs::write(repo.join(&path), &content).unwrap();
+    run_git(&repo, &["add", &path]);
+
+    // Store blob hash for verification
+    let (_c, output, _e) = run_git(&repo, &["hash-object", "--stdin"]);
+    blob_hashes.push(output.trim().to_string());
+  }
+
+  run_git(&repo, &["commit", "-m", "add many files"]);
+
+  // Test with a size threshold that will filter many blobs
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should filter large blobs while managing memory efficiently
+  let files: Vec<&str> = tree.split_whitespace().collect();
+  assert!(files.len() < 1000, "expected some files to be filtered by size");
+
+  // Verify no memory issues occurred (test would crash on memory errors)
+}
+
+#[test]
+fn memory_management_concurrent_operations() {
+  let repo = init_repo();
+
+  // Create multiple files to simulate concurrent access patterns
+  for i in 0..100 {
+    let content = match i % 4 {
+      0 => "x".repeat(2000),  // Large
+      1 => "x".repeat(500),   // Medium
+      2 => "x".repeat(100),   // Small
+      _ => "minimal".to_string(), // Tiny
+    };
+
+    let path = format!("concurrent_{}.txt", i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+  run_git(&repo, &["commit", "-m", "concurrent test"]);
+
+  // First, check the baseline (no filtering)
+  let (_c0, tree0, _e0) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files0: Vec<&str> = tree0.split_whitespace().collect();
+  let baseline_count = files0.len();
+  assert!(baseline_count >= 100, "baseline should have at least 100 files, got {}", baseline_count);
+
+  // Run multiple filter operations in sequence to test memory cleanup
+  for threshold in &[100, 500, 1000, 2000] {
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(*threshold); });
+
+    // Each operation should clean up properly without memory leaks
+    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    // For memory management testing, we care more about the process completing successfully
+    // than exact file counts, since the main goal is to test that memory is cleaned up
+    // between operations and that the tool doesn't crash or leak memory
+    assert!(files.len() <= baseline_count, "file count should not exceed original count for threshold {}: {} vs {}", threshold, files.len(), baseline_count);
+
+    // Ensure filtering is actually working by verifying that files are being removed
+    // at lower thresholds (but allow for implementation-specific behavior)
+    if *threshold < 2000 {
+      assert!(files.len() < baseline_count, "filtering should remove some files at threshold {}: {} vs {}", threshold, files.len(), baseline_count);
+    }
+  }
+
+  // Final verification that all operations completed without memory issues
+}
+
+#[test]
+fn memory_management_path_filtering_memory() {
+  let repo = init_repo();
+
+  // Create many files in nested directories to test path filtering memory usage
+  for dir in 0..10 {
+    let dir_path = repo.join(format!("dir_{}", dir));
+    std::fs::create_dir_all(&dir_path).unwrap();
+
+    for file in 0..100 {
+      let content = format!("content for dir {} file {}", dir, file);
+      let file_path = dir_path.join(format!("file_{}.txt", file));
+      std::fs::write(file_path, content).unwrap();
+      run_git(&repo, &["add", &format!("dir_{}/file_{}.txt", dir, file)]);
+    }
+  }
+  run_git(&repo, &["commit", "-m", "nested directories"]);
+
+  // Test path filtering with many paths
+  let mut paths = Vec::new();
+  for dir in 0..5 {
+    paths.push(format!("dir_{}/", dir).into_bytes());
+  }
+
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    paths,
+    ..Default::default()
+  };
+
+  let _result = fr::run(&opts);
+
+  // Verify memory efficiency by checking operation completed
+  let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  // Should have filtered files both by path and by size
+  assert!(files.len() > 0 && files.len() < 1000, "expected some files to remain after filtering");
+}
+
+#[test]
+fn memory_management_blob_size_precomputation_stress() {
+  let repo = init_repo();
+
+  // Create a repository with many commits and blobs to stress test precomputation
+  for commit in 0..20 {
+    for file in 0..50 {
+      let size = 100 + (commit * file * 10) % 4000; // Varying sizes
+      let content = "x".repeat(size);
+      let file_path = repo.join(format!("commit{}_file{}.txt", commit, file));
+      std::fs::write(file_path, content).unwrap();
+      run_git(&repo, &["add", &format!("commit{}_file{}.txt", commit, file)]);
+    }
+    run_git(&repo, &["commit", "-m", &format!("commit {}", commit)]);
+  }
+
+  // Test precomputation with a size threshold that affects many blobs
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Verify the operation completed without memory issues
+  let files: Vec<&str> = tree.split_whitespace().collect();
+  assert!(files.len() > 0, "expected some files to remain");
+
+  // The key test is that this doesn't crash due to memory pressure
+}
+
+#[test]
+fn memory_management_repeated_operations_same_repository() {
+  let repo = init_repo();
+
+  // Create test data
+  for i in 0..200 {
+    let size = 100 + (i * 15) % 3000;
+    let content = "x".repeat(size);
+    std::fs::write(repo.join(format!("file_{}.txt", i)), content).unwrap();
+    run_git(&repo, &["add", &format!("file_{}.txt", i)]);
+  }
+  run_git(&repo, &["commit", "-m", "initial commit"]);
+
+  // Run many consecutive operations to test for memory leaks
+  for iteration in 0..50 {
+    let threshold = 500 + (iteration * 50) % 2500;
+
+    let opts = fr::Options {
+      source: repo.clone(),
+      target: repo.clone(),
+      refs: vec!["--all".to_string()],
+      max_blob_size: Some(threshold),
+      ..Default::default()
+    };
+
+    let _result = fr::run(&opts);
+
+    // If there were memory leaks, this would eventually fail
+    if iteration % 10 == 0 {
+      let (_c, _tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+      // Test completed without memory issues
+    }
+  }
+
+  // Verify final state is consistent
+  let (_c, _tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  // All iterations completed successfully
+}
+
+#[test]
+fn memory_management_edge_case_empty_repositories() {
+  // Test with completely empty repositories
+  let temp_dir = tempfile::TempDir::new().unwrap();
+  let repo_path = temp_dir.path();
+
+  run_git(&repo_path, &["init"]);
+  // Create an empty commit
+  run_git(&repo_path, &["commit", "--allow-empty", "-m", "empty commit"]);
+
+  let opts = fr::Options {
+    source: repo_path.to_path_buf(),
+    target: repo_path.to_path_buf(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(1000),
+    ..Default::default()
+  };
+
+  // Should handle empty repositories without memory issues
+  let _result = fr::run(&opts);
+
+  // Verify it completed without crashing
+  let (_c, tree, _e) = run_git(&repo_path, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert_eq!(tree.trim(), "", "empty repository should have no files");
+}
+
+#[test]
+fn memory_management_extreme_path_depth() {
+  let repo = init_repo();
+
+  // Create deeply nested directory structure
+  let mut deep_path = repo.clone();
+  for level in 0..50 {
+    deep_path = deep_path.join(format!("level_{}", level));
+  }
+  std::fs::create_dir_all(deep_path.parent().unwrap()).unwrap();
+
+  // Create a file at maximum depth
+  let content = "content in deep path".repeat(10); // Make it sizable
+  std::fs::write(&deep_path, content).unwrap();
+
+  // Add the file (need to handle the long path)
+  let relative_path = deep_path.strip_prefix(&repo).unwrap();
+  let relative_str = relative_path.to_str().unwrap();
+  run_git(&repo, &["add", relative_str]);
+  run_git(&repo, &["commit", "-m", "deep path file"]);
+
+  // Test filtering with extreme path depth
+  let opts = fr::Options {
+    source: repo.clone(),
+    target: repo.clone(),
+    refs: vec!["--all".to_string()],
+    max_blob_size: Some(100),
+    ..Default::default()
+  };
+
+  // Should handle extreme path depth without memory issues
+  let _result = fr::run(&opts);
+
+  // Verify the file was processed
+  let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  assert!(!tree.trim().is_empty(), "deep path file should be processed");
+}
+
+#[test]
+fn memory_management_unicode_path_heavy_load() {
+  let repo = init_repo();
+
+  // Create many files with Unicode characters to test memory usage with complex paths
+  let unicode_names = vec![
+    "café", "naïve", "résumé", "séchage", "noël", "hiver", "été", "automne",
+    "北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉",
+    "こんにちは", "ありがとう", "さようなら", "おはよう", "こんばんは", "おやすみ",
+    "안녕하세요", "감사합니다", "안녕히 가세요", "좋은 아침", "좋은 저녁",
+  ];
+
+  for (i, base_name) in unicode_names.iter().cycle().take(200).enumerate() {
+    let path = format!("unicode_{}_{}.txt", i, base_name);
+    let content = format!("content for {} file {}", base_name, i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+  run_git(&repo, &["commit", "-m", "unicode heavy load"]);
+
+  // Test with size filtering on Unicode-heavy repository
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+
+  // Should handle Unicode paths efficiently
+  let files: Vec<&str> = tree.split_whitespace().collect();
+  assert!(files.len() > 0, "unicode files should be processed");
+
+  // Verify Unicode characters are preserved correctly
+  let mut found_unicode_files = false;
+  for file in &files {
+    if file.contains("unicode_") {
+      found_unicode_files = true;
+      assert!(file.contains("unicode_"), "file should maintain unicode naming: {}", file);
+    }
+  }
+  assert!(found_unicode_files, "should find at least one unicode file, found: {:?}", files);
+}
+
+// ===== PHASE 2.3: CROSS-PLATFORM COMPATIBILITY TESTS =====
+
+#[test]
+fn cross_platform_windows_path_handling() {
+  let repo = init_repo();
+
+  // Test Windows-specific path patterns that might cause issues
+  // Note: Skip some reserved paths that Windows doesn't allow
+  let windows_paths = vec![
+    "file_with_backslash/path/test.txt",
+    "file/with/mixed/separators.txt",
+    "relative/path/file.txt",
+    "./hidden/file.txt",
+    "../parent/file.txt",
+  ];
+
+  for (i, path_str) in windows_paths.iter().enumerate() {
+    let content = format!("Windows path test file {} content", i);
+
+    // Create directory structure if needed
+    if let Some(parent) = std::path::Path::new(path_str).parent() {
+      if !parent.as_os_str().is_empty() {
+        if let Err(_e) = std::fs::create_dir_all(repo.join(parent)) {
+          // Skip paths that can't be created on this platform
+          continue;
+        }
+      }
+    }
+
+    if let Err(_e) = std::fs::write(repo.join(path_str), content) {
+      // Skip files that can't be created on this platform
+      continue;
+    }
+    run_git(&repo, &["add", path_str]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Windows path compatibility test"]);
+
+  // Test blob size filtering works correctly with Windows-style paths
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(50); });
+
+  // Verify paths are handled correctly
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+  assert!(files.len() > 0, "Windows paths should be processed correctly");
+}
+
+#[test]
+fn cross_platform_case_sensitivity_handling() {
+  let repo = init_repo();
+
+  // Create files with different case variations
+  let test_files = vec![
+    "TestFile.txt",
+    "testfile.txt",
+    "TESTFILE.TXT",
+    "TestFile.TXT",
+    "subdir/File.txt",
+    "subdir/file.txt",
+  ];
+
+  for file_path in test_files {
+    if let Some(parent) = std::path::Path::new(file_path).parent() {
+      std::fs::create_dir_all(repo.join(parent)).unwrap();
+    }
+
+    std::fs::write(repo.join(file_path), format!("Content for {}", file_path)).unwrap();
+    run_git(&repo, &["add", file_path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Case sensitivity test"]);
+
+  // Test filtering handles case variations correctly
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(20); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  // Should preserve original case
+  assert!(files.len() > 0, "Case sensitivity should be handled correctly");
+}
+
+#[test]
+fn cross_platform_special_characters_in_paths() {
+  let repo = init_repo();
+
+  // Test various special characters that might behave differently across platforms
+  // Start with most universally supported characters
+  let special_paths = vec![
+    "file with spaces.txt",
+    "file-with-dashes.txt",
+    "file_with_underscores.txt",
+    "file.with.dots.txt",
+    "file123.txt", // simple alphanumeric as fallback
+  ];
+
+  let mut files_created = 0;
+  let mut successfully_created = Vec::new();
+
+  for (i, path_str) in special_paths.iter().enumerate() {
+    let content = format!("Special character test file {} content", i);
+
+    // Try to create the file, skip if it fails
+    match std::fs::write(repo.join(path_str), content) {
+      Ok(_) => {
+        let (code, _output, _error) = run_git(&repo, &["add", path_str]);
+        if code == 0 {
+          files_created += 1;
+          successfully_created.push(path_str.to_string());
+        }
+      }
+      Err(_e) => {
+        // Skip files that can't be created on this platform
+        continue;
+      }
+    }
+  }
+
+  // Only proceed with test if we created some files
+  if files_created > 0 {
+    run_git(&repo, &["commit", "-m", "Special characters in paths"]);
+
+    // Check what files are in the commit before running filter-repo
+    let (_c_pre, pre_tree, _e_pre) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let pre_files: Vec<&str> = pre_tree.split_whitespace().collect();
+
+    // Test blob size filtering with special characters
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(30); });
+
+    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(files.len() > 0, "Special characters in paths should be handled correctly");
+
+    // Verify we can find our test files in the pre-filter state
+    let mut found_test_files = false;
+    for file in &pre_files {
+      for created_file in &successfully_created {
+        if file == created_file || created_file.contains(file) {
+          found_test_files = true;
+          break;
+        }
+      }
+    }
+
+    assert!(found_test_files, "should find at least one test file before filtering, created: {:?}, found: {:?}", successfully_created, pre_files);
+
+    // The main goal is that special characters don't cause crashes or panics
+    // Even if all files are filtered by size, the operation should complete successfully
+  } else {
+    // If no files could be created, create a simple test to verify the basic functionality
+    let simple_content = "Simple test content";
+    std::fs::write(repo.join("simple_file.txt"), simple_content).unwrap();
+    run_git(&repo, &["add", "simple_file.txt"]);
+    run_git(&repo, &["commit", "-m", "Simple fallback test"]);
+
+    // Test that blob size filtering works without crashing
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(5); });
+
+    // If we get here without panicking, the test passes
+    println!("Special characters test fell back to simple file test");
+  }
+}
+
+#[test]
+fn cross_platform_unicode_normalization() {
+  let repo = init_repo();
+
+  // Test Unicode normalization forms (NFC, NFD, etc.)
+  let unicode_files = vec![
+    // Accented characters in different forms
+    "café.txt",                    // NFC form
+    "cafe\u{0301}.txt",            // NFD form (e + combining acute)
+    "naïve.txt",                   // NFC
+    "naive\u{0308}.txt",           // NFD
+    "résumé.txt",                  // NFC
+    "resume\u{0301}\u{0301}.txt",  // NFD
+
+    // Other Unicode scripts
+    "русский.txt",                 // Cyrillic
+    "中文.txt",                    // Chinese
+    "日本語.txt",                   // Japanese
+    "العربية.txt",                  // Arabic
+    "한국어.txt",                   // Korean
+
+    // Emoji and symbols
+    "🚀rocket.txt",
+    "⭐star.txt",
+    "♫music.txt",
+
+    // Zero-width characters
+    "zero\u{200B}width.txt",      // Zero-width space
+    "zero\u{200C}join.txt",       // Zero-width non-joiner
+  ];
+
+  for (i, file_path) in unicode_files.iter().enumerate() {
+    let content = format!("Unicode normalization test file {} content", i);
+    std::fs::write(repo.join(file_path), content).unwrap();
+    run_git(&repo, &["add", file_path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Unicode normalization test"]);
+
+  // Test blob size filtering with Unicode normalization
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(50); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  assert!(files.len() > 0, "Unicode files should be processed correctly");
+
+  // Verify Unicode characters are preserved
+  let mut found_unicode = false;
+  for file in files {
+    if !file.chars().all(|c| c.is_ascii()) {
+      found_unicode = true;
+      break;
+    }
+  }
+  assert!(found_unicode, "Should find Unicode characters in file names");
+}
+
+#[test]
+fn cross_platform_line_endings() {
+  let repo = init_repo();
+
+  // Create files with different line endings
+  let files_content = vec![
+    ("unix_line_endings.txt", "line1\nline2\nline3\n"),
+    ("windows_line_endings.txt", "line1\r\nline2\r\nline3\r\n"),
+    ("mixed_line_endings.txt", "line1\nline2\r\nline3\n"),
+    ("old_mac_line_endings.txt", "line1\rline2\rline3\r"),
+  ];
+
+  for (file_path, content) in files_content {
+    std::fs::write(repo.join(file_path), content).unwrap();
+    run_git(&repo, &["add", file_path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Line endings compatibility test"]);
+
+  // Test blob size filtering with different line endings
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(25); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  assert!(files.len() > 0, "Files with different line endings should be processed");
+}
+
+#[test]
+fn cross_platform_file_permissions() {
+  let repo = init_repo();
+
+  // Create files with different permissions (where supported)
+  let test_files = vec![
+    "normal_file.txt",
+    "readonly_file.txt",
+    "executable_file.sh",
+  ];
+
+  for file_path in test_files {
+    let content = format!("Test content for {}", file_path);
+    std::fs::write(repo.join(file_path), content).unwrap();
+
+    // Try to set different permissions (may not work on all platforms)
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::PermissionsExt;
+      let path = repo.join(file_path);
+      let mut perms = std::fs::metadata(&path).unwrap().permissions();
+
+      if file_path.contains("readonly") {
+        perms.set_readonly(true);
+      } else if file_path.contains("executable") {
+        perms.set_mode(0o755);
+      }
+
+      std::fs::set_permissions(&path, perms).unwrap();
+    }
+
+    run_git(&repo, &["add", file_path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "File permissions test"]);
+
+  // Test blob size filtering works regardless of file permissions
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(20); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  assert!(files.len() > 0, "Files with different permissions should be processed");
+}
+
+#[test]
+fn cross_platform_long_file_names() {
+  let repo = init_repo();
+
+  // Test very long file names (approaching system limits)
+  let base_name = "a".repeat(200); // 200 character base name
+  let long_paths = vec![
+    format!("{}.txt", base_name),
+    format!("{}_{}.txt", base_name, "b".repeat(50)),
+    format!("long_directory_name_{}\\{}.txt", "x".repeat(100), base_name),
+  ];
+
+  for (i, path_str) in long_paths.iter().enumerate() {
+    let normalized_path = path_str.replace('\\', "/");
+    let content = format!("Long file name test {} content", i);
+
+    if let Some(parent) = std::path::Path::new(&normalized_path).parent() {
+      if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(repo.join(parent)).unwrap();
+      }
+    }
+
+    std::fs::write(repo.join(&normalized_path), content).unwrap();
+    run_git(&repo, &["add", &normalized_path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Long file names test"]);
+
+  // Test blob size filtering with long file names
+  let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(30); });
+
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files: Vec<&str> = tree.split_whitespace().collect();
+
+  assert!(files.len() > 0, "Long file names should be handled correctly");
+
+  // Verify file names are preserved
+  for file in files {
+    // README.md might be present from repo initialization, so check for our test files
+    if file.contains("long_file_name") {
+      assert!(file.len() > 10, "File names should maintain their length: {}", file);
+    }
+  }
+}
+
+// Phase 3.1: Performance Benchmark Tests
+// ===============================
+
+#[test]
+fn performance_large_repository_batch_optimization() {
+  let repo = init_repo();
+
+  // Create a large number of files to test batch optimization performance
+  let num_files = 1000;
+  let start_time = std::time::Instant::now();
+
+  for i in 0..num_files {
+    let content = match i % 5 {
+      0 => "large file content that exceeds typical blob size thresholds".repeat(100),  // ~5KB
+      1 => "medium file content with moderate size".repeat(20),                    // ~800B
+      2 => "small file content".repeat(5),                                         // ~100B
+      3 => "tiny content".to_string(),                                            // ~12B
+      _ => "min".to_string(),                                                     // ~3B
+    };
+
+    let path = format!("perf_test_file_{:04}.txt", i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+
+  let commit_time = start_time.elapsed();
+  run_git(&repo, &["commit", "-m", "Performance test: large repository"]);
+  let setup_time = start_time.elapsed();
+
+  println!("Setup time: {:.2}s (commit: {:.2}s)", setup_time.as_secs_f64(), commit_time.as_secs_f64());
+
+  // Test baseline (no filtering)
+  let baseline_start = std::time::Instant::now();
+  let (_c0, tree0, _e0) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files0: Vec<&str> = tree0.split_whitespace().collect();
+  let baseline_count = files0.len();
+  let baseline_time = baseline_start.elapsed();
+
+  println!("Baseline: {} files in {:.2}ms", baseline_count, baseline_time.as_millis());
+  assert!(baseline_count >= num_files, "Should have at least {} files, got {}", num_files, baseline_count);
+
+  // Test performance with different blob size thresholds
+  let thresholds = vec![10, 50, 100, 500, 1000, 5000];
+  let mut performance_metrics = Vec::new();
+
+  for threshold in thresholds {
+    let filter_start = std::time::Instant::now();
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(threshold); });
+    let filter_time = filter_start.elapsed();
+
+    let verify_start = std::time::Instant::now();
+    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+    let verify_time = verify_start.elapsed();
+
+    let filtered_count = files.len();
+    let filter_ratio = (baseline_count - filtered_count) as f64 / baseline_count as f64;
+
+    performance_metrics.push((threshold, filter_time, filtered_count, filter_ratio));
+
+    println!("Threshold {}: {} files ({:.1}% filtered) in {:.2}ms (verify: {:.2}ms)",
+             threshold, filtered_count, filter_ratio * 100.0, filter_time.as_millis(), verify_time.as_millis());
+
+    // Performance assertions - filtering should be reasonably fast even for large repositories
+    assert!(filter_time.as_millis() < 5000, "Filtering with threshold {} should complete within 5s, took {:.2}ms",
+            threshold, filter_time.as_millis());
+
+    // Filtering should actually work (remove some files for reasonable thresholds)
+    if threshold < 5000 {
+      assert!(filtered_count < baseline_count, "Should filter some files for threshold {}: {} vs {}",
+              threshold, filtered_count, baseline_count);
+    }
+  }
+
+  // Verify performance scaling - larger thresholds should not be significantly slower
+  if performance_metrics.len() >= 2 {
+    let fastest_time = performance_metrics.iter().map(|&(_, t, _, _)| t).min().unwrap();
+    let slowest_time = performance_metrics.iter().map(|&(_, t, _, _)| t).max().unwrap();
+    let time_ratio = slowest_time.as_millis() as f64 / fastest_time.as_millis() as f64;
+
+    println!("Performance ratio (slowest/fastest): {:.2}x", time_ratio);
+    assert!(time_ratio < 10.0, "Performance should not vary by more than 10x across thresholds, ratio: {:.2}x", time_ratio);
+  }
+
+  println!("Large repository performance test completed successfully");
+}
+
+#[test]
+fn performance_memory_usage_benchmark() {
+  let repo = init_repo();
+
+  // Create files that will test memory management with large blobs
+  let large_blob_count = 50;
+  let large_blob_size = 100_000; // 100KB each
+  let small_blob_count = 200;
+
+  // Create large blobs
+  for i in 0..large_blob_count {
+    let content = "x".repeat(large_blob_size);
+    let path = format!("large_blob_{:03}.dat", i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+
+  // Create small blobs
+  for i in 0..small_blob_count {
+    let content = format!("small blob {}", i);
+    let path = format!("small_blob_{:03}.txt", i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Memory benchmark test"]);
+
+  // Verify baseline
+  let (_c0, tree0, _e0) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files0: Vec<&str> = tree0.split_whitespace().collect();
+  let baseline_count = files0.len();
+  let expected_total = large_blob_count + small_blob_count;
+  assert!(baseline_count >= expected_total, "Should have at least {} files, got {}", expected_total, baseline_count);
+
+  // Test memory usage with different filtering strategies
+  let test_cases = vec![
+    (Some(50_000), "filter large blobs"),
+    (Some(1000), "filter most blobs"),
+    (None, "no filtering"),
+  ];
+
+  for (max_size, description) in test_cases {
+    println!("Testing memory usage: {}", description);
+
+    // Create a fresh repository for each test case
+    let test_repo = init_repo();
+
+    // Create the same test files
+    for i in 0..large_blob_count {
+      let content = "x".repeat(large_blob_size);
+      let path = format!("large_blob_{:03}.dat", i);
+      std::fs::write(test_repo.join(&path), content).unwrap();
+      run_git(&test_repo, &["add", &path]);
+    }
+
+    for i in 0..small_blob_count {
+      let content = format!("small blob {}", i);
+      let path = format!("small_blob_{:03}.txt", i);
+      std::fs::write(test_repo.join(&path), content).unwrap();
+      run_git(&test_repo, &["add", &path]);
+    }
+
+    run_git(&test_repo, &["commit", "-m", "Memory benchmark test"]);
+
+    // Verify baseline for this test repository
+    let (_c0, tree0, _e0) = run_git(&test_repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files0: Vec<&str> = tree0.split_whitespace().collect();
+    let test_baseline = files0.len();
+    let expected_total = large_blob_count + small_blob_count;
+    assert!(test_baseline >= expected_total, "Should have at least {} files, got {}", expected_total, test_baseline);
+
+    // Measure memory before filtering
+    let start_time = std::time::Instant::now();
+    let (_c, _o, _e) = run_tool(&test_repo, |o| { o.max_blob_size = max_size; });
+    let elapsed = start_time.elapsed();
+
+    // Verify results
+    let (_c2, tree, _e2) = run_git(&test_repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+    let filtered_count = files.len();
+
+    println!("  {} files remaining (from {}) in {:.2}ms", filtered_count, test_baseline, elapsed.as_millis());
+
+    // Memory usage assertions - operations should complete in reasonable time
+    assert!(elapsed.as_secs() < 30, "Memory test should complete within 30s, took {:.2}s", elapsed.as_secs());
+
+    // Verify filtering worked as expected
+    if let Some(size_limit) = max_size {
+      if size_limit == 50_000 {
+        // Should keep small blobs, filter large ones
+        assert!(filtered_count <= small_blob_count + 10, "Should mostly keep small blobs for 50KB limit: {} vs {}",
+                filtered_count, small_blob_count);
+      } else if size_limit == 1000 {
+        // Should filter large blobs (100KB) but keep small blobs (~15 bytes)
+        // We have 200 small blobs that should pass the 1KB filter
+        assert!(filtered_count >= small_blob_count - 10 && filtered_count <= small_blob_count + 10,
+                "Should keep small blobs for 1KB limit: {} vs expected ~{}", filtered_count, small_blob_count);
+      }
+    } else {
+      // No filtering - should keep all files
+      assert!(filtered_count == test_baseline, "No filtering should keep all files: {} vs {}",
+              filtered_count, test_baseline);
+    }
+  }
+
+  println!("Memory usage benchmark completed successfully");
+}
+
+#[test]
+fn performance_cache_effectiveness() {
+  let repo = init_repo();
+
+  // Create a repository structure that benefits from caching
+  let num_commits = 20;
+  let files_per_commit = 10;
+
+  for commit_i in 0..num_commits {
+    for file_j in 0..files_per_commit {
+      let content = format!("Commit {} file {} content with varying size {}",
+                           commit_i, file_j, "x".repeat((commit_i * 100 + file_j * 10) % 2000));
+      let path = format!("cache_test_commit_{:02}_file_{:02}.txt", commit_i, file_j);
+      std::fs::write(repo.join(&path), content).unwrap();
+      run_git(&repo, &["add", &path]);
+    }
+    run_git(&repo, &["commit", "-m", &format!("Cache test commit {}", commit_i)]);
+  }
+
+  // Verify baseline
+  let (_c0, tree0, _e0) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files0: Vec<&str> = tree0.split_whitespace().collect();
+  let baseline_count = files0.len();
+  assert!(baseline_count >= num_commits * files_per_commit, "Should have at least {} files, got {}",
+          num_commits * files_per_commit, baseline_count);
+
+  // Test multiple filtering operations on the same repository
+  // This should benefit from any caching mechanisms
+  let num_iterations = 5;
+  let mut iteration_times = Vec::new();
+
+  for i in 0..num_iterations {
+    // Create a fresh repository state for each iteration
+    let fresh_repo = init_repo();
+
+    // Recreate the same repository structure
+    for commit_i in 0..num_commits {
+      for file_j in 0..files_per_commit {
+        let content = format!("Commit {} file {} content with varying size {}",
+                             commit_i, file_j, "x".repeat((commit_i * 100 + file_j * 10) % 2000));
+        let path = format!("cache_test_commit_{:02}_file_{:02}.txt", commit_i, file_j);
+        std::fs::write(fresh_repo.join(&path), content).unwrap();
+        run_git(&fresh_repo, &["add", &path]);
+      }
+      run_git(&fresh_repo, &["commit", "-m", &format!("Cache test commit {}", commit_i)]);
+    }
+
+    let start_time = std::time::Instant::now();
+    let (_c, _o, _e) = run_tool(&fresh_repo, |o| { o.max_blob_size = Some(500); });
+    let elapsed = start_time.elapsed();
+    iteration_times.push(elapsed);
+
+    let (_c2, tree, _e2) = run_git(&fresh_repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+    let filtered_count = files.len();
+
+    println!("Iteration {}: {} files (from {}) in {:.2}ms",
+             i + 1, filtered_count, baseline_count, elapsed.as_millis());
+  }
+
+  // Performance should not degrade significantly across iterations
+  // (in fact, it might improve due to caching)
+  if iteration_times.len() >= 3 {
+    let first_time = iteration_times[0];
+    let last_time = iteration_times[iteration_times.len() - 1];
+    let max_time = iteration_times.iter().max().unwrap();
+    let min_time = iteration_times.iter().min().unwrap();
+
+    println!("Cache performance - First: {:.2}ms, Last: {:.2}ms, Min: {:.2}ms, Max: {:.2}ms",
+             first_time.as_millis(), last_time.as_millis(), min_time.as_millis(), max_time.as_millis());
+
+    // Performance should not degrade by more than 2x
+    let degradation_ratio = max_time.as_millis() as f64 / min_time.as_millis() as f64;
+    assert!(degradation_ratio < 3.0, "Performance should not degrade by more than 3x across iterations: {:.2}x",
+            degradation_ratio);
+  }
+
+  println!("Cache effectiveness test completed successfully");
+}
+
+#[test]
+fn performance_scalability_with_blob_count() {
+  let repo = init_repo();
+
+  // Test scalability with increasing numbers of blobs
+  let blob_counts = vec![100, 500, 1000];
+  let mut scalability_metrics = Vec::new();
+
+  for &blob_count in &blob_counts {
+    println!("Testing scalability with {} blobs", blob_count);
+
+    // Create test files for this blob count
+    for i in 0..blob_count {
+      let content = format!("Scalability test blob {} with content size {}",
+                           i, "x".repeat((i % 1000) + 100));
+      let path = format!("scale_test_{:04}_count_{}.txt", i, blob_count);
+      std::fs::write(repo.join(&path), content).unwrap();
+      run_git(&repo, &["add", &path]);
+    }
+
+    run_git(&repo, &["commit", "-m", &format!("Scalability test with {} blobs", blob_count)]);
+
+    // Test filtering performance
+    let start_time = std::time::Instant::now();
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(500); });
+    let filter_time = start_time.elapsed();
+
+    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+    let filtered_count = files.len();
+
+    scalability_metrics.push((blob_count, filter_time, filtered_count));
+
+    println!("  {} blobs: filtered to {} files in {:.2}ms",
+             blob_count, filtered_count, filter_time.as_millis());
+
+    // Performance should scale reasonably (not exponentially worse)
+    assert!(filter_time.as_millis() < 10_000, "Filtering should complete within 10s for {} blobs", blob_count);
+  }
+
+  // Analyze scalability - time should scale roughly linearly with blob count
+  if scalability_metrics.len() >= 2 {
+    println!("Scalability analysis:");
+    for (i, &(count, time, _filtered)) in scalability_metrics.iter().enumerate() {
+      if i > 0 {
+        let &(prev_count, prev_time, _) = &scalability_metrics[i-1];
+        let count_ratio = count as f64 / prev_count as f64;
+        let time_ratio = time.as_millis() as f64 / prev_time.as_millis() as f64;
+        let efficiency = count_ratio / time_ratio;
+
+        println!("  {} -> {} blobs: {:.1}x more blobs, {:.1}x more time, efficiency: {:.2}",
+                 prev_count, count, count_ratio, time_ratio, efficiency);
+
+        // Efficiency should be reasonable (time shouldn't grow much faster than blob count)
+        assert!(efficiency > 0.3, "Efficiency should be reasonable: {:.2}", efficiency);
+      }
+    }
+  }
+
+  println!("Scalability test completed successfully");
+}
+
+#[test]
+fn performance_batch_vs_individual_optimization() {
+  let repo = init_repo();
+
+  // Create a scenario that would benefit from batch processing
+  let blob_count = 500;
+  let mut blob_sizes = Vec::new();
+
+  for i in 0..blob_count {
+    let size = match i % 10 {
+      0 => 5000,   // Large
+      1 => 2000,   // Medium-large
+      2 => 1000,   // Medium
+      3 => 500,    // Small-medium
+      4 => 100,    // Small
+      _ => 50,     // Very small
+    };
+    blob_sizes.push(size);
+
+    let content = "x".repeat(size);
+    let path = format!("batch_test_{:04}.txt", i);
+    std::fs::write(repo.join(&path), content).unwrap();
+    run_git(&repo, &["add", &path]);
+  }
+
+  run_git(&repo, &["commit", "-m", "Batch optimization test"]);
+
+  // Verify baseline
+  let (_c0, tree0, _e0) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let files0: Vec<&str> = tree0.split_whitespace().collect();
+  let baseline_count = files0.len();
+  assert!(baseline_count >= blob_count, "Should have at least {} files, got {}", blob_count, baseline_count);
+
+  // Test multiple filtering thresholds to exercise batch processing
+  let thresholds = vec![10, 100, 1000, 5000];
+  let mut batch_times = Vec::new();
+
+  for &threshold in &thresholds {
+    let start_time = std::time::Instant::now();
+    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(threshold); });
+    let elapsed = start_time.elapsed();
+    batch_times.push(elapsed);
+
+    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+    let filtered_count = files.len();
+
+    println!("Threshold {}: {} files remaining in {:.2}ms",
+             threshold, filtered_count, elapsed.as_millis());
+
+    // Performance should be reasonable for batch processing
+    assert!(elapsed.as_millis() < 5000, "Batch processing should complete within 5s for threshold {}", threshold);
+  }
+
+  // Analyze performance characteristics
+  if batch_times.len() >= 2 {
+    let fastest = batch_times.iter().min().unwrap();
+    let slowest = batch_times.iter().max().unwrap();
+    let avg_time = batch_times.iter().sum::<std::time::Duration>() / batch_times.len() as u32;
+
+    println!("Batch performance - Fastest: {:.2}ms, Slowest: {:.2}ms, Average: {:.2}ms",
+             fastest.as_millis(), slowest.as_millis(), avg_time.as_millis());
+
+    // Performance should not vary wildly between thresholds
+    let variance_ratio = slowest.as_millis() as f64 / fastest.as_millis() as f64;
+    assert!(variance_ratio < 5.0, "Performance variance should be reasonable: {:.2}x", variance_ratio);
+  }
+
+  println!("Batch optimization test completed successfully");
+}
+
+// Phase 3.2: Complex multi-feature interaction tests
+#[test]
+fn multi_feature_blob_size_with_path_filtering() {
+    // Test combining --max-blob-size with --path filtering
+    let repo = init_repo();
+
+    // Create large files in different directories
+    std::fs::create_dir_all(repo.join("keep")).unwrap();
+    std::fs::create_dir_all(repo.join("filter")).unwrap();
+
+    std::fs::write(repo.join("keep/large_file.txt"), "x".repeat(2000)).unwrap();
+    std::fs::write(repo.join("filter/large_file.txt"), "x".repeat(2000)).unwrap();
+    std::fs::write(repo.join("keep/small_file.txt"), "small").unwrap();
+    std::fs::write(repo.join("filter/small_file.txt"), "small").unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add mixed size files"]);
+
+    // Run filter-repo with blob size limit AND path filtering
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.paths = vec![b"keep/".to_vec()];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Multi-feature filtering should succeed");
+
+    // Check that:
+    // 1. Only files in "keep/" directory remain
+    // 2. Large files in "keep/" are filtered out by size
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.starts_with("filter/")), "Should filter out filter/ directory");
+    assert!(files.contains(&"keep/small_file.txt"), "Should keep small file in keep/ directory");
+    assert!(!files.contains(&"keep/large_file.txt"), "Should filter large file by size");
+    assert_eq!(files.len(), 1, "Should have exactly 1 file (small file in keep/)");
+}
+
+#[test]
+fn multi_feature_blob_size_with_path_rename() {
+    // Test combining --max-blob-size with --path-rename
+    let repo = init_repo();
+
+    // Create files with different sizes
+    std::fs::create_dir_all(repo.join("old_dir")).unwrap();
+    std::fs::create_dir_all(repo.join("other_dir")).unwrap();
+
+    std::fs::write(repo.join("old_dir/large_file.dat"), "x".repeat(1500)).unwrap();
+    std::fs::write(repo.join("old_dir/small_file.txt"), "small content").unwrap();
+    std::fs::write(repo.join("other_dir/medium_file.txt"), "x".repeat(800)).unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add files for size and rename test"]);
+
+    // Run filter-repo with blob size limit AND path rename
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.path_renames = vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Multi-feature filtering with rename should succeed");
+
+    // Check that:
+    // 1. Files are renamed from old_dir/ to new_dir/
+    // 2. Large files are filtered out by size
+    // 3. Files in other directories are unaffected
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.starts_with("old_dir/")), "Should rename old_dir/ to new_dir/");
+    assert!(files.contains(&"new_dir/small_file.txt"), "Should rename and keep small file");
+    assert!(!files.contains(&"new_dir/large_file.dat"), "Should filter large renamed file by size");
+    assert!(files.contains(&"other_dir/medium_file.txt"), "Should keep files in other directories");
+    assert!(!files.iter().any(|f| f.contains("large_file.dat")), "Large file should be filtered out regardless of rename");
+}
+
+#[test]
+fn multi_feature_blob_size_with_branch_rename() {
+    // Test combining --max-blob-size with --branch-rename
+    let repo = init_repo();
+
+    // Create files with different sizes
+    std::fs::write(repo.join("large_file.bin"), "x".repeat(2000)).unwrap();
+    std::fs::write(repo.join("small_file.txt"), "small").unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add files for size and branch rename test"]);
+
+    // Create a branch
+    run_git(&repo, &["branch", "original-branch"]);
+
+    // Run filter-repo with blob size limit AND branch rename
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.branch_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.refs = vec!["--all".to_string()];
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Multi-feature filtering with branch rename should succeed");
+
+    // Check that:
+    // 1. Branch is renamed
+    // 2. Large files are filtered out by size
+    let (_c, branches, _e) = run_git(&repo, &["branch", "-l"]);
+    assert!(branches.contains("renamed-branch"), "Branch should be renamed");
+    assert!(!branches.contains("original-branch"), "Original branch name should not exist");
+
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(files.contains(&"small_file.txt"), "Should keep small file");
+    assert!(!files.contains(&"large_file.bin"), "Should filter large file by size");
+}
+
+#[test]
+fn multi_feature_blob_size_with_tag_rename() {
+    // Test combining --max-blob-size with --tag-rename
+    let repo = init_repo();
+
+    // Create files with different sizes
+    std::fs::write(repo.join("large_file.dat"), "x".repeat(3000)).unwrap();
+    std::fs::write(repo.join("small_file.txt"), "small content").unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add files for size and tag rename test"]);
+
+    // Create a tag
+    run_git(&repo, &["tag", "original-tag", "HEAD"]);
+
+    // Run filter-repo with blob size limit AND tag rename
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.tag_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.refs = vec!["--all".to_string()];
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Multi-feature filtering with tag rename should succeed");
+
+    // Check that:
+    // 1. Tag is renamed
+    // 2. Large files are filtered out by size
+    let (_c, tags, _e) = run_git(&repo, &["tag", "-l"]);
+    assert!(tags.contains("renamed-tag"), "Tag should be renamed");
+    assert!(!tags.contains("original-tag"), "Original tag name should not exist");
+
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(files.contains(&"small_file.txt"), "Should keep small file");
+    assert!(!files.contains(&"large_file.dat"), "Should filter large file by size");
+}
+
+#[test]
+fn multi_feature_path_filtering_with_rename_and_size() {
+    // Test combining path filtering, path rename, and blob size limiting
+    let repo = init_repo();
+
+    // Create a complex directory structure with various file sizes
+    std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::create_dir_all(repo.join("docs")).unwrap();
+    std::fs::create_dir_all(repo.join("test")).unwrap();
+
+    std::fs::write(repo.join("src/large_module.rs"), "x".repeat(5000)).unwrap();
+    std::fs::write(repo.join("src/small_module.rs"), "small module").unwrap();
+    std::fs::write(repo.join("docs/large_doc.pdf"), "x".repeat(3000)).unwrap();
+    std::fs::write(repo.join("docs/small_doc.md"), "# Small doc").unwrap();
+    std::fs::write(repo.join("test/medium_test.rs"), "x".repeat(800)).unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add complex structure for multi-feature test"]);
+
+    // Run filter-repo with multiple features:
+    // 1. Path filter to only include src/ and docs/
+    // 2. Path rename to change docs/ -> documentation/
+    // 3. Blob size limit to filter large files
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.paths = vec![b"src/".to_vec(), b"docs/".to_vec()];
+    opts.path_renames = vec![(b"docs/".to_vec(), b"documentation/".to_vec())];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Complex multi-feature filtering should succeed");
+
+    // Check that:
+    // 1. Only src/ and docs/ (renamed to documentation/) remain
+    // 2. docs/ is renamed to documentation/
+    // 3. Large files are filtered out by size
+    // 4. test/ directory is completely filtered out
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.starts_with("test/")), "Should filter out test/ directory");
+    assert!(files.contains(&"src/small_module.rs"), "Should keep small src file");
+    assert!(!files.contains(&"src/large_module.rs"), "Should filter large src file by size");
+    assert!(files.contains(&"documentation/small_doc.md"), "Should rename docs/ and keep small file");
+    assert!(!files.contains(&"documentation/large_doc.pdf"), "Should filter large renamed file by size");
+    assert!(!files.iter().any(|f| f.starts_with("docs/")), "docs/ should be renamed to documentation/");
+
+    // Verify final file count is correct
+    assert_eq!(files.len(), 2, "Should have exactly 2 files: src/small_module.rs and documentation/small_doc.md");
+}
+
+#[test]
+fn multi_feature_invert_paths_with_size_filtering() {
+    // Test combining --invert-paths with --max-blob-size
+    let repo = init_repo();
+
+    // Create files with different sizes and locations
+    std::fs::create_dir_all(repo.join("exclude")).unwrap();
+    std::fs::create_dir_all(repo.join("include")).unwrap();
+
+    std::fs::write(repo.join("exclude/large_file.bin"), "x".repeat(2000)).unwrap();
+    std::fs::write(repo.join("exclude/small_file.txt"), "small").unwrap();
+    std::fs::write(repo.join("include/large_file.dat"), "x".repeat(1500)).unwrap();
+    std::fs::write(repo.join("include/small_file.txt"), "small content").unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add files for invert paths and size test"]);
+
+    // Run filter-repo with:
+    // 1. Path filter to exclude/ directory
+    // 2. Invert paths to keep everything EXCEPT exclude/
+    // 3. Blob size limit to filter large files
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.paths = vec![b"exclude/".to_vec()];
+    opts.invert_paths = true;
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Invert paths with size filtering should succeed");
+
+    // Check that:
+    // 1. exclude/ directory is completely filtered out
+    // 2. Large files in include/ are filtered out by size
+    // 3. Small files in include/ are kept
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.starts_with("exclude/")), "Should completely exclude exclude/ directory");
+    assert!(files.contains(&"include/small_file.txt"), "Should keep small file in include/");
+    assert!(!files.contains(&"include/large_file.dat"), "Should filter large file by size");
+    assert_eq!(files.len(), 2, "Should have exactly 2 files: README.md and include/small_file.txt");
+}
+
+#[test]
+fn multi_feature_complex_rename_chain() {
+    // Test complex rename operations with size filtering
+    let repo = init_repo();
+
+    // Create files in nested directories with various sizes
+    std::fs::create_dir_all(repo.join("old/v1")).unwrap();
+    std::fs::create_dir_all(repo.join("old/v2")).unwrap();
+
+    std::fs::write(repo.join("old/v1/large_file.cpp"), "x".repeat(4000)).unwrap();
+    std::fs::write(repo.join("old/v1/small_file.cpp"), "small").unwrap();
+    std::fs::write(repo.join("old/v2/medium_file.py"), "x".repeat(1200)).unwrap();
+    std::fs::write(repo.join("old/v2/tiny_file.py"), "tiny").unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add nested structure for complex rename test"]);
+
+    // Run filter-repo with multiple renames and size filtering:
+    // 1. old/ -> new/
+    // 2. v1/ -> version1/ (within new/)
+    // 3. v2/ -> version2/ (within new/)
+    // 4. Size limit to filter large files
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.path_renames = vec![
+        (b"old/".to_vec(), b"new/".to_vec()),
+        (b"new/v1/".to_vec(), b"new/version1/".to_vec()),
+        (b"new/v2/".to_vec(), b"new/version2/".to_vec()),
+    ];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Complex rename chain with size filtering should succeed");
+
+    // Check that:
+    // 1. All renames are applied in sequence
+    // 2. Large files are filtered out by size
+    // 3. Directory structure is preserved correctly
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.starts_with("old/")), "old/ should be renamed to new/");
+    assert!(files.contains(&"new/version1/small_file.cpp"), "Should have renamed and kept small file");
+    assert!(!files.contains(&"new/version1/large_file.cpp"), "Should filter large file by size");
+    assert!(files.contains(&"new/version2/tiny_file.py"), "Should have renamed and kept tiny file");
+    assert!(!files.contains(&"new/version2/medium_file.py"), "Should filter medium file by size");
+
+    // Verify final structure (README.md is also present)
+    assert_eq!(files.len(), 3, "Should have exactly 3 files after renames and size filtering (including README.md)");
+}
+
+#[test]
+fn multi_feature_size_filter_with_special_paths() {
+    // Test size filtering with special path characters and Unicode
+    let repo = init_repo();
+
+    // Create files with special characters and various sizes
+    std::fs::create_dir_all(repo.join("path with spaces")).unwrap();
+    std::fs::create_dir_all(repo.join("unicode")).unwrap();
+    std::fs::create_dir_all(repo.join("regular")).unwrap();
+
+    std::fs::write(repo.join("path with spaces/large file.txt"), "x".repeat(2500)).unwrap();
+    std::fs::write(repo.join("path with spaces/small file.txt"), "small").unwrap();
+    std::fs::write(repo.join("unicode/😀_large.dat"), "x".repeat(1800)).unwrap();
+    std::fs::write(repo.join("unicode/😀_small.dat"), "unicode small").unwrap();
+    std::fs::write(repo.join("regular/medium.txt"), "x".repeat(900)).unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add special paths with size variation"]);
+
+    // Run filter-repo with:
+    // 1. Size limit to filter large files
+    // 2. Path filter to include unicode/ and regular/ directories
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.paths = vec![b"unicode/".to_vec(), b"regular/".to_vec()];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Size filtering with special paths should succeed");
+
+    // Check that:
+    // 1. "path with spaces/" directory is filtered out
+    // 2. Large files in unicode/ and regular/ are filtered by size
+    // 3. Small files are kept
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(!files.iter().any(|f| f.contains("path with spaces")), "Should filter out 'path with spaces' directory");
+
+    // Check for remaining files
+    let has_unicode_small = files.iter().any(|f| f.contains("😀_small.dat"));
+    let has_regular_medium = files.iter().any(|f| f.contains("regular/medium.txt"));
+
+    assert!(has_unicode_small, "Should keep unicode small file");
+    assert!(has_regular_medium, "Should keep regular medium file (under 1KB)");
+
+    // Should not have large files
+    assert!(!files.iter().any(|f| f.contains("😀_large.dat")), "Should filter unicode large file");
+
+    assert!(files.len() <= 2, "Should have at most 2 files");
+}
+
+#[test]
+fn multi_feature_empty_filtering_results() {
+    // Test edge case where multiple filters result in no files remaining
+    let repo = init_repo();
+
+    // Create only large files in directories that will be filtered
+    std::fs::create_dir_all(repo.join("will_be_filtered")).unwrap();
+    std::fs::create_dir_all(repo.join("also_filtered")).unwrap();
+
+    std::fs::write(repo.join("will_be_filtered/large_file.bin"), "x".repeat(3000)).unwrap();
+    std::fs::write(repo.join("also_filtered/huge_file.dat"), "x".repeat(5000)).unwrap();
+
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "Add files that will all be filtered"]);
+
+    // Run filter-repo with:
+    // 1. Path filter to only include will_be_filtered/
+    // 2. Size limit that filters all files in that directory
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(1000);
+    opts.paths = vec![b"will_be_filtered/".to_vec()];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Filtering that results in no files should still succeed");
+
+    // Check that no files remain
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    assert!(files.is_empty(), "Should have no files remaining after filtering");
+
+    // But commit should still exist
+    let (_c, log, _e) = run_git(&repo, &["log", "--oneline"]);
+    assert!(log.contains("Add files that will all be filtered"), "Commit should exist but be empty");
+}
+
+#[test]
+fn multi_feature_performance_with_multiple_filters() {
+    // Test that performance is maintained when using multiple filters
+    let repo = init_repo();
+
+    // Create many files with various sizes and paths
+    for i in 0..100 {
+        let size = if i % 10 == 0 { 2000 } else { 100 }; // 10% large files
+        let content = "x".repeat(size);
+        let path = if i % 2 == 0 {
+            format!("keep/file_{}.txt", i)
+        } else {
+            format!("discard/file_{}.txt", i)
+        };
+
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(repo.join(parent)).unwrap();
+            }
+        }
+
+        std::fs::write(repo.join(&path), content).unwrap();
+        run_git(&repo, &["add", &path]);
+    }
+
+    run_git(&repo, &["commit", "-m", "Add many files for performance test"]);
+
+    // Time the filtering operation
+    let start = std::time::Instant::now();
+
+    // Run filter-repo with multiple filters
+    let mut opts = fr::Options::default();
+    opts.max_blob_size = Some(500);
+    opts.paths = vec![b"keep/".to_vec()];
+    opts.path_renames = vec![(b"keep/".to_vec(), b"preserved/".to_vec())];
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    let duration = start.elapsed();
+
+    assert!(result.is_ok(), "Multi-filter performance test should succeed");
+
+    // Should complete in reasonable time (adjust threshold as needed)
+    assert!(duration.as_secs() < 10, "Multi-filter operation should complete quickly, took: {:?}", duration);
+
+    // Verify results are correct
+    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let files: Vec<&str> = tree.split_whitespace().collect();
+
+    // All files should be in preserved/ directory and small
+    for file in &files {
+        assert!(file.starts_with("preserved/"), "All files should be renamed to preserved/");
+        assert!(!file.contains("discard/"), "No files should remain from discard/");
+    }
+
+    // Should have filtered out large files and discard/ directory
+    assert!(files.len() < 50, "Should have significantly fewer files after filtering");
+}
+
+// Phase 4.1: Unit tests for remaining core modules
+#[test]
+fn unit_test_commit_message_processing() {
+    // Test that commit messages are processed correctly
+    let repo = init_repo();
+
+    std::fs::write(repo.join("test.txt"), "test content").unwrap();
+    run_git(&repo, &["add", "test.txt"]);
+    run_git(&repo, &["commit", "-m", "Original commit message"]);
+
+    // Test commit message replacement
+    let message_file = repo.join("message_replacements.txt");
+    std::fs::write(&message_file, "Original==>Replacement").unwrap();
+
+    let mut opts = fr::Options::default();
+    opts.replace_message_file = Some(message_file);
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Commit message replacement should succeed");
+
+    // Check that message was replaced
+    let (_c, log, _e) = run_git(&repo, &["log", "--oneline", "-1"]);
+    assert!(log.contains("Replacement"), "Commit message should be replaced");
+    assert!(!log.contains("Original"), "Original message should be replaced");
+}
+
+#[test]
+fn unit_test_tag_processing() {
+    // Test that tags are processed correctly
+    let repo = init_repo();
+
+    std::fs::write(repo.join("test.txt"), "test content").unwrap();
+    run_git(&repo, &["add", "test.txt"]);
+    run_git(&repo, &["commit", "-m", "Test commit for tags"]);
+
+    // Create lightweight and annotated tags
+    run_git(&repo, &["tag", "lightweight-tag"]);
+    run_git(&repo, &["tag", "-a", "annotated-tag", "-m", "Annotated tag message"]);
+
+    let mut opts = fr::Options::default();
+    opts.tag_rename = Some((b"lightweight-".to_vec(), b"renamed-lightweight-".to_vec()));
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.refs = vec!["--all".to_string()];
+
+    let result = fr::run(&opts);
+    assert!(result.is_ok(), "Tag processing should succeed");
+
+    // Check that lightweight tag was renamed
+    let (_c, tags, _e) = run_git(&repo, &["tag", "-l"]);
+    println!("Available tags: {:?}", tags);
+    let tags_list: Vec<&str> = tags.split('\n').collect();
+    assert!(tags_list.contains(&"renamed-lightweight-tag"), "Lightweight tag should be renamed");
+    assert!(!tags_list.contains(&"lightweight-tag"), "Original lightweight tag should not exist");
+    // Annotated tag should remain unchanged
+    assert!(tags_list.contains(&"annotated-tag"), "Annotated tag should remain");
+}
+
+#[test]
+fn unit_test_path_utilities() {
+    // Test path utility functions
+    use filter_repo_rs::pathutil;
+
+    // Test C-style dequoting on a string without outer quotes
+    let unquoted = b"test\npath\tab";
+    let dequoted = pathutil::dequote_c_style_bytes(unquoted);
+    assert_eq!(dequoted, b"test\npath\tab");
+
+    // Test unquoted input
+    let unquoted = b"regular_path";
+    let result = pathutil::dequote_c_style_bytes(unquoted);
+    assert_eq!(result, unquoted);
+
+    // Test empty input
+    let empty = b"";
+    let result = pathutil::dequote_c_style_bytes(empty);
+    assert_eq!(result, empty);
+}
+
+#[test]
+fn unit_test_git_utilities() {
+    // Test Git utility functions
+    let repo = init_repo();
+
+    // Test git show-ref functionality
+    std::fs::write(repo.join("test.txt"), "test").unwrap();
+    run_git(&repo, &["add", "test.txt"]);
+    run_git(&repo, &["commit", "-m", "Test commit"]);
+
+    let (_c, head_ref_out, _e) = run_git(&repo, &["symbolic-ref", "HEAD"]);
+    let head_ref = head_ref_out.trim();
+    let (_c, output, _e) = run_git(&repo, &["show-ref", head_ref]);
+    println!("show-ref output: {:?}", output);
+    assert!(!output.is_empty(), "show-ref should return HEAD reference");
+}

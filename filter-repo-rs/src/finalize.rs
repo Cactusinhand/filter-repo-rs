@@ -65,6 +65,7 @@ pub fn finalize(
   mut import_broken: bool,
   allow_flush_tag_resets: bool,
   report: Option<ReportData>,
+  blob_size_cache: &HashMap<Vec<u8>, usize>,
 ) -> io::Result<()> {
   // Emit buffered lightweight tag resets if any remain (ideally flushed before 'done')
   if allow_flush_tag_resets {
@@ -105,7 +106,7 @@ pub fn finalize(
         .spawn()
       .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to run git update-ref: {e}")))?;
     if let Some(mut sin) = child.stdin.take() {
-      for (old, new_) in &refs {
+      for (old, _new_) in &refs {
         // Check if old ref exists before trying to delete it
         let old_exists = Command::new("git")
           .arg("-C").arg(&opts.target)
@@ -303,14 +304,9 @@ pub fn finalize(
                     if size_samples.len()>=20 { break; }
                   }
                 } else if id.len()==40 && id.iter().all(|b| (*b>=b'0'&&*b<=b'9') || (*b>=b'a'&&*b<=b'f')) {
-                  // SHA1: check size via cat-file on source
-                  let sha = std::str::from_utf8(id).unwrap_or("");
-                  let sz = std::process::Command::new("git")
-                    .arg("-C").arg(&opts.source)
-                    .arg("cat-file").arg("-s").arg(sha)
-                    .output().ok()
-                    .and_then(|o| if o.status.success() { std::str::from_utf8(&o.stdout).ok().and_then(|s| s.trim().parse::<usize>().ok()) } else { None })
-                    .unwrap_or(0);
+                  // SHA1: use pre-computed size from cache
+                  let sha = id;
+                  let sz = blob_size_cache.get(sha).copied().unwrap_or(0);
                   if let Some(max) = opts.max_blob_size { if sz > max {
                     let mut p = bytes[path_start..].to_vec(); if let Some(last)=p.last(){ if *last==b'\n' { p.pop(); } }
                     if !p.is_empty() && !size_samples.iter().any(|e| e==&p) { size_samples.push(p); }

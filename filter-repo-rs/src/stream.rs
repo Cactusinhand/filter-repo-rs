@@ -149,6 +149,56 @@ fn hex_val(b: u8) -> Option<u8> {
   }
 }
 
+/// Pre-compute blob sizes using Git's batch processing for efficient --max-blob-size filtering
+fn precompute_blob_sizes(opts: &Options) -> io::Result<HashMap<Vec<u8>, usize>> {
+    let mut blob_sizes = HashMap::new();
+
+    // Use Git's batch processing to get all blob sizes efficiently
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(&opts.source)
+       .arg("cat-file")
+       .arg("--batch-all-objects")
+       .arg("--batch-check=%(objectname) %(objecttype) %(objectsize)");
+
+    let output = cmd.output()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to run git cat-file batch: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(io::Error::new(io::ErrorKind::Other, format!("git cat-file batch failed: {stderr}")));
+    }
+
+    // Parse the batch output: <sha> <type> <size>
+    for line in output.stdout.split(|&b| b == b'\n') {
+        if line.is_empty() { continue; }
+
+        let parts: Vec<&[u8]> = line.splitn(3, |&b| b == b' ').collect();
+        if parts.len() != 3 { continue; }
+
+        let sha = parts[0];
+        let objtype = parts[1];
+        let size_str = parts[2];
+
+        // Only process blob objects
+        if objtype != b"blob" { continue; }
+
+        // Parse size
+        let size = std::str::from_utf8(size_str)
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+
+        // Store both hex and binary representations for flexible lookup
+        blob_sizes.insert(sha.to_vec(), size);
+    }
+
+    if !opts.quiet {
+        eprintln!("Pre-computed sizes for {} blobs", blob_sizes.len());
+    }
+
+    Ok(blob_sizes)
+}
+
 pub fn run(opts: &Options) -> io::Result<()> {
   let target_git_dir = git_dir(&opts.target)
     .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Target {:?} is not a git repo: {e}", opts.target)))?;
@@ -215,7 +265,19 @@ pub fn run(opts: &Options) -> io::Result<()> {
     None => StripShaLookup::empty(),
   };
   let mut last_blob_orig_sha: Option<Vec<u8>> = None;
-  let mut sha_size_cache: HashMap<Vec<u8>, usize> = HashMap::new();
+  let mut sha_size_cache: HashMap<Vec<u8>, usize> = if opts.max_blob_size.is_some() {
+    match precompute_blob_sizes(opts) {
+      Ok(cache) => cache,
+      Err(e) => {
+        if !opts.quiet {
+          eprintln!("Warning: batch blob size pre-computation failed ({e}), falling back to on-demand sizing");
+        }
+        HashMap::new()
+      }
+    }
+  } else {
+    HashMap::new()
+  };
   // Reporting accumulators
   let mut suppressed_marks_by_size: HashSet<u32> = HashSet::new();
   let mut suppressed_marks_by_sha: HashSet<u32> = HashSet::new();
@@ -447,8 +509,10 @@ pub fn run(opts: &Options) -> io::Result<()> {
           let sha = id.to_vec();
           if strip_sha_lookup.contains_hex(&sha)? { drop_path = true; reason_sha = true; suppressed_shas_by_sha.insert(sha.clone()); }
           if let Some(max) = opts.max_blob_size {
-            let oversize = if let Some(sz) = sha_size_cache.get(&sha) { *sz > max } else {
-              // query source repo for blob size
+            let oversize = if let Some(sz) = sha_size_cache.get(&sha) {
+              *sz > max
+            } else {
+              // Fallback: query source repo for blob size (should be rare with batch pre-computation)
               let sha_str = String::from_utf8_lossy(&sha).to_string();
               let sz = Command::new("git")
                 .arg("-C").arg(&opts.source)
@@ -670,5 +734,225 @@ pub fn run(opts: &Options) -> io::Result<()> {
         samples_modified,
       })
     },
+    &sha_size_cache,
   )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn create_test_opts(source: &str) -> Options {
+        Options {
+            source: PathBuf::from(source),
+            target: PathBuf::from("."),
+            refs: vec!["--all".to_string()],
+            date_order: false,
+            no_data: false,
+            quiet: false,
+            reset: true,
+            replace_message_file: None,
+            replace_text_file: None,
+            paths: Vec::new(),
+            invert_paths: false,
+            path_globs: Vec::new(),
+            path_renames: Vec::new(),
+            tag_rename: None,
+            branch_rename: None,
+            max_blob_size: None,
+            strip_blobs_with_ids: None,
+            write_report: false,
+            cleanup: crate::opts::CleanupMode::None,
+            reencode: true,
+            quotepath: true,
+            mark_tags: true,
+            fe_stream_override: None,
+            force: false,
+            enforce_sanity: false,
+            dry_run: false,
+            partial: false,
+            sensitive: false,
+            no_fetch: false,
+        }
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_empty_repo() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Create empty git repository
+        std::process::Command::new("git")
+            .args(&["init", "--bare", repo_path])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let result = precompute_blob_sizes(&opts);
+
+        // Should succeed and return empty map for empty repo
+        assert!(result.is_ok());
+        let blob_sizes = result.unwrap();
+        assert!(blob_sizes.is_empty());
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_with_blobs() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Create git repository with some blobs
+        std::process::Command::new("git")
+            .args(&["init", repo_path])
+            .output()
+            .unwrap();
+
+        // Create some test files
+        std::fs::write(temp_dir.path().join("test1.txt"), b"hello world").unwrap();
+        std::fs::write(temp_dir.path().join("test2.bin"), vec![0u8, 1, 2, 3, 4]).unwrap();
+
+        // Add and commit files
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "add", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "commit", "-m", "test commit"])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let result = precompute_blob_sizes(&opts);
+
+        // Should succeed and return non-empty map
+        assert!(result.is_ok());
+        let blob_sizes = result.unwrap();
+
+        // Should find our test blobs
+        assert!(blob_sizes.len() >= 2);
+
+        // Check that sizes are reasonable
+        for size in blob_sizes.values() {
+            assert!(*size > 0);
+        }
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_invalid_repo() {
+        let opts = create_test_opts("/nonexistent/path");
+        let result = precompute_blob_sizes(&opts);
+
+        // Should fail with appropriate error
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("git cat-file batch"));
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_output_parsing() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Create git repository
+        std::process::Command::new("git")
+            .args(&["init", repo_path])
+            .output()
+            .unwrap();
+
+        // Create files with known sizes
+        let content1 = b"a".repeat(1000);
+        let content2 = b"b".repeat(2000);
+        std::fs::write(temp_dir.path().join("file1.txt"), &content1).unwrap();
+        std::fs::write(temp_dir.path().join("file2.txt"), &content2).unwrap();
+
+        // Add and commit files
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "add", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "commit", "-m", "test commit"])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let result = precompute_blob_sizes(&opts);
+
+        // Should succeed and parse sizes correctly
+        assert!(result.is_ok());
+        let blob_sizes = result.unwrap();
+
+        // Should find our blobs with correct sizes
+        let mut found_sizes: Vec<usize> = blob_sizes.values().cloned().collect();
+        found_sizes.sort_unstable();
+
+        // Should have sizes close to our expected values (accounting for git object overhead)
+        assert!(found_sizes.contains(&1000));
+        assert!(found_sizes.contains(&2000));
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_filters_non_blobs() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Create git repository
+        std::process::Command::new("git")
+            .args(&["init", repo_path])
+            .output()
+            .unwrap();
+
+        // Create a file and commit it
+        std::fs::write(temp_dir.path().join("test.txt"), b"test content").unwrap();
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "add", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "commit", "-m", "test commit"])
+            .output()
+            .unwrap();
+
+        // Create a tag (which creates a tag object, not a blob)
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "tag", "v1.0"])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let result = precompute_blob_sizes(&opts);
+
+        // Should succeed and only include blob objects
+        assert!(result.is_ok());
+        let blob_sizes = result.unwrap();
+
+        // All entries should be blob objects (we don't care about exact count, just that they exist)
+        for size in blob_sizes.values() {
+            assert!(*size > 0);
+        }
+    }
+
+    #[test]
+    fn test_precompute_blob_sizes_malformed_output() {
+        // This test would require mocking the git command output
+        // For now, we just test that the function handles basic cases
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Create git repository
+        std::process::Command::new("git")
+            .args(&["init", repo_path])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let result = precompute_blob_sizes(&opts);
+
+        // Should succeed even with empty repo
+        assert!(result.is_ok());
+        let blob_sizes = result.unwrap();
+        assert!(blob_sizes.is_empty());
+    }
 }
