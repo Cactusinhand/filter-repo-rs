@@ -1,6 +1,11 @@
-use std::collections::{BTreeSet, HashSet, HashMap};
-use std::fs::{create_dir_all, File};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::cell::RefCell;
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::Command;
 
 
@@ -10,6 +15,139 @@ use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use crate::opts::Options;
 
 const REPORT_SAMPLE_LIMIT: usize = 20;
+const SHA_HEX_LEN: usize = 40;
+const SHA_BIN_LEN: usize = 20;
+const STRIP_SHA_ON_DISK_THRESHOLD: usize = 100_000;
+
+type ShaBytes = [u8; SHA_BIN_LEN];
+
+static TEMP_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+enum StripShaLookup {
+  Empty,
+  InMemory(Vec<ShaBytes>),
+  OnDisk(TempSortedFile),
+}
+
+impl StripShaLookup {
+  fn empty() -> Self { StripShaLookup::Empty }
+
+  fn from_path(path: &Path) -> io::Result<Self> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut entries: Vec<ShaBytes> = Vec::new();
+    for line in reader.lines() {
+      let line = line?;
+      if let Some(bytes) = parse_sha_line(&line) {
+        entries.push(bytes);
+      }
+    }
+    if entries.is_empty() { return Ok(StripShaLookup::Empty); }
+    entries.sort_unstable();
+    entries.dedup();
+    if entries.len() > STRIP_SHA_ON_DISK_THRESHOLD {
+      TempSortedFile::from_entries(entries).map(StripShaLookup::OnDisk)
+    } else {
+      Ok(StripShaLookup::InMemory(entries))
+    }
+  }
+
+  fn contains_hex(&self, sha_hex: &[u8]) -> io::Result<bool> {
+    if sha_hex.len() != SHA_HEX_LEN { return Ok(false); }
+    let needle = match parse_sha_bytes(sha_hex) {
+      Some(bytes) => bytes,
+      None => return Ok(false),
+    };
+    match self {
+      StripShaLookup::Empty => Ok(false),
+      StripShaLookup::InMemory(entries) => Ok(entries.binary_search(&needle).is_ok()),
+      StripShaLookup::OnDisk(file) => file.contains(&needle),
+    }
+  }
+}
+
+struct TempSortedFile {
+  path: PathBuf,
+  file: RefCell<File>,
+  entries: u64,
+}
+
+impl TempSortedFile {
+  fn from_entries(entries: Vec<ShaBytes>) -> io::Result<Self> {
+    let count = entries.len() as u64;
+    let (path, mut file) = create_temp_file("filter-repo-strip-sha")?;
+    for entry in entries {
+      file.write_all(&entry)?;
+    }
+    file.flush()?;
+    file.seek(SeekFrom::Start(0))?;
+    Ok(TempSortedFile { path, file: RefCell::new(file), entries: count })
+  }
+
+  fn contains(&self, needle: &ShaBytes) -> io::Result<bool> {
+    let mut file = self.file.borrow_mut();
+    let mut left: u64 = 0;
+    let mut right: u64 = self.entries;
+    let mut buf: ShaBytes = [0u8; SHA_BIN_LEN];
+    while left < right {
+      let mid = (left + right) / 2;
+      file.seek(SeekFrom::Start(mid.saturating_mul(SHA_BIN_LEN as u64)))?;
+      file.read_exact(&mut buf)?;
+      match buf.cmp(needle) {
+        Ordering::Less => left = mid + 1,
+        Ordering::Greater => right = mid,
+        Ordering::Equal => return Ok(true),
+      }
+    }
+    Ok(false)
+  }
+}
+
+impl Drop for TempSortedFile {
+  fn drop(&mut self) {
+    let _ = std::fs::remove_file(&self.path);
+  }
+}
+
+fn create_temp_file(prefix: &str) -> io::Result<(PathBuf, File)> {
+  let temp_dir = std::env::temp_dir();
+  for attempt in 0..1000 {
+    let counter = TEMP_FILE_COUNTER.fetch_add(1, AtomicOrdering::Relaxed) + attempt;
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let name = format!("{}-{}-{}", prefix, std::process::id(), timestamp + counter as u128);
+    let path = temp_dir.join(name);
+    match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
+      Ok(file) => return Ok((path, file)),
+      Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+      Err(e) => return Err(e),
+    }
+  }
+  Err(io::Error::new(io::ErrorKind::AlreadyExists, "failed to create temporary sha lookup file"))
+}
+
+fn parse_sha_line(line: &str) -> Option<ShaBytes> {
+  parse_sha_bytes(line.trim().as_bytes())
+}
+
+fn parse_sha_bytes(bytes: &[u8]) -> Option<ShaBytes> {
+  if bytes.len() != SHA_HEX_LEN { return None; }
+  let mut out = [0u8; SHA_BIN_LEN];
+  for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+    let hi = hex_val(chunk[0])?;
+    let lo = hex_val(chunk[1])?;
+    out[i] = (hi << 4) | lo;
+  }
+  Some(out)
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+  match b {
+    b'0'..=b'9' => Some(b - b'0'),
+    b'a'..=b'f' => Some(b - b'a' + 10),
+    b'A'..=b'F' => Some(b - b'A' + 10),
+    _ => None,
+  }
+}
 
 pub fn run(opts: &Options) -> io::Result<()> {
   let target_git_dir = git_dir(&opts.target)
@@ -71,19 +209,10 @@ pub fn run(opts: &Options) -> io::Result<()> {
   let mut last_blob_mark: Option<u32> = None;
   let mut oversize_marks: HashSet<u32> = HashSet::new();
   let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
-  let strip_sha_set: HashSet<Vec<u8>> = {
-    let mut s = HashSet::new();
-    if let Some(path) = &opts.strip_blobs_with_ids {
-      if let Ok(text) = std::fs::read_to_string(path) {
-        for line in text.lines() {
-          let t = line.trim();
-          if t.len() == 40 && t.bytes().all(|b| (b'0'..=b'9').contains(&b) || (b'a'..=b'f').contains(&b) || (b'A'..=b'F').contains(&b)) {
-            s.insert(t.to_ascii_lowercase().into_bytes());
-          }
-        }
-      }
-    }
-    s
+  let strip_sha_lookup = match &opts.strip_blobs_with_ids {
+    Some(path) => StripShaLookup::from_path(path)
+      .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to load --strip-blobs-with-ids: {e}")))?,
+    None => StripShaLookup::empty(),
   };
   let mut last_blob_orig_sha: Option<Vec<u8>> = None;
   let mut sha_size_cache: HashMap<Vec<u8>, usize> = HashMap::new();
@@ -283,85 +412,83 @@ pub fn run(opts: &Options) -> io::Result<()> {
             pending_inline = Some((commit_buf.len(), p));
           }
         }
-        if let Some(max) = opts.max_blob_size {
-          // parse id and path
-          let bytes = &line;
-          // find end of mode and id
-          let mut i = 2; // after 'M '
-          while i < bytes.len() && bytes[i] != b' ' { i += 1; } // end of mode
-          if i < bytes.len() { i += 1; }
-          let id_start = i;
-          while i < bytes.len() && bytes[i] != b' ' { i += 1; }
-          let id_end = i;
-          let path_start = if i < bytes.len() { i + 1 } else { bytes.len() };
-          let id = &bytes[id_start..id_end];
-          let mut drop_path = false;
-          let mut reason_size = false;
-          let mut reason_sha = false;
-          if id.first().copied() == Some(b':') {
-            // mark
-            let mut num: u32 = 0; let mut seen=false; let mut j = 1;
-            while j < id.len() { let b = id[j]; if b>=b'0'&&b<=b'9' { seen=true; num=num.saturating_mul(10).saturating_add((b-b'0') as u32);} else {break;} j+=1; }
-            if seen && oversize_marks.contains(&num) {
-              drop_path = true;
+        let bytes = &line;
+        // find end of mode and id
+        let mut i = 2; // after 'M '
+        while i < bytes.len() && bytes[i] != b' ' { i += 1; } // end of mode
+        if i < bytes.len() { i += 1; }
+        let id_start = i;
+        while i < bytes.len() && bytes[i] != b' ' { i += 1; }
+        let id_end = i;
+        let path_start = if i < bytes.len() { i + 1 } else { bytes.len() };
+        let id = &bytes[id_start..id_end];
+        let mut drop_path = false;
+        let mut reason_size = false;
+        let mut reason_sha = false;
+        if id.first().copied() == Some(b':') {
+          // mark
+          let mut num: u32 = 0; let mut seen=false; let mut j = 1;
+          while j < id.len() { let b = id[j]; if b>=b'0'&&b<=b'9' { seen=true; num=num.saturating_mul(10).saturating_add((b-b'0') as u32);} else {break;} j+=1; }
+          if seen && oversize_marks.contains(&num) {
+            drop_path = true;
+            // Record size sample path eagerly
+            let path_bytes = &bytes[path_start..].to_vec();
+            if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == path_bytes) { samples_size.push(path_bytes.clone()); }
+            reason_size = suppressed_marks_by_size.contains(&num);
+            reason_sha = suppressed_marks_by_sha.contains(&num);
+          }
+          if seen && modified_marks.contains(&num) {
+            let path_bytes = &bytes[path_start..].to_vec();
+            if samples_modified.len() < REPORT_SAMPLE_LIMIT && !samples_modified.iter().any(|p| p == path_bytes) { samples_modified.push(path_bytes.clone()); }
+          }
+        } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
+        // } else if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
+          // sha1
+          let sha = id.to_vec();
+          if strip_sha_lookup.contains_hex(&sha)? { drop_path = true; reason_sha = true; suppressed_shas_by_sha.insert(sha.clone()); }
+          if let Some(max) = opts.max_blob_size {
+            let oversize = if let Some(sz) = sha_size_cache.get(&sha) { *sz > max } else {
+              // query source repo for blob size
+              let sha_str = String::from_utf8_lossy(&sha).to_string();
+              let sz = Command::new("git")
+                .arg("-C").arg(&opts.source)
+                .arg("cat-file").arg("-s").arg(&sha_str)
+                .output()
+                .ok()
+                .and_then(|out| if out.status.success() {
+                    std::str::from_utf8(&out.stdout).ok().and_then(|s| s.trim().parse::<usize>().ok())
+                  } else { None })
+                .unwrap_or(0);
+              sha_size_cache.insert(sha.clone(), sz);
+              sz > max
+            };
+            if oversize {
+              oversize_shas.insert(sha.clone()); suppressed_shas_by_size.insert(sha);
+              drop_path = true; reason_size = true;
               // Record size sample path eagerly
               let path_bytes = &bytes[path_start..].to_vec();
               if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == path_bytes) { samples_size.push(path_bytes.clone()); }
-              reason_size = suppressed_marks_by_size.contains(&num);
-              reason_sha = suppressed_marks_by_sha.contains(&num);
-            }
-            if seen && modified_marks.contains(&num) {
-              let path_bytes = &bytes[path_start..].to_vec();
-              if samples_modified.len() < REPORT_SAMPLE_LIMIT && !samples_modified.iter().any(|p| p == path_bytes) { samples_modified.push(path_bytes.clone()); }
-            }
-          } else {
-            // sha1
-            if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
-              let sha = id.to_vec();
-              if strip_sha_set.contains(&sha) { drop_path = true; reason_sha = true; suppressed_shas_by_sha.insert(sha.clone()); }
-              let oversize = if let Some(sz) = sha_size_cache.get(&sha) { *sz > max } else {
-                // query source repo for blob size
-                let sha_str = String::from_utf8_lossy(&sha).to_string();
-                let sz = Command::new("git")
-                  .arg("-C").arg(&opts.source)
-                  .arg("cat-file").arg("-s").arg(&sha_str)
-                  .output()
-                  .ok()
-                  .and_then(|out| if out.status.success() {
-                      std::str::from_utf8(&out.stdout).ok().and_then(|s| s.trim().parse::<usize>().ok())
-                    } else { None })
-                  .unwrap_or(0);
-                sha_size_cache.insert(sha.clone(), sz);
-                sz > max
-              };
-              if oversize {
-                oversize_shas.insert(sha.clone()); suppressed_shas_by_size.insert(sha);
-                drop_path = true; reason_size = true;
-                // Record size sample path eagerly
-                let path_bytes = &bytes[path_start..].to_vec();
-                if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == path_bytes) { samples_size.push(path_bytes.clone()); }
-              }
             }
           }
-          if drop_path {
-            // Emit deletion for the path
-            let mut del = Vec::with_capacity(2 + bytes.len() - path_start);
-            del.extend_from_slice(b"D ");
-            del.extend_from_slice(&bytes[path_start..]);
-            commit_buf.extend_from_slice(&del);
-            commit_has_changes = true;
-            let path_bytes = &bytes[path_start..].to_vec();
-            let (mut r_size, mut r_sha) = (reason_size, reason_sha);
-            if !r_size && !r_sha {
-              if opts.max_blob_size.is_some() { r_size = true; } else { r_sha = true; }
-            }
-            if r_size {
-              if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == path_bytes) { samples_size.push(path_bytes.clone()); }
-            } else if r_sha {
-              if samples_sha.len() < REPORT_SAMPLE_LIMIT && !samples_sha.iter().any(|p| p == path_bytes) { samples_sha.push(path_bytes.clone()); }
-            }
-            continue;
+        }
+        if drop_path {
+          // Emit deletion for the path
+          let mut del = Vec::with_capacity(2 + bytes.len() - path_start);
+          del.extend_from_slice(b"D ");
+          del.extend_from_slice(&bytes[path_start..]);
+          commit_buf.extend_from_slice(&del);
+          commit_has_changes = true;
+          let path_bytes = &bytes[path_start..].to_vec();
+          let (mut r_size, mut r_sha) = (reason_size, reason_sha);
+          if !r_size && !r_sha {
+            if opts.max_blob_size.is_some() { r_size = true; } else { r_sha = true; }
           }
+          if r_size {
+            if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == path_bytes) { samples_size.push(path_bytes.clone()); }
+          } else if r_sha {
+            if samples_sha.len() < REPORT_SAMPLE_LIMIT && !samples_sha.iter().any(|p| p == path_bytes) { samples_sha.push(path_bytes.clone()); }
+          }
+          continue;
         }
       }
       match crate::commit::process_commit_line(
@@ -399,7 +526,11 @@ pub fn run(opts: &Options) -> io::Result<()> {
             skip_blob = true; reason_size = true;
           }
         }
-        if !skip_blob { if let Some(ref s) = last_blob_orig_sha { if strip_sha_set.contains(s) { skip_blob = true; reason_sha = true; } } }
+        if !skip_blob {
+          if let Some(ref s) = last_blob_orig_sha {
+            if strip_sha_lookup.contains_hex(s)? { skip_blob = true; reason_sha = true; }
+          }
+        }
         if skip_blob {
           if let Some(m) = last_blob_mark.take() {
             oversize_marks.insert(m);
