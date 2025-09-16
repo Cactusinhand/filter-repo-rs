@@ -2519,7 +2519,7 @@ fn multi_feature_blob_size_with_path_filtering() {
     assert!(!files.iter().any(|f| f.starts_with("filter/")), "Should filter out filter/ directory");
     assert!(files.contains(&"keep/small_file.txt"), "Should keep small file in keep/ directory");
     assert!(!files.contains(&"keep/large_file.txt"), "Should filter large file by size");
-    assert!(files.len() <= 1, "Should have at most 1 file (small file in keep/)");
+    assert_eq!(files.len(), 1, "Should have exactly 1 file (small file in keep/)");
 }
 
 #[test]
