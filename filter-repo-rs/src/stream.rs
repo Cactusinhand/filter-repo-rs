@@ -197,7 +197,12 @@ impl BlobSizeTracker {
     loop {
       line.clear();
       if reader.read_until(b'\n', &mut line)? == 0 { break; }
-      if let Some(&last) = line.last() { if last == b'\n' { line.pop(); } }
+      if line.ends_with(b"\n") {
+          line.pop();
+          if line.ends_with(b"\r") {
+              line.pop();
+          }
+      }
       if line.is_empty() { continue; }
       let mut it = line.split(|b| *b == b' ');
       let sha = match it.next() {
