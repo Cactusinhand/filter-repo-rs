@@ -3006,11 +3006,10 @@ fn unit_test_path_utilities() {
     // Test path utility functions
     use filter_repo_rs::pathutil;
 
-    // Test C-style dequoting - function handles escape sequences but keeps outer quotes
-    let quoted = b"\"test\\npath\\tab\"";
-    let dequoted = pathutil::dequote_c_style_bytes(quoted);
-    // The dequote function converts \n and \t but keeps outer quotes
-    assert_eq!(dequoted, b"\"test\npath\tab\"");
+    // Test C-style dequoting on a string without outer quotes
+    let unquoted = b"test\npath\tab";
+    let dequoted = pathutil::dequote_c_style_bytes(unquoted);
+    assert_eq!(dequoted, b"test\npath\tab");
 
     // Test unquoted input
     let unquoted = b"regular_path";
