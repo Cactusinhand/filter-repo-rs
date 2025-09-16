@@ -45,11 +45,8 @@ pub fn replace_all_bytes(h: &[u8], n: &[u8], r: &[u8]) -> Vec<u8> {
     out
 }
 
-// Optional regex support for blob replacements behind the `blob-regex` feature.
-// We keep it in this module to reuse the same replacement file syntax, where
-// lines starting with "regex:" are treated as regex rules.
-
-#[cfg(feature = "blob-regex")]
+// Regex support for blob replacements reuses the same replacement file syntax,
+// where lines starting with "regex:" are treated as regex rules.
 pub mod blob_regex {
     use super::*;
     use regex::bytes::{Regex, Captures};
@@ -147,39 +144,5 @@ pub mod blob_regex {
             }
         }
         out
-    }
-}
-
-#[cfg(not(feature = "blob-regex"))]
-pub mod blob_regex {
-    use super::*;
-    use std::sync::Once;
-
-    static WARN_ONCE: Once = Once::new();
-
-    #[derive(Clone, Debug, Default)]
-    pub struct RegexReplacer {}
-
-    impl RegexReplacer {
-        pub fn from_file(_path: &std::path::Path) -> io::Result<Option<Self>> {
-            // Scan file for regex: lines only to decide whether to warn.
-            // We avoid any dependency when feature is disabled.
-            let mut has_regex = false;
-            if let Ok(content) = std::fs::read(_path) {
-                for raw in content.split(|&b| b == b'\n') {
-                    if raw.starts_with(b"regex:") { has_regex = true; break; }
-                }
-            }
-            if has_regex {
-                WARN_ONCE.call_once(|| {
-                    eprintln!(
-                        "warning: regex rules in --replace-text are ignored; rebuild with --features blob-regex"
-                    );
-                });
-            }
-            Ok(None)
-        }
-
-        pub fn apply_regex(&self, data: Vec<u8>) -> Vec<u8> { data }
     }
 }
