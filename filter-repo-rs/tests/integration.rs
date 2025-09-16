@@ -944,8 +944,8 @@ fn max_blob_size_fallback_behavior() {
 
   // Test with large threshold - should definitely keep the file
   let (_c, _o, _e) = run_tool(&repo_path, |o| {
-    o.source = repo_path.to_path_buf();
-    o.target = repo_path.to_path_buf();
+    // o.source = repo_path.to_path_buf();
+    // o.target = repo_path.to_path_buf();
     o.max_blob_size = Some(1000); // 1KB threshold, 5 byte file should remain
   });
 
@@ -974,8 +974,8 @@ fn max_blob_size_no_git_objects() {
 
   // Should handle empty repositories gracefully
   let (_c, _o, _e) = run_tool(repo_path, |o| {
-    o.source = repo_path.to_path_buf();
-    o.target = repo_path.to_path_buf();
+    // o.source = repo_path.to_path_buf();
+    // o.target = repo_path.to_path_buf();
     o.max_blob_size = Some(1000);
   });
 
@@ -1045,7 +1045,7 @@ fn max_blob_size_extreme_threshold_values() {
 }
 
 #[test]
-fn max_blob_size_fallback_scenarios() {
+fn max_blob_size_normal_processing() {
   let repo = init_repo();
 
   // Create files that would trigger various fallback scenarios
@@ -1058,22 +1058,32 @@ fn max_blob_size_fallback_scenarios() {
 
   // Test with batch processing enabled (normal case)
   let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(500); });
-  let (_c2, tree1, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+  let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
 
   // Should work normally with batch processing
-  assert!(tree1.contains("normal.txt"), "expected normal.txt to remain (smaller than limit): {}", tree1);
-  assert!(tree1.contains("empty.txt"), "expected empty.txt to remain (zero bytes): {}", tree1);
-  assert!(!tree1.contains("binary.dat"), "expected binary.dat to be dropped (larger than limit): {}", tree1);
+  assert!(tree.contains("normal.txt"), "expected normal.txt to remain (smaller than limit): {}", tree);
+  assert!(tree.contains("empty.txt"), "expected empty.txt to remain (zero bytes): {}", tree);
+  assert!(!tree.contains("binary.dat"), "expected binary.dat to be dropped (larger than limit): {}", tree);
+}
 
-  // Reset repository
-  run_git(&repo, &["reset", "--hard", "HEAD~1"]).0;
+#[test]
+fn max_blob_size_zero_threshold() {
+  let repo = init_repo();
+
+  // Create files that would trigger various fallback scenarios
+  std::fs::write(repo.join("normal.txt"), b"normal content").unwrap();
+  std::fs::write(repo.join("empty.txt"), b"").unwrap();
+  std::fs::write(repo.join("binary.dat"), vec![0u8; 1000]).unwrap();
+
+  run_git(&repo, &["add", "."]);
+  run_git(&repo, &["commit", "-m", "add test files for zero threshold test"]);
 
   // Test with zero threshold (edge case - should drop everything)
-  let (_c, tree2, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(0); });
+  let (_c, tree, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(0); });
 
-  assert!(!tree2.contains("normal.txt"), "expected normal.txt to be dropped (zero threshold)");
-  assert!(!tree2.contains("empty.txt"), "expected empty.txt to be dropped (zero threshold)");
-  assert!(!tree2.contains("binary.dat"), "expected binary.dat to be dropped (zero threshold)");
+  assert!(!tree.contains("normal.txt"), "expected normal.txt to be dropped (zero threshold)");
+  assert!(!tree.contains("empty.txt"), "expected empty.txt to be dropped (zero threshold)");
+  assert!(!tree.contains("binary.dat"), "expected binary.dat to be dropped (zero threshold)");
 }
 
 #[test]
@@ -1242,7 +1252,7 @@ fn error_handling_invalid_sha_format_in_strip_blobs() {
 }
 
 #[test]
-fn error_handling_invalid_path_rename_format() {
+fn path_rename_with_identical_paths() {
   let repo = init_repo();
 
   // Test with invalid path rename format (missing colon)
