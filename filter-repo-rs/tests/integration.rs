@@ -3033,7 +3033,9 @@ fn unit_test_git_utilities() {
     run_git(&repo, &["add", "test.txt"]);
     run_git(&repo, &["commit", "-m", "Test commit"]);
 
-    let (_c, output, _e) = run_git(&repo, &["show-ref", "refs/heads/main"]);
+    let (_c, head_ref_out, _e) = run_git(&repo, &["symbolic-ref", "HEAD"]);
+    let head_ref = head_ref_out.trim();
+    let (_c, output, _e) = run_git(&repo, &["show-ref", head_ref]);
     println!("show-ref output: {:?}", output);
     assert!(!output.is_empty(), "show-ref should return HEAD reference");
 }
