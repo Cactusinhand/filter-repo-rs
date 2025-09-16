@@ -1,0 +1,18 @@
+[package]
+name = "filter-repo-rs"
+version = "0.0.1"
+edition = "2021"
+description = "Prototype of git-filter-repo in Rust: minimal export->filter->import pipeline"
+license = "MIT"
+
+[dependencies]
+regex = { version = "1", optional = true, default-features = true }
+
+[lib]
+name = "filter_repo_rs"
+path = "src/lib.rs"
+
+[features]
+# Optional feature to enable regex-based blob replacements for --replace-text
+# Kept off by default to avoid new runtime deps unless requested.
+blob-regex = ["regex"]
