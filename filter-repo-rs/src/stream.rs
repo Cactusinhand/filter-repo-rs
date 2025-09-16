@@ -190,6 +190,9 @@ fn precompute_blob_sizes(opts: &Options) -> io::Result<HashMap<Vec<u8>, usize>> 
 
         // Store both hex and binary representations for flexible lookup
         blob_sizes.insert(sha.to_vec(), size);
+        if let Some(bin) = parse_sha_bytes(sha) {
+            blob_sizes.insert(bin.to_vec(), size);
+        }
     }
 
     if !opts.quiet {
@@ -837,6 +840,48 @@ mod tests {
         for size in blob_sizes.values() {
             assert!(*size > 0);
         }
+    }
+
+    #[test]
+    fn test_blob_size_tracker_detects_large_blob() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path().to_str().unwrap();
+
+        // Initialize repository and create a large blob
+        std::process::Command::new("git")
+            .args(&["init", repo_path])
+            .output()
+            .unwrap();
+
+        let large_content = vec![0u8; 5000];
+        let file_path = temp_dir.path().join("large.bin");
+        std::fs::write(&file_path, &large_content).unwrap();
+
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "add", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(&["-C", repo_path, "commit", "-m", "add large blob"])
+            .output()
+            .unwrap();
+
+        let opts = create_test_opts(repo_path);
+        let blob_sizes = precompute_blob_sizes(&opts).unwrap();
+
+        // Determine the SHA of the large blob
+        let sha_output = std::process::Command::new("git")
+            .args(&["-C", repo_path, "hash-object", file_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let sha_hex = String::from_utf8(sha_output.stdout).unwrap();
+        let sha_hex_trim = sha_hex.trim();
+        let sha_hex_bytes = sha_hex_trim.as_bytes().to_vec();
+        let sha_bin = parse_sha_bytes(sha_hex_trim.as_bytes()).unwrap().to_vec();
+
+        // Both representations should be present and report the correct size
+        assert_eq!(blob_sizes.get(&sha_hex_bytes), Some(&large_content.len()));
+        assert_eq!(blob_sizes.get(&sha_bin), Some(&large_content.len()));
     }
 
     #[test]
