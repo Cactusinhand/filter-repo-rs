@@ -27,7 +27,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 
 - Blob Filtering
   - `--replace-text FILE`: literal byte-based replacements applied to blob contents.
-  - Regex replacements in `--replace-text` supported when built with the optional `blob-regex` feature.
+  - Regex replacements in `--replace-text` supported via `regex:` rules in the replacement file.
   - `--max-blob-size BYTES`: drops oversized blobs and deletes paths that reference them.
   - `--strip-blobs-with-ids FILE`: drops blobs by 40-hex id (one per line).
   - Optional report (`--write-report`) writes a summary to `.git/filter-repo/report.txt`.
@@ -68,7 +68,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 
 - Filtering semantics
   - Include-by-prefix (`--path`), glob (`--path-glob`), and invert (`--invert-paths`) supported. No regex yet.
-  - Regex path matching not implemented; use prefix/glob. Regex blob replacements require the optional `blob-regex` feature.
+  - Regex path matching not implemented; use prefix/glob. Regex blob replacements are supported by default through the `regex:` syntax in replacement files.
 
 
 - Merge/degen handling

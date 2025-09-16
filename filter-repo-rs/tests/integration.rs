@@ -434,7 +434,6 @@ fn inline_replace_text_and_report_modified() {
   assert!(s.contains("Blobs modified by replace-text"), "expected modified counter in report, got: {}", s);
   assert!(s.contains("secret.txt"), "expected modified sample path in report, got: {}", s);
 }
-#[cfg(feature = "blob-regex")]
 #[test]
 fn replace_text_regex_redacts_blob() {
   let repo = init_repo();

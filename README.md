@@ -33,8 +33,8 @@ Key Flags (prototype)
 - `--replace-message FILE`: literal replacements for commit/tag messages.
   Each non-empty, non-comment line is `from==>to` or `from` (implies `***REMOVED***`).
 - `--replace-text FILE`: literal replacements applied to blob contents (files). Same syntax
-  as `--replace-message`. Lines starting with `regex:` are treated as regex rules when
-  built with `--features blob-regex` (e.g., `regex:foo[0-9]+==>X`).
+  as `--replace-message`. Lines starting with `regex:` are treated as regex rules
+  (e.g., `regex:foo[0-9]+==>X`).
 - `--path PREFIX`: include-only by prefix (repeatable; ORed)
 - `--path-glob GLOB`: include by glob (supports `*`, `?`, `**`; repeatable; ORed)
 - `--invert-paths`: invert selection (drop matches; keep others)
@@ -51,9 +51,7 @@ Key Flags (prototype)
   - `--sensitive` (aka sensitive-data removal): enables fetch-all refs to ensure coverage; implies skipping origin removal.
   - `--no-fetch`: do not fetch refs even in `--sensitive` mode.
 
-Build with regex support for blob replacements:
-
-  cargo build -p filter-repo-rs --release --features blob-regex
+Regex-based blob replacements are included in the default build.
 
 Behavior Highlights
 -------------------
@@ -83,7 +81,6 @@ Limitations (prototype)
 -----------------------
 
 - No regex path matching; glob/prefix only.
-- Regex blob replacements require `--features blob-regex`; without it, `regex:` rules are ignored with a warning.
 - Merge simplification not implemented; we preserve merges but don't trim extra parents.
 - No `--state-branch` yet; marks exported to a file.
 - Windows path policy is always "sanitize" for rebuilt lines (no skip/error modes yet).
@@ -105,10 +102,9 @@ Examples
   rust/target/release/filter-repo-rs --replace-text redact.txt
   ```
 
-- Regex blob redaction (build with feature):
+- Regex blob redaction:
 
   ```sh
-  cargo build -p filter-repo-rs --release --features blob-regex
   echo "regex:api_key-[0-9]+==>REDACTED" > redact.txt
   rust/target/release/filter-repo-rs --replace-text redact.txt
   ```
