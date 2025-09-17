@@ -33,16 +33,16 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
       } else {
         opts.source.join(path)
       };
-      if resolved.extension().is_some() {
+      if resolved.is_dir() || resolved.extension().is_none() {
+        fs::create_dir_all(&resolved)?;
+        resolved.join(&bundle_name)
+      } else {
         if let Some(parent) = resolved.parent() {
           if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
           }
         }
         resolved
-      } else {
-        fs::create_dir_all(&resolved)?;
-        resolved.join(&bundle_name)
       }
     }
     None => {
