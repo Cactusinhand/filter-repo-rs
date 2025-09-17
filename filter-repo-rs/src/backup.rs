@@ -3,6 +3,9 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use time::format_description::FormatItem;
+use time::macros::format_description;
+use time::OffsetDateTime;
 
 use crate::gitutil::git_dir;
 use crate::opts::Options;
@@ -20,11 +23,20 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
   let timestamp = SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap_or_else(|_| Duration::from_secs(0));
-  let bundle_name = format!(
-    "{}-{:09}.bundle",
-    timestamp.as_secs(),
-    timestamp.subsec_nanos(),
-  );
+  let nanos_since_epoch = (timestamp.as_secs() as i128)
+    .saturating_mul(1_000_000_000)
+    + timestamp.subsec_nanos() as i128;
+  let datetime = OffsetDateTime::from_unix_timestamp_nanos(nanos_since_epoch)
+    .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+  const FORMAT: &[FormatItem<'_>] =
+    format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:9]");
+  let formatted = datetime.format(FORMAT).map_err(|e| {
+    io::Error::new(
+      io::ErrorKind::Other,
+      format!("failed to format backup timestamp: {e}"),
+    )
+  })?;
+  let bundle_name = format!("backup-{formatted}.bundle");
 
   let bundle_path = match &opts.backup_path {
     Some(path) => {

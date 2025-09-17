@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 regex = "1"
+time = { version = "0.3", features = ["formatting", "macros"] }
 
 [lib]
 name = "filter_repo_rs"

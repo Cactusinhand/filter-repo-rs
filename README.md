@@ -64,6 +64,33 @@ Key Flags (prototype)
 - `--backup`: create a git bundle of the selected refs under `.git/filter-repo/` (skipped in `--dry-run`).
 - `--backup-path PATH`: override where the bundle is written (directory or explicit file path).
 
+### Restoring from bundle backups
+
+When `--backup` runs, the tool invokes `git bundle create` with a file name such as
+`backup-20240216-153012-123456789.bundle`. The timestamp is recorded in UTC down to
+nanoseconds so repeated runs cannot collide, and the `.bundle` extension matches what
+`git bundle` expects.
+
+To recover a repository from one of these backups:
+
+1. Create a new directory (it does not need to be a Git repository yet).
+2. Clone the bundle into that directory:
+
+   ```sh
+   git clone /path/to/backup-20240216-153012-123456789.bundle restored-repo
+   ```
+
+   Alternatively, to import into an existing empty repository, run:
+
+   ```sh
+   git init restored-repo
+   cd restored-repo
+   git bundle unbundle /path/to/backup-20240216-153012-123456789.bundle
+   git symbolic-ref HEAD refs/heads/<branch-from-bundle>
+   ```
+
+3. Inspect the restored refs (e.g., `git show-ref`) and continue working from the recovered history.
+
 ### Safety & advanced modes
 
 - `--partial`: partial rewrite; disables origin migration, ref cleanup, reflog gc.
