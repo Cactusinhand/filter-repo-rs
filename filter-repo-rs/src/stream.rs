@@ -818,6 +818,8 @@ mod tests {
             no_fetch: false,
             backup: false,
             backup_path: None,
+            mode: crate::opts::Mode::Filter,
+            analyze: crate::opts::AnalyzeConfig::default(),
         }
     }
 

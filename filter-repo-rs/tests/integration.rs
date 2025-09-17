@@ -58,6 +58,35 @@ fn run_tool(dir: &Path, configure: impl FnOnce(&mut fr::Options)) -> (i32, Strin
 }
 
 #[test]
+fn analyze_mode_produces_human_report() {
+  let repo = init_repo();
+  let mut opts = fr::Options::default();
+  opts.source = repo.clone();
+  opts.target = repo.clone();
+  opts.mode = fr::Mode::Analyze;
+  let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
+  assert!(report.metrics.refs_total >= 1, "expected refs to be counted");
+  assert!(!report.warnings.is_empty(), "expected at least one informational warning");
+  fr::analysis::run(&opts).expect("analyze mode should render without error");
+}
+
+#[test]
+fn analyze_mode_emits_json() {
+  let repo = init_repo();
+  let mut opts = fr::Options::default();
+  opts.source = repo.clone();
+  opts.target = repo.clone();
+  opts.mode = fr::Mode::Analyze;
+  let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
+  let json = serde_json::to_string(&report).expect("serialize report");
+  let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+  assert!(v.get("metrics").is_some(), "metrics missing in json: {}", json);
+  assert!(v.get("warnings").is_some(), "warnings missing in json: {}", json);
+  opts.analyze.json = true;
+  fr::analysis::run(&opts).expect("json analyze run should succeed");
+}
+
+#[test]
 fn tag_rename_lightweight_creates_new_and_deletes_old() {
   let repo = init_repo();
   // create lightweight tag
