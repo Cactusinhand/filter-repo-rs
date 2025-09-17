@@ -847,19 +847,33 @@ mod tests {
             .output()
             .unwrap();
 
+        for (key, value) in [
+            ("user.name", "Blob Size Tester"),
+            ("user.email", "blob-size@example.com"),
+        ] {
+            let status = std::process::Command::new("git")
+                .args(["-C", repo_path.to_str().unwrap(), "config", key, value])
+                .status()
+                .expect("failed to configure git test repo");
+            assert!(status.success(), "failed to set git config {key}");
+        }
+
         let large_path = repo_path.join("large.bin");
         let small_path = repo_path.join("small.txt");
         std::fs::write(&large_path, vec![b'a'; 4096]).unwrap();
         std::fs::write(&small_path, b"hello").unwrap();
 
-        std::process::Command::new("git")
+        let status = std::process::Command::new("git")
             .args(["-C", repo_path.to_str().unwrap(), "add", "."])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
+            .status()
+            .expect("failed to add files to git test repo");
+        assert!(status.success(), "git add failed for test repo");
+
+        let status = std::process::Command::new("git")
             .args(["-C", repo_path.to_str().unwrap(), "commit", "-m", "add files"])
-            .output()
-            .unwrap();
+            .status()
+            .expect("failed to commit files in git test repo");
+        assert!(status.success(), "git commit failed for test repo");
 
         let ls_tree = std::process::Command::new("git")
             .args(["-C", repo_path.to_str().unwrap(), "ls-tree", "-r", "HEAD"])
