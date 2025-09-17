@@ -8,7 +8,6 @@ several core features with Windows compatibility.
 Build
 -----
 
-cd rust
 cargo build -p filter-repo-rs --release
 
 Run
