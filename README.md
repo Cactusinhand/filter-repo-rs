@@ -61,6 +61,8 @@ Key Flags (prototype)
 - `--cleanup [none|standard|aggressive]`: post-import cleanup (reflog expire + gc). Default `none`.
 - `--quiet`, `--no-reset`: reduce noise / skip post-import reset
 - `--no-reencode`, `--no-quotepath`, `--no-mark-tags`: pass-through fast-export toggles
+- `--backup`: create a git bundle of the selected refs under `.git/filter-repo/` (skipped in `--dry-run`).
+- `--backup-path PATH`: override where the bundle is written (directory or explicit file path).
 
 ### Safety & advanced modes
 

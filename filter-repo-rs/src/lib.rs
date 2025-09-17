@@ -1,6 +1,7 @@
 mod message;
 pub mod pathutil;
 mod gitutil;
+mod backup;
 pub mod opts;
 mod pipes;
 mod tag;

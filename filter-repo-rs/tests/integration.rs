@@ -127,6 +127,32 @@ fn writes_commit_map_and_ref_map() {
 }
 
 #[test]
+fn backup_creates_bundle_in_filter_repo_directory() {
+  let repo = init_repo();
+  let (code, _o, _e) = run_tool(&repo, |o| {
+    o.backup = true;
+    o.no_data = true;
+  });
+  assert_eq!(code, 0, "filter-repo-rs run should succeed");
+
+  let backup_dir = repo.join(".git").join("filter-repo");
+  assert!(backup_dir.exists(), "backup directory should exist at {:?}", backup_dir);
+  let bundles: Vec<_> = fs::read_dir(&backup_dir)
+    .unwrap()
+    .filter_map(|entry| {
+      let entry = entry.ok()?;
+      let path = entry.path();
+      if path.extension().and_then(|ext| ext.to_str()) == Some("bundle") {
+        Some(path)
+      } else {
+        None
+      }
+    })
+    .collect();
+  assert!(!bundles.is_empty(), "expected at least one bundle in {:?}, entries: {:?}", backup_dir, bundles);
+}
+
+#[test]
 fn branch_rename_updates_ref_and_head() {
   let repo = init_repo();
   // Determine current HEAD ref name
