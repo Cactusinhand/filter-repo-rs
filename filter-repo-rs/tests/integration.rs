@@ -126,6 +126,21 @@ fn writes_commit_map_and_ref_map() {
   assert!(r.contains("refs/tags/v3.0 refs/tags/release-3.0"), "ref-map expected v3.0->release-3.0, got: {}", r);
 }
 
+fn find_bundles_in(dir: &Path) -> Vec<PathBuf> {
+    fs::read_dir(dir)
+        .expect("failed to read backup directory")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("bundle") {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn backup_creates_bundle_in_filter_repo_directory() {
   let repo = init_repo();
@@ -137,18 +152,7 @@ fn backup_creates_bundle_in_filter_repo_directory() {
 
   let backup_dir = repo.join(".git").join("filter-repo");
   assert!(backup_dir.exists(), "backup directory should exist at {:?}", backup_dir);
-  let bundles: Vec<_> = fs::read_dir(&backup_dir)
-    .expect("failed to read backup directory")
-    .filter_map(|entry| {
-      let entry = entry.ok()?;
-      let path = entry.path();
-      if path.extension().and_then(|ext| ext.to_str()) == Some("bundle") {
-        Some(path)
-      } else {
-        None
-      }
-    })
-    .collect();
+  let bundles = find_bundles_in(&backup_dir);
   assert!(!bundles.is_empty(), "expected at least one bundle in {:?}, entries: {:?}", backup_dir, bundles);
 }
 

@@ -54,7 +54,7 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
 
   if opts.refs.is_empty() {
     return Err(io::Error::new(
-      io::ErrorKind::Other,
+      io::ErrorKind::InvalidInput,
       "no refs specified for backup",
     ));
   }

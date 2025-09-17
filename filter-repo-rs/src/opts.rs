@@ -148,8 +148,12 @@ pub fn parse_args() -> Options {
       "--no-fetch" => { opts.no_fetch = true; }
       "--backup" => { opts.backup = true; }
       "--backup-path" => {
-        let p = it.next().expect("--backup-path requires value");
-        opts.backup_path = Some(PathBuf::from(p));
+        if let Some(p) = it.next() {
+          opts.backup_path = Some(PathBuf::from(p));
+        } else {
+          eprintln!("error: --backup-path requires a value");
+          std::process::exit(2);
+        }
       }
       "-h" | "--help" => { print_help(); std::process::exit(0); }
       other => { eprintln!("Unknown argument: {}", other); print_help(); std::process::exit(2); }
