@@ -816,6 +816,8 @@ mod tests {
             partial: false,
             sensitive: false,
             no_fetch: false,
+            backup: false,
+            backup_path: None,
         }
     }
 

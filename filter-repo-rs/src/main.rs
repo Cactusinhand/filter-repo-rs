@@ -1,6 +1,7 @@
 mod message;
 mod pathutil;
 mod gitutil;
+mod backup;
 mod opts;
 mod pipes;
 mod tag;
@@ -10,9 +11,10 @@ mod finalize;
 mod migrate;
 mod stream;
 
+use filter_repo_rs as fr;
 use std::io;
 
 fn main() -> io::Result<()> {
-  let opts = crate::opts::parse_args();
-  crate::stream::run(&opts)
+  let opts = fr::opts::parse_args();
+  fr::run(&opts)
 }

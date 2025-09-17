@@ -36,6 +36,8 @@ pub struct Options {
   pub partial: bool,
   pub sensitive: bool,
   pub no_fetch: bool,
+  pub backup: bool,
+  pub backup_path: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -70,6 +72,8 @@ impl Default for Options {
       partial: false,
       sensitive: false,
       no_fetch: false,
+      backup: false,
+      backup_path: None,
     }
   }
 }
@@ -142,6 +146,15 @@ pub fn parse_args() -> Options {
       "--partial" => { opts.partial = true; }
       "--sensitive" | "--sensitive-data-removal" => { opts.sensitive = true; }
       "--no-fetch" => { opts.no_fetch = true; }
+      "--backup" => { opts.backup = true; }
+      "--backup-path" => {
+        if let Some(p) = it.next() {
+          opts.backup_path = Some(PathBuf::from(p));
+        } else {
+          eprintln!("error: --backup-path requires a value");
+          std::process::exit(2);
+        }
+      }
       "-h" | "--help" => { print_help(); std::process::exit(0); }
       other => { eprintln!("Unknown argument: {}", other); print_help(); std::process::exit(2); }
     }
@@ -188,7 +201,9 @@ Execution behavior & output:\n\
   --no-reencode               Do not pass --reencode=yes to fast-export\n\
   --no-quotepath              Do not force core.quotepath=false for export\n\
   --no-mark-tags              Do not pass --mark-tags to fast-export\n\
-\n\
+  --backup                    Create a git bundle backup of selected refs\n\
+  --backup-path PATH          Override backup destination (file or directory)\n\
+  \n\
 Safety & advanced modes:\n\
   --force, -f                 Bypass sanity checks (danger: destructive)\n\
   --enforce-sanity            Enable preflight safety checks\n\
