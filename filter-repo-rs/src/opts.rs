@@ -171,8 +171,8 @@ Path selection & rewriting:\n\
   --to-subdirectory-filter D  Equivalent to --path-rename :D/\n\
 \n\
 Blob filtering & redaction:\n\
-  --replace-text FILE     Literal/regex (feature-gated) replacements for blobs\n\
-  --max-blob-size BYTES   Drop blobs larger than BYTES\n\
+  --replace-text FILE          Literal/regex (feature-gated) replacements for blobs\n\
+  --max-blob-size BYTES        Drop blobs larger than BYTES\n\
   --strip-blobs-with-ids FILE  Drop blobs by 40-hex id (one per line)\n\
 \n\
 Commit, tag & ref updates:\n\
