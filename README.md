@@ -16,7 +16,7 @@ Run
 
 Run from inside a Git repository (or pass `--source`/`--target`):
 
-rust/target/release/filter-repo-rs \
+filter-repo-rs \
   --source . \
   --target . \
   --refs --all \
@@ -111,34 +111,34 @@ Examples
 
   ```sh
   echo "FOO==>BAR" > replacements.txt
-  rust/target/release/filter-repo-rs --replace-message replacements.txt
+  filter-repo-rs --replace-message replacements.txt
   ```
 
 - Literal blob redaction:
 
   ```sh
   echo "SECRET_TOKEN==>REDACTED" > redact.txt
-  rust/target/release/filter-repo-rs --replace-text redact.txt
+  filter-repo-rs --replace-text redact.txt
   ```
 
 - Regex blob redaction:
 
   ```sh
   echo "regex:api_key-[0-9]+==>REDACTED" > redact.txt
-  rust/target/release/filter-repo-rs --replace-text redact.txt
+  filter-repo-rs --replace-text redact.txt
   ```
 
 - Write a report for stripped/modified blobs:
 
   ```sh
-  rust/target/release/filter-repo-rs --max-blob-size 1024 --write-report
+  filter-repo-rs --max-blob-size 1024 --write-report
   cat .git/filter-repo/report.txt
   ```
 
 - Run cleanup after import:
 
   ```sh
-  rust/target/release/filter-repo-rs --cleanup standard
+  filter-repo-rs --cleanup standard
   # or
-  rust/target/release/filter-repo-rs --cleanup aggressive
+  filter-repo-rs --cleanup aggressive
   ```
