@@ -155,24 +155,32 @@ pub fn print_help() {
     "filter-repo-rs (prototype)\n\
 Usage: filter-repo-rs [options]\n\
 \n\
-Key options:\n\
+Repository & ref selection:\n\
   --source DIR            Source Git working directory (default .)\n\
   --target DIR            Target Git working directory (default .)\n\
   --refs REF              Ref to export (repeatable; defaults to --all)\n\
   --date-order            Use date-order for fast-export\n\
   --no-data               Do not include blob data in fast-export\n\
-  --replace-message FILE  Literal replacements in commit/tag messages\n\
-  --replace-text FILE     Literal/regex (feature-gated) replacements for blobs\n\
+\n\
+Path selection & rewriting:\n\
   --path PREFIX           Include-only files under PREFIX (repeatable)\n\
   --path-glob GLOB        Include by glob (repeatable)\n\
   --invert-paths          Invert path selection (drop matches)\n\
   --path-rename OLD:NEW   Rename path prefix in file changes\n\
   --subdirectory-filter D Equivalent to --path D/ --path-rename D/:\n\
   --to-subdirectory-filter D  Equivalent to --path-rename :D/\n\
-  --tag-rename OLD:NEW    Rename tags with given prefix\n\
-  --branch-rename OLD:NEW Rename branches with given prefix\n\
+\n\
+Blob filtering & redaction:\n\
+  --replace-text FILE     Literal/regex (feature-gated) replacements for blobs\n\
   --max-blob-size BYTES   Drop blobs larger than BYTES\n\
   --strip-blobs-with-ids FILE  Drop blobs by 40-hex id (one per line)\n\
+\n\
+Commit, tag & ref updates:\n\
+  --replace-message FILE  Literal replacements in commit/tag messages\n\
+  --tag-rename OLD:NEW    Rename tags with given prefix\n\
+  --branch-rename OLD:NEW Rename branches with given prefix\n\
+\n\
+Execution behavior & output:\n\
   --write-report          Write .git/filter-repo/report.txt summary\n\
   --cleanup MODE          none|standard|aggressive (default: none)\n\
   --quiet                 Reduce output noise\n\
@@ -180,6 +188,8 @@ Key options:\n\
   --no-reencode           Do not pass --reencode=yes to fast-export\n\
   --no-quotepath          Do not force core.quotepath=false for export\n\
   --no-mark-tags          Do not pass --mark-tags to fast-export\n\
+\n\
+Safety & advanced modes:\n\
   --force, -f             Bypass sanity checks (danger: destructive)\n\
   --enforce-sanity        Enable preflight safety checks\n\
   --dry-run               Do not update refs or clean up; preview only\n\
