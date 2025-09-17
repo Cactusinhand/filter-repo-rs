@@ -8,7 +8,6 @@ several core features with Windows compatibility.
 Build
 -----
 
-cd rust
 cargo build -p filter-repo-rs --release
 
 Run
@@ -16,7 +15,7 @@ Run
 
 Run from inside a Git repository (or pass `--source`/`--target`):
 
-rust/target/release/filter-repo-rs \
+filter-repo-rs \
   --source . \
   --target . \
   --refs --all \
@@ -26,32 +25,51 @@ rust/target/release/filter-repo-rs \
 Key Flags (prototype)
 ---------------------
 
+### Repository & ref selection
+
 - `--source DIR`, `--target DIR`: working directories (default `.`)
 - `--ref|--refs REF`: repeatable; defaults to `--all`
-- `--date-order`, `--no-data`: pass-through to fast-export
-- `--quiet`, `--no-reset`: reduce noise / skip post-import reset
-- `--replace-message FILE`: literal replacements for commit/tag messages.
-  Each non-empty, non-comment line is `from==>to` or `from` (implies `***REMOVED***`).
-- `--replace-text FILE`: literal replacements applied to blob contents (files). Same syntax
-  as `--replace-message`. Lines starting with `regex:` are treated as regex rules
-  (e.g., `regex:foo[0-9]+==>X`).
+- `--date-order`, `--no-data`: pass-through to `git fast-export`
+
+### Path selection & rewriting
+
 - `--path PREFIX`: include-only by prefix (repeatable; ORed)
 - `--path-glob GLOB`: include by glob (supports `*`, `?`, `**`; repeatable; ORed)
 - `--invert-paths`: invert selection (drop matches; keep others)
 - `--path-rename OLD:NEW`: rename path prefix in file changes
 - `--subdirectory-filter DIR`: equivalent to `--path DIR/ --path-rename DIR/:`
 - `--to-subdirectory-filter DIR`: equivalent to `--path-rename :DIR/`
+
+### Blob filtering & redaction
+
+- `--replace-text FILE`: literal replacements applied to blob contents (files). Same syntax
+  as `--replace-message`. Lines starting with `regex:` are treated as regex rules
+  (e.g., `regex:foo[0-9]+==>X`). Enabled in the default build.
+- `--max-blob-size BYTES`: drop blobs larger than BYTES and delete paths that reference them.
+- `--strip-blobs-with-ids FILE`: drop blobs whose 40-hex ids (one per line) are listed.
+
+### Commit, tag & ref updates
+
+- `--replace-message FILE`: literal replacements for commit/tag messages.
+  Each non-empty, non-comment line is `from==>to` or `from` (implies `***REMOVED***`).
 - `--tag-rename OLD:NEW`: rename tags starting with OLD to start with NEW
 - `--branch-rename OLD:NEW`: rename branches starting with OLD to start with NEW
- - `--max-blob-size BYTES`: drop blobs larger than BYTES and delete paths that reference them.
- - `--strip-blobs-with-ids FILE`: drop blobs whose 40-hex ids (one per line) are listed.
- - `--cleanup [none|standard|aggressive]`: post-import cleanup (reflog expire + gc). Default `none`.
- - `--write-report`: write a summary to `.git/filter-repo/report.txt`.
-  - `--partial`: partial rewrite; disables origin migration, ref cleanup, reflog gc.
-  - `--sensitive` (aka sensitive-data removal): enables fetch-all refs to ensure coverage; implies skipping origin removal.
-  - `--no-fetch`: do not fetch refs even in `--sensitive` mode.
 
-Regex-based blob replacements are included in the default build.
+### Execution behavior & output
+
+- `--write-report`: write a summary to `.git/filter-repo/report.txt`.
+- `--cleanup [none|standard|aggressive]`: post-import cleanup (reflog expire + gc). Default `none`.
+- `--quiet`, `--no-reset`: reduce noise / skip post-import reset
+- `--no-reencode`, `--no-quotepath`, `--no-mark-tags`: pass-through fast-export toggles
+
+### Safety & advanced modes
+
+- `--partial`: partial rewrite; disables origin migration, ref cleanup, reflog gc.
+- `--sensitive` (aka sensitive-data removal): enables fetch-all refs to ensure coverage; implies skipping origin removal.
+- `--no-fetch`: do not fetch refs even in `--sensitive` mode.
+- `--force`, `-f`: bypass sanity checks (danger: destructive).
+- `--enforce-sanity`: enable preflight safety checks.
+- `--dry-run`: do not update refs or clean up; preview only.
 
 Behavior Highlights
 -------------------
@@ -92,34 +110,34 @@ Examples
 
   ```sh
   echo "FOO==>BAR" > replacements.txt
-  rust/target/release/filter-repo-rs --replace-message replacements.txt
+  filter-repo-rs --replace-message replacements.txt
   ```
 
 - Literal blob redaction:
 
   ```sh
   echo "SECRET_TOKEN==>REDACTED" > redact.txt
-  rust/target/release/filter-repo-rs --replace-text redact.txt
+  filter-repo-rs --replace-text redact.txt
   ```
 
 - Regex blob redaction:
 
   ```sh
   echo "regex:api_key-[0-9]+==>REDACTED" > redact.txt
-  rust/target/release/filter-repo-rs --replace-text redact.txt
+  filter-repo-rs --replace-text redact.txt
   ```
 
 - Write a report for stripped/modified blobs:
 
   ```sh
-  rust/target/release/filter-repo-rs --max-blob-size 1024 --write-report
+  filter-repo-rs --max-blob-size 1024 --write-report
   cat .git/filter-repo/report.txt
   ```
 
 - Run cleanup after import:
 
   ```sh
-  rust/target/release/filter-repo-rs --cleanup standard
+  filter-repo-rs --cleanup standard
   # or
-  rust/target/release/filter-repo-rs --cleanup aggressive
+  filter-repo-rs --cleanup aggressive
   ```
