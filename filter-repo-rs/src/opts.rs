@@ -156,11 +156,11 @@ pub fn print_help() {
 Usage: filter-repo-rs [options]\n\
 \n\
 Repository & ref selection:\n\
-  --source DIR            Source Git working directory (default .)\n\
-  --target DIR            Target Git working directory (default .)\n\
-  --refs REF              Ref to export (repeatable; defaults to --all)\n\
-  --date-order            Use date-order for fast-export\n\
-  --no-data               Do not include blob data in fast-export\n\
+  --source DIR                Source Git working directory (default .)\n\
+  --target DIR                Target Git working directory (default .)\n\
+  --refs REF                  Ref to export (repeatable; defaults to --all)\n\
+  --date-order                Use date-order for fast-export\n\
+  --no-data                   Do not include blob data in fast-export\n\
 \n\
 Path selection & rewriting:\n\
   --path PREFIX               Include-only files under PREFIX (repeatable)\n\
@@ -176,26 +176,26 @@ Blob filtering & redaction:\n\
   --strip-blobs-with-ids FILE  Drop blobs by 40-hex id (one per line)\n\
 \n\
 Commit, tag & ref updates:\n\
-  --replace-message FILE  Literal replacements in commit/tag messages\n\
-  --tag-rename OLD:NEW    Rename tags with given prefix\n\
-  --branch-rename OLD:NEW Rename branches with given prefix\n\
+  --replace-message FILE      Literal replacements in commit/tag messages\n\
+  --tag-rename OLD:NEW        Rename tags with given prefix\n\
+  --branch-rename OLD:NEW     Rename branches with given prefix\n\
 \n\
 Execution behavior & output:\n\
-  --write-report          Write .git/filter-repo/report.txt summary\n\
-  --cleanup MODE          none|standard|aggressive (default: none)\n\
-  --quiet                 Reduce output noise\n\
-  --no-reset              Skip final 'git reset --hard' in target\n\
-  --no-reencode           Do not pass --reencode=yes to fast-export\n\
-  --no-quotepath          Do not force core.quotepath=false for export\n\
-  --no-mark-tags          Do not pass --mark-tags to fast-export\n\
+  --write-report              Write .git/filter-repo/report.txt summary\n\
+  --cleanup MODE              none|standard|aggressive (default: none)\n\
+  --quiet                     Reduce output noise\n\
+  --no-reset                  Skip final 'git reset --hard' in target\n\
+  --no-reencode               Do not pass --reencode=yes to fast-export\n\
+  --no-quotepath              Do not force core.quotepath=false for export\n\
+  --no-mark-tags              Do not pass --mark-tags to fast-export\n\
 \n\
 Safety & advanced modes:\n\
-  --force, -f             Bypass sanity checks (danger: destructive)\n\
-  --enforce-sanity        Enable preflight safety checks\n\
-  --dry-run               Do not update refs or clean up; preview only\n\
-  --partial               Do a partial rewrite; disable origin migration, ref cleanup, reflog gc\n\
-  --sensitive             Sensitive-data mode (enables fetch-all unless --no-fetch)\n\
-  --no-fetch              Do not fetch all refs even in --sensitive mode\n\
-  -h, --help              Show this help\n"
+  --force, -f                 Bypass sanity checks (danger: destructive)\n\
+  --enforce-sanity            Enable preflight safety checks\n\
+  --dry-run                   Do not update refs or clean up; preview only\n\
+  --partial                   Do a partial rewrite; disable origin migration, ref cleanup, reflog gc\n\
+  --sensitive                 Sensitive-data mode (enables fetch-all unless --no-fetch)\n\
+  --no-fetch                  Do not fetch all refs even in --sensitive mode\n\
+  -h, --help                  Show this help\n"
   );
 }
