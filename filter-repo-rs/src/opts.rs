@@ -163,11 +163,11 @@ Repository & ref selection:\n\
   --no-data               Do not include blob data in fast-export\n\
 \n\
 Path selection & rewriting:\n\
-  --path PREFIX           Include-only files under PREFIX (repeatable)\n\
-  --path-glob GLOB        Include by glob (repeatable)\n\
-  --invert-paths          Invert path selection (drop matches)\n\
-  --path-rename OLD:NEW   Rename path prefix in file changes\n\
-  --subdirectory-filter D Equivalent to --path D/ --path-rename D/:\n\
+  --path PREFIX               Include-only files under PREFIX (repeatable)\n\
+  --path-glob GLOB            Include by glob (repeatable)\n\
+  --invert-paths              Invert path selection (drop matches)\n\
+  --path-rename OLD:NEW       Rename path prefix in file changes\n\
+  --subdirectory-filter D     Equivalent to --path D/ --path-rename D/:\n\
   --to-subdirectory-filter D  Equivalent to --path-rename :D/\n\
 \n\
 Blob filtering & redaction:\n\
