@@ -6,6 +6,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 
 use crate::opts::Options;
 use crate::migrate;
+use crate::stream::BlobSizeTracker;
 
 #[derive(Debug)]
 pub struct ReportData {
@@ -65,7 +66,7 @@ pub fn finalize(
   mut import_broken: bool,
   allow_flush_tag_resets: bool,
   report: Option<ReportData>,
-  blob_size_cache: &HashMap<Vec<u8>, usize>,
+  blob_sizes: &BlobSizeTracker,
 ) -> io::Result<()> {
   // Emit buffered lightweight tag resets if any remain (ideally flushed before 'done')
   if allow_flush_tag_resets {
@@ -304,14 +305,13 @@ pub fn finalize(
                     if size_samples.len()>=20 { break; }
                   }
                 } else if id.len()==40 && id.iter().all(|b| (*b>=b'0'&&*b<=b'9') || (*b>=b'a'&&*b<=b'f')) {
-                  // SHA1: use pre-computed size from cache
+                  // SHA1: use pre-computed oversize tracker
                   let sha = id;
-                  let sz = blob_size_cache.get(sha).copied().unwrap_or(0);
-                  if let Some(max) = opts.max_blob_size { if sz > max {
+                  if blob_sizes.known_oversize(sha) {
                     let mut p = bytes[path_start..].to_vec(); if let Some(last)=p.last(){ if *last==b'\n' { p.pop(); } }
                     if !p.is_empty() && !size_samples.iter().any(|e| e==&p) { size_samples.push(p); }
                     if size_samples.len()>=20 { break; }
-                  } }
+                  }
                 }
               }
             }
