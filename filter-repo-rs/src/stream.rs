@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::{Command, Stdio};
 
 
-use crate::backup::create_backup;
 use crate::gitutil::git_dir;
 use crate::message::MessageReplacer;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
@@ -280,11 +279,6 @@ pub fn run(opts: &Options) -> io::Result<()> {
 
   let debug_dir = target_git_dir.join("filter-repo");
   if !debug_dir.exists() { create_dir_all(&debug_dir)?; }
-  if opts.backup {
-    if let Some(bundle_path) = create_backup(opts)? {
-      println!("Backup bundle saved to {}", bundle_path.display());
-    }
-  }
   let mut orig_file = File::create(debug_dir.join("fast-export.original"))?;
   let mut filt_file = File::create(debug_dir.join("fast-export.filtered"))?;
 
