@@ -70,7 +70,7 @@ pub fn finalize(
     opts: &Options,
     debug_dir: &Path,
     ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)>,
-    commit_pairs: Vec<(u32, Vec<u8>)>,
+    commit_pairs: Vec<(Vec<u8>, Option<u32>)>,
     buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)>,
     annotated_tag_refs: BTreeSet<Vec<u8>>,
     updated_branch_refs: BTreeSet<Vec<u8>>,
@@ -280,7 +280,7 @@ pub fn finalize(
                 }
                 if line == b"\n" {
                     if let (Some(m), Some(old)) = (cur_mark.take(), cur_old.take()) {
-                        pairs.push((m, old));
+                        pairs.push((old, Some(m)));
                     }
                     in_commit = false;
                     continue;
@@ -292,13 +292,19 @@ pub fn finalize(
     // Always create commit-map (even if empty) for user tooling parity
     {
         let mut f = File::create(debug_dir.join("commit-map"))?;
-        if !pairs.is_empty() {
-            for (mark, old) in pairs {
-                if let Some(newid) = mark_to_id.get(&mark) {
+        for (old, mark) in pairs {
+            match mark {
+                Some(m) => {
+                    if let Some(newid) = mark_to_id.get(&m) {
+                        f.write_all(&old)?;
+                        f.write_all(b" ")?;
+                        f.write_all(newid)?;
+                        f.write_all(b"\n")?;
+                    }
+                }
+                None => {
                     f.write_all(&old)?;
-                    f.write_all(b" ")?;
-                    f.write_all(newid)?;
-                    f.write_all(b"\n")?;
+                    f.write_all(b" 0000000000000000000000000000000000000000\n")?;
                 }
             }
         }

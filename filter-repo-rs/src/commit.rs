@@ -89,7 +89,7 @@ pub fn process_commit_line(
   first_parent_mark: &mut Option<u32>,
   commit_original_oid: &mut Option<Vec<u8>>,
   parent_count: &mut usize,
-  commit_pairs: &mut Vec<(u32, Vec<u8>)>,
+  commit_pairs: &mut Vec<(Vec<u8>, Option<u32>)>,
   import_broken: &mut bool,
   emitted_marks: &std::collections::HashSet<u32>,
 ) -> io::Result<CommitAction> {
@@ -142,10 +142,13 @@ pub fn process_commit_line(
       filt_file.write_all(&commit_buf)?;
       if let Some(ref mut fi) = fi_in { if let Err(e) = fi.write_all(&commit_buf) { if e.kind()==io::ErrorKind::BrokenPipe { *import_broken=true; } else { return Err(e); } } }
       // Record mark and original id for later resolution via marks file
-      if let (Some(m), Some(old)) = (*commit_mark, commit_original_oid.clone()) {
-        commit_pairs.push((m, old));
+      if let Some(old) = commit_original_oid.take() {
+        if let Some(m) = *commit_mark {
+          commit_pairs.push((old, Some(m)));
+        }
       }
     } else {
+      if let Some(old) = commit_original_oid.take() { commit_pairs.push((old, None)); }
       // prune commit: only alias if we have both marks and parent mark has been emitted
       if let (Some(old_mark), Some(parent_mark)) = (*commit_mark, *first_parent_mark) {
         if emitted_marks.contains(&parent_mark) {

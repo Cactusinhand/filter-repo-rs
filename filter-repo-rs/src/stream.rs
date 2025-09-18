@@ -407,7 +407,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
     let mut first_parent_mark: Option<u32> = None;
     let mut commit_original_oid: Option<Vec<u8>> = None;
     let mut parent_count: usize = 0;
-    let mut commit_pairs: Vec<(u32, Vec<u8>)> = Vec::new();
+    let mut commit_pairs: Vec<(Vec<u8>, Option<u32>)> = Vec::new();
     let mut import_broken = false;
     // If we skip a duplicate annotated tag header, swallow the rest of its block
     let mut skipping_tag_block: bool = false;
