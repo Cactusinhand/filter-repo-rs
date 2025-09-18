@@ -577,6 +577,62 @@ fn quoted_paths_roundtrip_with_rename() {
 }
 
 #[test]
+fn rename_and_copy_paths_requote_after_filtering() {
+  let repo = init_repo();
+  let stream_path = repo.join("fe-renames.stream");
+  let stream = r#"blob
+mark :1
+data 4
+one
+
+commit refs/heads/main
+mark :2
+author Tester <tester@example.com> 0 +0000
+committer Tester <tester@example.com> 0 +0000
+data 3
+c1
+M 100644 :1 "sp ace.txt"
+M 100644 :1 "old\001.txt"
+M 100644 :1 "removed space.txt"
+
+commit refs/heads/main
+mark :3
+author Tester <tester@example.com> 1 +0000
+committer Tester <tester@example.com> 1 +0000
+data 3
+c2
+from :2
+D "removed space.txt"
+C "sp ace.txt" "dup space.txt"
+R "old\001.txt" "final\001name.txt"
+
+done
+"#;
+  fs::write(&stream_path, stream).expect("write custom fast-export stream");
+
+  let (_c, _o, _e) = run_tool(&repo, |o| {
+    o.dry_run = true;
+    o.path_renames.push((Vec::new(), b"prefix/".to_vec()));
+    #[allow(deprecated)]
+    { o.fe_stream_override = Some(stream_path.clone()); }
+  });
+
+  let filtered_path = repo.join(".git").join("filter-repo").join("fast-export.filtered");
+  let filtered = fs::read_to_string(&filtered_path).expect("read filtered stream");
+
+  assert!(filtered.contains("M 100644 :1 \"prefix/sp ace.txt\""),
+          "expected prefixed modify line, got: {}", filtered);
+  assert!(filtered.contains("M 100644 :1 \"prefix/old\\001.txt\""),
+          "expected prefixed control-char modify line, got: {}", filtered);
+  assert!(filtered.contains("D \"prefix/removed space.txt\""),
+          "expected prefixed delete line, got: {}", filtered);
+  assert!(filtered.contains("C \"prefix/sp ace.txt\" \"prefix/dup space.txt\""),
+          "expected prefixed copy line, got: {}", filtered);
+  assert!(filtered.contains("R \"prefix/old\\001.txt\" \"prefix/final\\001name.txt\""),
+          "expected prefixed rename line, got: {}", filtered);
+}
+
+#[test]
 fn inline_replace_text_and_report_modified() {
   // use std::env as stdenv;
   let repo = init_repo();
