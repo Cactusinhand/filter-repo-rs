@@ -19,6 +19,8 @@ pub struct AnalyzeThresholds {
   pub warn_tree_entries: usize,
   pub warn_path_length: usize,
   pub warn_duplicate_paths: usize,
+  pub warn_commit_msg_bytes: usize,
+  pub warn_max_parents: usize,
 }
 
 impl Default for AnalyzeThresholds {
@@ -32,6 +34,8 @@ impl Default for AnalyzeThresholds {
       warn_tree_entries: 2_000,
       warn_path_length: 200,
       warn_duplicate_paths: 1_000,
+      warn_commit_msg_bytes: 10_000,
+      warn_max_parents: 8,
     }
   }
 }
@@ -173,6 +177,14 @@ pub fn parse_args() -> Options {
       "--analyze-duplicate-paths" => {
         let v = it.next().expect("--analyze-duplicate-paths requires COUNT");
         opts.analyze.thresholds.warn_duplicate_paths = parse_usize(&v, "--analyze-duplicate-paths");
+      }
+      "--analyze-commit-msg-warn" => {
+        let v = it.next().expect("--analyze-commit-msg-warn requires BYTES");
+        opts.analyze.thresholds.warn_commit_msg_bytes = parse_usize(&v, "--analyze-commit-msg-warn");
+      }
+      "--analyze-max-parents-warn" => {
+        let v = it.next().expect("--analyze-max-parents-warn requires COUNT");
+        opts.analyze.thresholds.warn_max_parents = parse_usize(&v, "--analyze-max-parents-warn");
       }
       "--source" => opts.source = PathBuf::from(it.next().expect("--source requires value")),
       "--target" => opts.target = PathBuf::from(it.next().expect("--target requires value")),
@@ -389,6 +401,8 @@ Repository analysis:\n\
   --analyze-tree-entries N    Override tree entry warning threshold\n\
   --analyze-path-length N     Override path length warning threshold\n\
   --analyze-duplicate-paths N Override duplicate-path warning threshold\n\
+  --analyze-commit-msg-warn N Override commit message length warning threshold\n\
+  --analyze-max-parents-warn N Override max parent count warning threshold\n\
 \n\
 Misc:\n\
   -h, --help                 Show this help message\n\

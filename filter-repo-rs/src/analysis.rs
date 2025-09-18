@@ -1,6 +1,7 @@
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
-use std::io::{self, BufRead, BufReader, Read};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -109,7 +110,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
   gather_object_inventory(repo, cfg, &mut metrics)?;
   gather_refs(repo, &mut metrics)?;
   gather_worktree_snapshot(repo, cfg, &mut metrics)?;
-  gather_history_stats(repo, &mut metrics)?;
+  gather_history_stats(repo, cfg, &mut metrics)?;
   Ok(metrics)
 }
 
@@ -133,9 +134,9 @@ fn gather_footprint(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<
 }
 
 fn gather_object_inventory(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut RepositoryMetrics) -> io::Result<()> {
-  let mut largest_blobs: Vec<ObjectStat> = Vec::new();
-  let mut largest_trees: Vec<ObjectStat> = Vec::new();
-  let mut threshold_hits: Vec<ObjectStat> = Vec::new();
+  let mut largest_blobs: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
+  let mut largest_trees: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
+  let mut threshold_hits: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
   let mut object_counts: BTreeMap<String, u64> = BTreeMap::new();
   let mut child = Command::new("git")
     .arg("-C").arg(repo)
@@ -155,29 +156,23 @@ fn gather_object_inventory(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repos
     let size = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
     *object_counts.entry(typ.to_string()).or_insert(0) += 1;
     if typ == "blob" {
+      push_top(&mut largest_blobs, cfg.top, size, oid);
       if size >= cfg.thresholds.warn_blob_bytes {
-        threshold_hits.push(ObjectStat { oid: oid.to_string(), size, path: None });
+        push_top(&mut threshold_hits, cfg.top, size, oid);
       }
-      largest_blobs.push(ObjectStat { oid: oid.to_string(), size, path: None });
     } else if typ == "tree" {
-      largest_trees.push(ObjectStat { oid: oid.to_string(), size, path: None });
+      push_top(&mut largest_trees, cfg.top, size, oid);
     }
   }
   let status = child.wait()?;
   if !status.success() {
     return Err(io::Error::new(io::ErrorKind::Other, "git cat-file --batch-check failed"));
   }
-  largest_blobs.sort_by(|a, b| b.size.cmp(&a.size));
-  largest_trees.sort_by(|a, b| b.size.cmp(&a.size));
-  threshold_hits.sort_by(|a, b| b.size.cmp(&a.size));
-  largest_blobs.truncate(cfg.top);
-  largest_trees.truncate(cfg.top);
-  threshold_hits.truncate(cfg.top);
   metrics.total_objects = object_counts.values().copied().sum();
   metrics.object_types = object_counts;
-  metrics.largest_blobs = largest_blobs;
-  metrics.largest_trees = largest_trees;
-  metrics.blobs_over_threshold = threshold_hits;
+  metrics.largest_blobs = heap_to_vec(largest_blobs);
+  metrics.largest_trees = heap_to_vec(largest_trees);
+  metrics.blobs_over_threshold = heap_to_vec(threshold_hits);
   Ok(())
 }
 
@@ -253,9 +248,6 @@ fn gather_worktree_snapshot(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repo
         example_path: Some(path.to_string()),
       });
       entry.paths += 1;
-      if entry.example_path.is_none() {
-        entry.example_path = Some(path.to_string());
-      }
     }
     if let Some(dir) = parent_directory(path) {
       *directories.entry(dir).or_insert(0) += 1;
@@ -274,7 +266,7 @@ fn gather_worktree_snapshot(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repo
     .map(|(_, stat)| stat)
     .collect();
   duplicates_vec.sort_by(|a, b| b.paths.cmp(&a.paths));
-  duplicates_vec.truncate(cfg.top.max(1));
+  duplicates_vec.truncate(cfg.top);
   metrics.duplicate_blobs = duplicates_vec;
   for blob in &mut metrics.largest_blobs {
     if let Some(path) = sample_paths.get(&blob.oid) {
@@ -292,7 +284,7 @@ fn gather_worktree_snapshot(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repo
   Ok(())
 }
 
-fn gather_history_stats(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
+fn gather_history_stats(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut RepositoryMetrics) -> io::Result<()> {
   let mut child = Command::new("git")
     .arg("-C").arg(repo)
     .arg("rev-list")
@@ -323,29 +315,28 @@ fn gather_history_stats(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Res
     .stdout(Stdio::piped())
     .stderr(Stdio::inherit())
     .spawn()?;
-  if let Some(mut stdout) = child.stdout.take() {
-    let mut data = Vec::new();
-    stdout.read_to_end(&mut data)?;
-    let mut idx = 0;
-    while idx < data.len() {
-      let end_oid = match memchr(b'\0', &data[idx..]) {
-        Some(pos) => idx + pos,
-        None => break,
-      };
-      let oid = String::from_utf8_lossy(&data[idx..end_oid]).to_string();
-      idx = end_oid + 1;
-      if idx >= data.len() {
+  if let Some(stdout) = child.stdout.take() {
+    let mut reader = BufReader::new(stdout);
+    let mut oid_buf = Vec::new();
+    let mut msg_buf = Vec::new();
+    loop {
+      if !read_until(&mut reader, 0, &mut oid_buf)? {
         break;
       }
-      let end_msg = match memchr(b'\0', &data[idx..]) {
-        Some(pos) => idx + pos,
-        None => break,
-      };
-      let length = end_msg - idx;
-      if length > 10_000 {
-        metrics.oversized_commit_messages.push(CommitMessageStat { oid: oid.clone(), length });
+      if oid_buf.is_empty() {
+        continue;
       }
-      idx = end_msg + 1;
+      let oid = String::from_utf8_lossy(&oid_buf[..oid_buf.len().saturating_sub(1)]).to_string();
+      if oid.is_empty() {
+        continue;
+      }
+      if !read_until(&mut reader, 0, &mut msg_buf)? {
+        break;
+      }
+      let length = msg_buf.len().saturating_sub(1);
+      if length > cfg.thresholds.warn_commit_msg_bytes {
+        metrics.oversized_commit_messages.push(CommitMessageStat { oid, length });
+      }
     }
   }
   let status = child.wait()?;
@@ -383,11 +374,14 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
       recommendation: Some("Delete stale branches/tags or move rarely-needed refs to a separate remote.".to_string()),
     });
   }
-  let total_objects: u64 = metrics.object_types.values().copied().sum();
-  if total_objects as usize >= thresholds.warn_object_count {
+  if metrics.total_objects as usize >= thresholds.warn_object_count {
     warnings.push(Warning {
       level: WarningLevel::Warning,
-      message: format!("Repository contains {} Git objects (warning threshold {}).", total_objects, thresholds.warn_object_count),
+      message: format!(
+        "Repository contains {} Git objects (warning threshold {}).",
+        metrics.total_objects,
+        thresholds.warn_object_count
+      ),
       recommendation: Some("Consider sharding the project or aggregating many tiny files to reduce object churn.".to_string()),
     });
   }
@@ -433,17 +427,26 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
       });
     }
   }
-  if metrics.max_commit_parents > 8 {
+  if metrics.max_commit_parents > thresholds.warn_max_parents {
     warnings.push(Warning {
       level: WarningLevel::Info,
-      message: format!("Commit with {} parents detected; octopus merges can complicate history.", metrics.max_commit_parents),
+      message: format!(
+        "Commit with {} parents detected (threshold {}). Octopus merges can complicate history.",
+        metrics.max_commit_parents,
+        thresholds.warn_max_parents
+      ),
       recommendation: Some("Consider rebasing large merge trains or splitting history to simplify traversal.".to_string()),
     });
   }
   for msg in &metrics.oversized_commit_messages {
     warnings.push(Warning {
       level: WarningLevel::Info,
-      message: format!("Commit {} has a {} byte message.", msg.oid, msg.length),
+      message: format!(
+        "Commit {} has a {} byte message (threshold {}).",
+        msg.oid,
+        msg.length,
+        thresholds.warn_commit_msg_bytes
+      ),
       recommendation: Some("Store large logs or dumps outside Git; keep commit messages concise.".to_string()),
     });
   }
@@ -574,6 +577,25 @@ fn to_io_error(err: serde_json::Error) -> io::Error {
   io::Error::new(io::ErrorKind::Other, err)
 }
 
-fn memchr(byte: u8, data: &[u8]) -> Option<usize> {
-  data.iter().position(|b| *b == byte)
+fn heap_to_vec(heap: BinaryHeap<Reverse<(u64, String)>>) -> Vec<ObjectStat> {
+  heap
+    .into_sorted_vec()
+    .into_iter()
+    .map(|Reverse((size, oid))| ObjectStat { oid, size, path: None })
+    .collect()
+}
+
+fn push_top(heap: &mut BinaryHeap<Reverse<(u64, String)>>, limit: usize, size: u64, oid: &str) {
+  if limit == 0 {
+    return;
+  }
+  let entry = Reverse((size, oid.to_string()));
+  if heap.len() < limit {
+    heap.push(entry);
+  } else if let Some(Reverse((min_size, _))) = heap.peek() {
+    if size > *min_size {
+      heap.pop();
+      heap.push(entry);
+    }
+  }
 }
