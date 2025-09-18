@@ -461,76 +461,79 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
 }
 
 fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
-  println!("Repository analysis");
+  println!("{}", banner("Repository analysis"));
   if let Some(path) = &report.metrics.workdir {
-    println!("  Path: {}", path);
+    println!("{}", path);
   }
-  println!("");
-  println!("== Footprint ==");
-  println!("  Loose objects: {} (~{:.2} MiB)", report.metrics.loose_objects, to_mib(report.metrics.loose_size_bytes));
-  println!("  Packed objects: {} (~{:.2} MiB)", report.metrics.packed_objects, to_mib(report.metrics.packed_size_bytes));
-  println!("  Total size: {:.2} GiB", to_gib(report.metrics.total_size_bytes));
-  println!("");
-  println!("== Object inventory ==");
+
+  print_section("Footprint");
+  println!("  {:<18} {:>12}  (≈{:>7.2} MiB)", "Loose objects", format_count(report.metrics.loose_objects), to_mib(report.metrics.loose_size_bytes));
+  println!("  {:<18} {:>12}  (≈{:>7.2} MiB)", "Packed objects", format_count(report.metrics.packed_objects), to_mib(report.metrics.packed_size_bytes));
+  println!("  {:<18} {:>12}", "Total size", format_size_gib(report.metrics.total_size_bytes));
+
+  print_section("Object inventory");
+  println!("  {:<10} {:>12}", "Type", "Count");
   for (typ, count) in &report.metrics.object_types {
-    println!("  {:>7}: {}", typ, count);
+    println!("  {:<10} {:>12}", typ, format_count(*count));
   }
   if !report.metrics.largest_blobs.is_empty() {
     println!("");
     println!("  Top {} blobs by size:", report.metrics.largest_blobs.len());
-    for blob in &report.metrics.largest_blobs {
-      println!("    {}  {:.2} MiB{}", blob.oid, to_mib(blob.size), blob.path.as_ref().map(|p| format!(" ({})", p)).unwrap_or_default());
+    println!("    {:>2}  {:<12}  {:>9}  {}", "#", "Blob", "Size", "Path");
+    for (idx, blob) in report.metrics.largest_blobs.iter().enumerate() {
+      let size = format!("{:.2} MiB", to_mib(blob.size));
+      let path = blob.path.as_deref().unwrap_or("");
+      println!("    {:>2}  {:<12}  {:>9}  {}", idx + 1, short_oid(&blob.oid), size, path);
     }
   }
   if !report.metrics.largest_trees.is_empty() {
     println!("");
     println!("  Top {} trees by size:", report.metrics.largest_trees.len());
-    for tree in &report.metrics.largest_trees {
-      println!("    {}  {:.2} KiB", tree.oid, tree.size as f64 / 1024.0);
+    println!("    {:>2}  {:<12}  {:>9}", "#", "Tree", "Size");
+    for (idx, tree) in report.metrics.largest_trees.iter().enumerate() {
+      let size = format!("{:.2} KiB", tree.size as f64 / 1024.0);
+      println!("    {:>2}  {:<12}  {:>9}", idx + 1, short_oid(&tree.oid), size);
     }
   }
-  println!("");
-  println!("== References ==");
-  println!("  Total refs: {} (heads: {}, tags: {}, remotes: {}, other: {})",
-    report.metrics.refs_total,
-    report.metrics.refs_heads,
-    report.metrics.refs_tags,
-    report.metrics.refs_remotes,
-    report.metrics.refs_other
-  );
-  println!("");
-  println!("== Working tree snapshot (HEAD) ==");
+
+  print_section("References");
+  println!("  {:<18} {:>12}", "Total", format_count(report.metrics.refs_total as u64));
+  println!("  {:<18} {:>12}", "Heads", format_count(report.metrics.refs_heads as u64));
+  println!("  {:<18} {:>12}", "Tags", format_count(report.metrics.refs_tags as u64));
+  println!("  {:<18} {:>12}", "Remotes", format_count(report.metrics.refs_remotes as u64));
+  println!("  {:<18} {:>12}", "Other", format_count(report.metrics.refs_other as u64));
+
+  print_section("Working tree snapshot (HEAD)");
   if let Some(dir) = &report.metrics.directory_hotspots {
-    println!("  Busiest directory: '{}' with {} entries", dir.path, dir.entries);
+    println!("  {:<18} {} ({} entries)", "Busiest directory", dir.path, format_count(dir.entries as u64));
   }
   if let Some(path) = &report.metrics.longest_path {
-    println!("  Longest path: '{}' ({} characters)", path.path, path.length);
+    println!("  {:<18} '{}' ({} characters)", "Longest path", path.path, format_count(path.length as u64));
   }
   if !report.metrics.duplicate_blobs.is_empty() {
-    println!("  Duplicate blobs (top {}):", report.metrics.duplicate_blobs.len().min(cfg.top));
-    for dup in &report.metrics.duplicate_blobs {
-      println!("    {} -> {} paths{}",
-        dup.oid,
-        dup.paths,
-        dup.example_path.as_ref().map(|p| format!(" (e.g. {})", p)).unwrap_or_default()
-      );
+    println!("  {:<18} (top {})", "Duplicate blobs", report.metrics.duplicate_blobs.len().min(cfg.top));
+    println!("    {:>2}  {:<12}  {:>7}  {}", "#", "Blob", "Paths", "Example");
+    for (idx, dup) in report.metrics.duplicate_blobs.iter().enumerate() {
+      let example = dup.example_path.as_deref().unwrap_or("");
+      println!("    {:>2}  {:<12}  {:>7}  {}", idx + 1, short_oid(&dup.oid), format_count(dup.paths as u64), example);
     }
   }
-  println!("");
-  println!("== History oddities ==");
-  println!("  Max commit parents: {}", report.metrics.max_commit_parents);
+
+  print_section("History oddities");
+  println!("  {:<18} {:>12}", "Max parents", format_count(report.metrics.max_commit_parents as u64));
   if !report.metrics.oversized_commit_messages.is_empty() {
     println!("  Oversized commit messages:");
-    for msg in &report.metrics.oversized_commit_messages {
-      println!("    {} -> {} bytes", msg.oid, msg.length);
+    println!("    {:>2}  {:<12}  {:>9}", "#", "Commit", "Bytes");
+    for (idx, msg) in report.metrics.oversized_commit_messages.iter().enumerate() {
+      println!("    {:>2}  {:<12}  {:>9}", idx + 1, short_oid(&msg.oid), format_count(msg.length as u64));
     }
   }
-  println!("");
-  println!("== Warnings ==");
+
+  print_section("Warnings");
   for warning in &report.warnings {
-    println!("  [{:?}] {}", warning.level, warning.message);
+    println!("  • [{:?}] {}", warning.level, warning.message);
     if let Some(rec) = &warning.recommendation {
-      println!("      -> {}", rec);
+      println!("      ↳ {}", rec);
     }
   }
 }
@@ -598,4 +601,34 @@ fn push_top(heap: &mut BinaryHeap<Reverse<(u64, String)>>, limit: usize, size: u
       heap.push(entry);
     }
   }
+}
+
+fn banner(title: &str) -> String {
+  format!("{:=^64}", format!(" {} ", title))
+}
+
+fn print_section(title: &str) {
+  println!("");
+  println!("{:-^64}", format!(" {} ", title));
+}
+
+fn format_count<T: Into<u64>>(value: T) -> String {
+  let digits: Vec<char> = value.into().to_string().chars().rev().collect();
+  let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+  for (i, ch) in digits.into_iter().enumerate() {
+    if i > 0 && i % 3 == 0 {
+      out.push(',');
+    }
+    out.push(ch);
+  }
+  out.chars().rev().collect()
+}
+
+fn format_size_gib(bytes: u64) -> String {
+  format!("{:.2} GiB", to_gib(bytes))
+}
+
+fn short_oid(oid: &str) -> &str {
+  let end = oid.len().min(12);
+  &oid[..end]
 }
