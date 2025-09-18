@@ -1,3 +1,7 @@
+use comfy_table::{
+  modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment,
+  ContentArrangement, Table,
+};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
@@ -467,75 +471,191 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
   }
 
   print_section("Footprint");
-  println!("  {:<18} {:>12}  (≈{:>7.2} MiB)", "Loose objects", format_count(report.metrics.loose_objects), to_mib(report.metrics.loose_size_bytes));
-  println!("  {:<18} {:>12}  (≈{:>7.2} MiB)", "Packed objects", format_count(report.metrics.packed_objects), to_mib(report.metrics.packed_size_bytes));
-  println!("  {:<18} {:>12}", "Total size", format_size_gib(report.metrics.total_size_bytes));
+  print_table(
+    &[("Metric", CellAlignment::Left), ("Count", CellAlignment::Right), ("Approx. size", CellAlignment::Right)],
+    vec![
+      vec![
+        "Loose objects".to_string(),
+        format_count(report.metrics.loose_objects),
+        format!("{:.2} MiB", to_mib(report.metrics.loose_size_bytes)),
+      ],
+      vec![
+        "Packed objects".to_string(),
+        format_count(report.metrics.packed_objects),
+        format!("{:.2} MiB", to_mib(report.metrics.packed_size_bytes)),
+      ],
+    ],
+  );
+  println!("  Total size: {}", format_size_gib(report.metrics.total_size_bytes));
 
   print_section("Object inventory");
-  println!("  {:<10} {:>12}", "Type", "Count");
+  let mut inventory_rows = Vec::new();
   for (typ, count) in &report.metrics.object_types {
-    println!("  {:<10} {:>12}", typ, format_count(*count));
+    inventory_rows.push(vec![typ.clone(), format_count(*count)]);
   }
+  print_table(
+    &[("Type", CellAlignment::Left), ("Count", CellAlignment::Right)],
+    inventory_rows,
+  );
+
   if !report.metrics.largest_blobs.is_empty() {
-    println!("");
-    println!("  Top {} blobs by size:", report.metrics.largest_blobs.len());
-    println!("    {:>2}  {:<12}  {:>9}  {}", "#", "Blob", "Size", "Path");
-    for (idx, blob) in report.metrics.largest_blobs.iter().enumerate() {
-      let size = format!("{:.2} MiB", to_mib(blob.size));
-      let path = blob.path.as_deref().unwrap_or("");
-      println!("    {:>2}  {:<12}  {:>9}  {}", idx + 1, short_oid(&blob.oid), size, path);
-    }
+    println!(
+      "  Top {} blobs by size:",
+      format_count(report.metrics.largest_blobs.len() as u64)
+    );
+    let rows = report
+      .metrics
+      .largest_blobs
+      .iter()
+      .enumerate()
+      .map(|(idx, blob)| {
+        vec![
+          format!("{}", idx + 1),
+          short_oid(&blob.oid).to_string(),
+          format!("{:.2} MiB", to_mib(blob.size)),
+          blob.path.clone().unwrap_or_default(),
+        ]
+      })
+      .collect();
+    print_table(
+      &[
+        ("#", CellAlignment::Right),
+        ("Blob", CellAlignment::Left),
+        ("Size", CellAlignment::Right),
+        ("Example", CellAlignment::Left),
+      ],
+      rows,
+    );
   }
   if !report.metrics.largest_trees.is_empty() {
-    println!("");
-    println!("  Top {} trees by size:", report.metrics.largest_trees.len());
-    println!("    {:>2}  {:<12}  {:>9}", "#", "Tree", "Size");
-    for (idx, tree) in report.metrics.largest_trees.iter().enumerate() {
-      let size = format!("{:.2} KiB", tree.size as f64 / 1024.0);
-      println!("    {:>2}  {:<12}  {:>9}", idx + 1, short_oid(&tree.oid), size);
-    }
+    println!(
+      "  Top {} trees by size:",
+      format_count(report.metrics.largest_trees.len() as u64)
+    );
+    let rows = report
+      .metrics
+      .largest_trees
+      .iter()
+      .enumerate()
+      .map(|(idx, tree)| {
+        vec![
+          format!("{}", idx + 1),
+          short_oid(&tree.oid).to_string(),
+          format!("{:.2} KiB", tree.size as f64 / 1024.0),
+        ]
+      })
+      .collect();
+    print_table(
+      &[("#", CellAlignment::Right), ("Tree", CellAlignment::Left), ("Size", CellAlignment::Right)],
+      rows,
+    );
   }
 
   print_section("References");
-  println!("  {:<18} {:>12}", "Total", format_count(report.metrics.refs_total as u64));
-  println!("  {:<18} {:>12}", "Heads", format_count(report.metrics.refs_heads as u64));
-  println!("  {:<18} {:>12}", "Tags", format_count(report.metrics.refs_tags as u64));
-  println!("  {:<18} {:>12}", "Remotes", format_count(report.metrics.refs_remotes as u64));
-  println!("  {:<18} {:>12}", "Other", format_count(report.metrics.refs_other as u64));
+  print_table(
+    &[("Category", CellAlignment::Left), ("Count", CellAlignment::Right)],
+    vec![
+      vec!["Total".to_string(), format_count(report.metrics.refs_total as u64)],
+      vec!["Heads".to_string(), format_count(report.metrics.refs_heads as u64)],
+      vec!["Tags".to_string(), format_count(report.metrics.refs_tags as u64)],
+      vec!["Remotes".to_string(), format_count(report.metrics.refs_remotes as u64)],
+      vec!["Other".to_string(), format_count(report.metrics.refs_other as u64)],
+    ],
+  );
 
   print_section("Working tree snapshot (HEAD)");
+  let mut snapshot_rows = Vec::new();
   if let Some(dir) = &report.metrics.directory_hotspots {
-    println!("  {:<18} {} ({} entries)", "Busiest directory", dir.path, format_count(dir.entries as u64));
+    snapshot_rows.push(vec![
+      "Busiest directory".to_string(),
+      dir.path.clone(),
+      format!("{} entries", format_count(dir.entries as u64)),
+    ]);
   }
   if let Some(path) = &report.metrics.longest_path {
-    println!("  {:<18} '{}' ({} characters)", "Longest path", path.path, format_count(path.length as u64));
+    snapshot_rows.push(vec![
+      "Longest path".to_string(),
+      path.path.clone(),
+      format!("{} characters", format_count(path.length as u64)),
+    ]);
   }
+  print_table(
+    &[("Metric", CellAlignment::Left), ("Value", CellAlignment::Left), ("Details", CellAlignment::Left)],
+    snapshot_rows,
+  );
   if !report.metrics.duplicate_blobs.is_empty() {
-    println!("  {:<18} (top {})", "Duplicate blobs", report.metrics.duplicate_blobs.len().min(cfg.top));
-    println!("    {:>2}  {:<12}  {:>7}  {}", "#", "Blob", "Paths", "Example");
-    for (idx, dup) in report.metrics.duplicate_blobs.iter().enumerate() {
-      let example = dup.example_path.as_deref().unwrap_or("");
-      println!("    {:>2}  {:<12}  {:>7}  {}", idx + 1, short_oid(&dup.oid), format_count(dup.paths as u64), example);
-    }
+    let shown = report.metrics.duplicate_blobs.len().min(cfg.top);
+    println!(
+      "  Duplicate blobs (top {}):",
+      format_count(shown as u64)
+    );
+    let rows = report
+      .metrics
+      .duplicate_blobs
+      .iter()
+      .enumerate()
+      .map(|(idx, dup)| {
+        vec![
+          format!("{}", idx + 1),
+          short_oid(&dup.oid).to_string(),
+          format_count(dup.paths as u64),
+          dup.example_path.clone().unwrap_or_default(),
+        ]
+      })
+      .collect();
+    print_table(
+      &[
+        ("#", CellAlignment::Right),
+        ("Blob", CellAlignment::Left),
+        ("Paths", CellAlignment::Right),
+        ("Example", CellAlignment::Left),
+      ],
+      rows,
+    );
   }
 
   print_section("History oddities");
-  println!("  {:<18} {:>12}", "Max parents", format_count(report.metrics.max_commit_parents as u64));
+  print_table(
+    &[("Metric", CellAlignment::Left), ("Value", CellAlignment::Right)],
+    vec![vec!["Max parents".to_string(), format_count(report.metrics.max_commit_parents as u64)]],
+  );
   if !report.metrics.oversized_commit_messages.is_empty() {
     println!("  Oversized commit messages:");
-    println!("    {:>2}  {:<12}  {:>9}", "#", "Commit", "Bytes");
-    for (idx, msg) in report.metrics.oversized_commit_messages.iter().enumerate() {
-      println!("    {:>2}  {:<12}  {:>9}", idx + 1, short_oid(&msg.oid), format_count(msg.length as u64));
-    }
+    let rows = report
+      .metrics
+      .oversized_commit_messages
+      .iter()
+      .enumerate()
+      .map(|(idx, msg)| {
+        vec![
+          format!("{}", idx + 1),
+          short_oid(&msg.oid).to_string(),
+          format_count(msg.length as u64),
+        ]
+      })
+      .collect();
+    print_table(
+      &[("#", CellAlignment::Right), ("Commit", CellAlignment::Left), ("Bytes", CellAlignment::Right)],
+      rows,
+    );
   }
 
   print_section("Warnings");
-  for warning in &report.warnings {
-    println!("  • [{:?}] {}", warning.level, warning.message);
-    if let Some(rec) = &warning.recommendation {
-      println!("      ↳ {}", rec);
-    }
-  }
+  let warning_rows = report
+    .warnings
+    .iter()
+    .map(|warning| {
+      vec![
+        format!("{:?}", warning.level),
+        warning.message.clone(),
+        warning.recommendation.clone().unwrap_or_default(),
+      ]
+    })
+    .collect();
+  print_table(
+    &[("Level", CellAlignment::Center), ("Message", CellAlignment::Left), ("Recommendation", CellAlignment::Left)],
+    warning_rows,
+  );
 }
 
 fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
@@ -610,6 +730,39 @@ fn banner(title: &str) -> String {
 fn print_section(title: &str) {
   println!("");
   println!("{:-^64}", format!(" {} ", title));
+}
+
+fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<String>>) {
+  if rows.is_empty() {
+    return;
+  }
+  let mut table = Table::new();
+  table.load_preset(UTF8_FULL);
+  table.apply_modifier(UTF8_ROUND_CORNERS);
+  table.set_content_arrangement(ContentArrangement::Dynamic);
+
+  let header_cells = headers
+    .iter()
+    .map(|(title, align)| {
+      Cell::new(*title)
+        .add_attribute(Attribute::Bold)
+        .set_alignment(*align)
+    })
+    .collect::<Vec<_>>();
+  table.set_header(header_cells);
+
+  for row in rows {
+    let cells = headers
+      .iter()
+      .zip(row.into_iter())
+      .map(|((_, align), value)| Cell::new(value).set_alignment(*align))
+      .collect::<Vec<_>>();
+    table.add_row(cells);
+  }
+
+  for line in table.to_string().lines() {
+    println!("  {}", line);
+  }
 }
 
 fn format_count<T: Into<u64>>(value: T) -> String {
