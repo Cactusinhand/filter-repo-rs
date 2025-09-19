@@ -188,6 +188,14 @@ fn analyze_mode_warns_on_commit_thresholds() {
     assert_eq!(run_git(&repo, &["commit", "-m", &"M".repeat(64)]).0, 0);
     let (_, long_oid, _) = run_git(&repo, &["rev-parse", "HEAD"]);
     let long_oid = long_oid.trim().to_string();
+    // determine the name of the default branch (e.g. master or main)
+    // prefer symbolic-ref, but fall back to rev-parse if needed
+    let (_, base_branch, _) = run_git(&repo, &["symbolic-ref", "--short", "HEAD"]);
+    let mut base_branch = base_branch.trim().to_string();
+    if base_branch.is_empty() || base_branch == "HEAD" {
+        let (_, alt, _) = run_git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+        base_branch = alt.trim().to_string();
+    }
 
     // create a feature branch and diverging history to produce a merge commit
     assert_eq!(run_git(&repo, &["checkout", "-b", "feature"]).0, 0);
@@ -195,7 +203,8 @@ fn analyze_mode_warns_on_commit_thresholds() {
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
     assert_eq!(run_git(&repo, &["commit", "-m", "feature commit"]).0, 0);
 
-    assert_eq!(run_git(&repo, &["checkout", "master"]).0, 0);
+    // return to the original default branch, regardless of its name
+    assert_eq!(run_git(&repo, &["checkout", &base_branch]).0, 0);
     write_file(&repo, "master.txt", "master work");
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
     assert_eq!(run_git(&repo, &["commit", "-m", "master commit"]).0, 0);

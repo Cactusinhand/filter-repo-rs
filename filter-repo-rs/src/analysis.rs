@@ -101,7 +101,9 @@ pub fn run(opts: &Options) -> io::Result<()> {
 }
 
 pub fn generate_report(opts: &Options) -> io::Result<AnalysisReport> {
-  let repo = opts.source.canonicalize().unwrap_or_else(|_| opts.source.clone());
+  // Avoid Windows verbatim (\\?\) paths which can confuse external tools like Git when
+  // passed via command-line flags. Use the provided path directly.
+  let repo = opts.source.clone();
   let metrics = collect_metrics(&repo, &opts.analyze)?;
   let warnings = evaluate_warnings(&metrics, &opts.analyze.thresholds);
   Ok(AnalysisReport { metrics, warnings })
@@ -143,7 +145,7 @@ fn gather_object_inventory(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repos
   let mut threshold_hits: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
   let mut object_counts: BTreeMap<String, u64> = BTreeMap::new();
   let mut child = Command::new("git")
-    .arg("-C").arg(repo)
+    .current_dir(repo)
     .arg("cat-file")
     .arg("--batch-check")
     .arg("--batch-all-objects")
@@ -209,7 +211,7 @@ fn gather_worktree_snapshot(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repo
     return Ok(());
   }
   let mut child = Command::new("git")
-    .arg("-C").arg(repo)
+    .current_dir(repo)
     .arg("ls-tree")
     .arg("-r")
     .arg("--full-tree")
@@ -290,7 +292,7 @@ fn gather_worktree_snapshot(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Repo
 
 fn gather_history_stats(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut RepositoryMetrics) -> io::Result<()> {
   let mut child = Command::new("git")
-    .arg("-C").arg(repo)
+    .current_dir(repo)
     .arg("rev-list")
     .arg("--all")
     .arg("--parents")
@@ -312,7 +314,7 @@ fn gather_history_stats(repo: &Path, cfg: &AnalyzeConfig, metrics: &mut Reposito
     return Err(io::Error::new(io::ErrorKind::Other, "git rev-list --parents failed"));
   }
   let mut child = Command::new("git")
-    .arg("-C").arg(repo)
+    .current_dir(repo)
     .arg("log")
     .arg("--all")
     .arg("--pretty=%H%x00%B%x00")
@@ -660,7 +662,7 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
 
 fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
   let out = Command::new("git")
-    .arg("-C").arg(repo)
+    .current_dir(repo)
     .args(args)
     .stdout(Stdio::piped())
     .stderr(Stdio::inherit())
