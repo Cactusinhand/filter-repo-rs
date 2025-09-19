@@ -16,6 +16,9 @@ comfy-table = "7.1.1"
 name = "filter_repo_rs"
 path = "src/lib.rs"
 
+[[bin]]
+name = "filter-repo-rs"
+path = "src/main.rs"
+
 [dev-dependencies]
 tempfile = "3.8"
-
