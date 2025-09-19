@@ -22,6 +22,21 @@ filter-repo-rs \
   --date-order \
   --replace-message replacements.txt
 
+Testing
+-------
+
+Integration tests exercise the end-to-end pipeline, spawning temporary Git
+repositories under `target/it/`. They cover path filtering and prefix renames,
+commit/ref map generation, Windows path sanitization policy, and final ref
+topology checks. Run them with:
+
+```
+cargo test -p filter-repo-rs
+```
+
+The suite requires Git in `PATH` and writes debug artifacts (commit-map,
+ref-map, reports) inside each ephemeral repository for verification.
+
 Key Flags (prototype)
 ---------------------
 
