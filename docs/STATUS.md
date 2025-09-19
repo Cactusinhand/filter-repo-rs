@@ -36,6 +36,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - Path Filtering & Renaming
   - `--path PREFIX`: include-only filtering of filechange entries (M/D/deleteall).
   - `--path-glob GLOB`: include via glob patterns (`*`, `?`, `**`).
+  - `--path-regex REGEX`: include via Rust regex (bytes mode, repeatable).
   - `--invert-paths`: invert path selection (drop matches; keep others).
   - `--path-rename OLD:NEW` with helpers:
     - `--subdirectory-filter DIR` (equivalent to `--path DIR/ --path-rename DIR/:`).
@@ -67,8 +68,8 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - We rebuild quoted paths with minimal C-style unescape/escape only when the original was quoted; pure pass-through M/D lines rely on fast-export quoting.
 
 - Filtering semantics
-  - Include-by-prefix (`--path`), glob (`--path-glob`), and invert (`--invert-paths`) supported. No regex yet.
-  - Regex path matching not implemented; use prefix/glob. Regex blob replacements are supported by default through the `regex:` syntax in replacement files.
+  - Include-by-prefix (`--path`), glob (`--path-glob`), regex (`--path-regex`), and invert (`--invert-paths`) supported.
+  - Regex path matching uses the Rust `regex` crate (bytes). Look-around and backreferences are unsupported, and complex patterns may have higher CPU cost; anchor expressions when possible. Regex blob replacements are supported by default through the `regex:` syntax in replacement files.
 
 
 - Merge/degen handling

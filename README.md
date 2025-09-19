@@ -50,10 +50,14 @@ Key Flags (prototype)
 
 - `--path PREFIX`: include-only by prefix (repeatable; ORed)
 - `--path-glob GLOB`: include by glob (supports `*`, `?`, `**`; repeatable; ORed)
+- `--path-regex REGEX`: include by regex (Rust `regex` crate in bytes mode; repeatable; ORed)
 - `--invert-paths`: invert selection (drop matches; keep others)
 - `--path-rename OLD:NEW`: rename path prefix in file changes
 - `--subdirectory-filter DIR`: equivalent to `--path DIR/ --path-rename DIR/:`
 - `--to-subdirectory-filter DIR`: equivalent to `--path-rename :DIR/`
+
+Regex path filters do not support look-around or backreferences (crate limitation). Prefer anchored patterns when scanning
+large histories to minimize backtracking costs.
 
 ### Blob filtering & redaction
 
