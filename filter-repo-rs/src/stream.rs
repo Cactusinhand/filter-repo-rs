@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -408,6 +408,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
     let mut commit_original_oid: Option<Vec<u8>> = None;
     let mut parent_count: usize = 0;
     let mut commit_pairs: Vec<(Vec<u8>, Option<u32>)> = Vec::new();
+    let mut parent_lines: Vec<crate::commit::ParentLine> = Vec::new();
+    let mut alias_map: HashMap<u32, u32> = HashMap::new();
     let mut import_broken = false;
     // If we skip a duplicate annotated tag header, swallow the rest of its block
     let mut skipping_tag_block: bool = false;
@@ -595,6 +597,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
             commit_has_changes = false;
             commit_mark = None;
             first_parent_mark = None;
+            parent_lines.clear();
             let hdr = crate::commit::rename_commit_header_ref(&line, opts, &mut ref_renames);
             commit_buf.extend_from_slice(&hdr);
             // Track final branch ref (post-rename) for HEAD updates
@@ -639,6 +642,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     &mut parent_count,
                     &mut commit_pairs,
                     &mut import_broken,
+                    &mut parent_lines,
+                    &mut alias_map,
                     &emitted_marks,
                 )? {
                     crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
@@ -879,12 +884,17 @@ pub fn run(opts: &Options) -> io::Result<()> {
                 &mut parent_count,
                 &mut commit_pairs,
                 &mut import_broken,
+                &mut parent_lines,
+                &mut alias_map,
                 &emitted_marks,
             )? {
                 crate::commit::CommitAction::Consumed => {
                     continue;
                 }
                 crate::commit::CommitAction::Ended => {
+                    if let Some(m) = commit_mark {
+                        emitted_marks.insert(m);
+                    }
                     in_commit = false;
                 }
             }
