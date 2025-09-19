@@ -142,6 +142,20 @@ impl ShortHashMapper {
     resolved
   }
 
+  pub fn update_mapping(&mut self, old_full: &[u8], new_full: &[u8]) {
+    if old_full.is_empty() || new_full.is_empty() { return; }
+    let old_norm = old_full.to_ascii_lowercase();
+    let new_norm = new_full.to_ascii_lowercase();
+    let prefix_len = MIN_SHORT_HASH_LEN.min(old_norm.len());
+    let prefix = old_norm[..prefix_len].to_vec();
+    let entry = self.prefix_index.entry(prefix).or_default();
+    if !entry.iter().any(|existing| existing == &old_norm) {
+      entry.push(old_norm.clone());
+    }
+    self.lookup.insert(old_norm, Some(new_norm));
+    self.cache.clear();
+  }
+
   fn lookup_prefix(&self, short: &[u8], orig_len: usize) -> Option<Vec<u8>> {
     if short.len() < MIN_SHORT_HASH_LEN {
       return None;
