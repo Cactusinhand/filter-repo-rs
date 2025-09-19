@@ -987,11 +987,7 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
 
     // ref-map should record branch and tag renames.
     let ref_map = repo.join(".git").join("filter-repo").join("ref-map");
-    let mut rm = String::new();
-    File::open(&ref_map)
-        .unwrap()
-        .read_to_string(&mut rm)
-        .unwrap();
+    let rm = std::fs::read_to_string(&ref_map).unwrap();
     assert!(
         rm.contains("refs/heads/feature/topic refs/heads/topics/topic"),
         "ref-map missing branch rename: {}",
