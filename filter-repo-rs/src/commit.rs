@@ -5,7 +5,7 @@ use std::io::BufReader;
 use std::process::{ChildStdout, ChildStdin};
 
 use crate::opts::Options;
-use crate::message::MessageReplacer;
+use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::filechange;
 
 pub fn rename_commit_header_ref(
@@ -101,6 +101,7 @@ pub fn process_commit_line(
   filt_file: &mut File,
   mut fi_in: Option<&mut ChildStdin>,
   replacer: &Option<MessageReplacer>,
+  short_mapper: Option<&ShortHashMapper>,
   commit_buf: &mut Vec<u8>,
   commit_has_changes: &mut bool,
   commit_mark: &mut Option<u32>,
@@ -129,7 +130,7 @@ pub fn process_commit_line(
   }
   // commit message data
   if line.starts_with(b"data ") {
-    handle_commit_data(line, fe_out, orig_file, commit_buf, replacer)?;
+    handle_commit_data(line, fe_out, orig_file, commit_buf, replacer, short_mapper)?;
     return Ok(CommitAction::Consumed);
   }
   // parents
@@ -242,6 +243,7 @@ pub fn handle_commit_data(
   orig_file: &mut File,
   commit_buf: &mut Vec<u8>,
   replacer: &Option<MessageReplacer>,
+  short_mapper: Option<&ShortHashMapper>,
 ) -> io::Result<()> {
   if !header_line.starts_with(b"data ") { return Ok(()); }
   let size_bytes = &header_line[b"data ".len()..];
@@ -251,7 +253,10 @@ pub fn handle_commit_data(
   let mut payload = vec![0u8; n];
   fe_out.read_exact(&mut payload)?;
   orig_file.write_all(&payload)?;
-  let new_payload = if let Some(r) = replacer { r.apply(payload) } else { payload };
+  let mut new_payload = if let Some(r) = replacer { r.apply(payload) } else { payload };
+  if let Some(mapper) = short_mapper {
+    new_payload = mapper.rewrite(new_payload);
+  }
   let header = format!("data {}\n", new_payload.len());
   commit_buf.extend_from_slice(header.as_bytes());
   commit_buf.extend_from_slice(&new_payload);

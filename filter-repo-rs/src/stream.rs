@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::gitutil::git_dir;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
-use crate::message::MessageReplacer;
+use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
 const REPORT_SAMPLE_LIMIT: usize = 20;
@@ -369,6 +369,11 @@ pub fn run(opts: &Options) -> io::Result<()> {
     } else {
         None
     };
+    let mut fi_out_opt: Option<BufReader<std::process::ChildStdout>> = if let Some(ref mut child) = fi {
+        child.stdout.take().map(BufReader::new)
+    } else {
+        None
+    };
 
     let replacer = match &opts.replace_message_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
@@ -379,6 +384,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
         })?),
         None => None,
     };
+    let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
     let content_replacer = match &opts.replace_text_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
             io::Error::new(
@@ -570,6 +576,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
 
         // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
         if line.starts_with(b"tag ") {
+            let short_mapper = short_hash_mapper.as_ref();
             crate::tag::process_tag_block(
                 &line,
                 &mut fe_out,
@@ -581,6 +588,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     None
                 },
                 &replacer,
+                short_mapper,
                 opts,
                 &mut updated_refs,
                 &mut annotated_tag_refs,
@@ -622,6 +630,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                 || line.starts_with(b"blob")
                 || line == b"done\n"
             {
+                let short_mapper = short_hash_mapper.as_ref();
                 match crate::commit::process_commit_line(
                     b"\n",
                     opts,
@@ -634,6 +643,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                         None
                     },
                     &replacer,
+                    short_mapper,
                     &mut commit_buf,
                     &mut commit_has_changes,
                     &mut commit_mark,
@@ -651,6 +661,19 @@ pub fn run(opts: &Options) -> io::Result<()> {
                         // Record emitted commit mark
                         if let Some(m) = commit_mark {
                             emitted_marks.insert(m);
+                            if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
+                                short_hash_mapper.as_mut(),
+                                fi_in_opt.as_mut(),
+                                fi_out_opt.as_mut(),
+                            ) {
+                                if let Some((old, Some(mark))) = commit_pairs.last() {
+                                    if *mark == m {
+                                        if let Some(new_id) = resolve_mark_oid(fi_in, fi_out, *mark)? {
+                                            mapper.update_mapping(old, &new_id);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         in_commit = false;
                     }
@@ -864,6 +887,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     continue;
                 }
             }
+            let short_mapper = short_hash_mapper.as_ref();
             match crate::commit::process_commit_line(
                 &line,
                 opts,
@@ -876,6 +900,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     None
                 },
                 &replacer,
+                short_mapper,
                 &mut commit_buf,
                 &mut commit_has_changes,
                 &mut commit_mark,
@@ -894,6 +919,19 @@ pub fn run(opts: &Options) -> io::Result<()> {
                 crate::commit::CommitAction::Ended => {
                     if let Some(m) = commit_mark {
                         emitted_marks.insert(m);
+                        if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
+                            short_hash_mapper.as_mut(),
+                            fi_in_opt.as_mut(),
+                            fi_out_opt.as_mut(),
+                        ) {
+                            if let Some((old, Some(mark))) = commit_pairs.last() {
+                                if *mark == m {
+                                    if let Some(new_id) = resolve_mark_oid(fi_in, fi_out, *mark)? {
+                                        mapper.update_mapping(old, &new_id);
+                                    }
+                                }
+                            }
+                        }
                     }
                     in_commit = false;
                 }
@@ -1151,6 +1189,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
         }
     }
 
+    drop(fi_out_opt);
+
     // Finalize run: flush buffered tags (if any remain), wait, write maps, optional reset
     let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
     crate::finalize::finalize(
@@ -1191,6 +1231,66 @@ pub fn run(opts: &Options) -> io::Result<()> {
         },
         &blob_size_tracker,
     )
+}
+
+fn resolve_mark_oid(
+    fi_in: &mut std::process::ChildStdin,
+    fi_out: &mut BufReader<std::process::ChildStdout>,
+    mark: u32,
+) -> io::Result<Option<Vec<u8>>> {
+    let cmd = format!("get-mark :{}\n", mark);
+    fi_in.write_all(cmd.as_bytes())?;
+    fi_in.flush()?;
+    let mut line = Vec::with_capacity(64);
+    loop {
+        line.clear();
+        let read = fi_out.read_until(b'\n', &mut line)?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let mut end = line.len();
+        while end > 0 && (line[end - 1] == b'\n' || line[end - 1] == b'\r') {
+            end -= 1;
+        }
+        if end == 0 {
+            continue;
+        }
+        let trimmed = &line[..end];
+        let slice = if let Some(rest) = trimmed.strip_prefix(b"mark ") {
+            let mut idx = 0usize;
+            let mut value: u32 = 0;
+            let mut seen_digit = false;
+            while idx < rest.len() {
+                let b = rest[idx];
+                if (b'0'..=b'9').contains(&b) {
+                    seen_digit = true;
+                    value = value.saturating_mul(10).saturating_add((b - b'0') as u32);
+                    idx += 1;
+                } else {
+                    break;
+                }
+            }
+            if !seen_digit || value != mark {
+                continue;
+            }
+            while idx < rest.len() && rest[idx] == b' ' {
+                idx += 1;
+            }
+            &rest[idx..]
+        } else {
+            trimmed
+        };
+        if !slice.iter().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let mut oid = slice.to_vec();
+        for byte in &mut oid {
+            if (b'A'..=b'F').contains(byte) {
+                *byte += 32;
+            }
+        }
+        return Ok(Some(oid));
+    }
 }
 
 #[cfg(test)]

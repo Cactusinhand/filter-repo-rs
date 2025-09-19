@@ -1,4 +1,7 @@
-use std::io;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::io::{self, BufRead};
+use std::path::Path;
 
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer { pub pairs: Vec<(Vec<u8>, Vec<u8>)> }
@@ -26,6 +29,142 @@ impl MessageReplacer {
         for (from, to) in &self.pairs { data = replace_all_bytes(&data, from, to); }
         data
     }
+}
+
+const MIN_SHORT_HASH_LEN: usize = 7;
+
+const NULL_OID: &[u8] = b"0000000000000000000000000000000000000000";
+
+pub struct ShortHashMapper {
+  lookup: HashMap<Vec<u8>, Option<Vec<u8>>>,
+  prefix_index: HashMap<Vec<u8>, Vec<Vec<u8>>>,
+  cache: RefCell<HashMap<Vec<u8>, Option<Vec<u8>>>>,
+  regex: regex::bytes::Regex,
+}
+
+impl ShortHashMapper {
+  pub fn from_debug_dir(dir: &Path) -> io::Result<Option<Self>> {
+    let map_path = dir.join("commit-map");
+    let file = match std::fs::File::open(&map_path) {
+      Ok(f) => f,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+      Err(e) => return Err(e),
+    };
+    let mut lookup: HashMap<Vec<u8>, Option<Vec<u8>>> = HashMap::new();
+    let mut prefix_index: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut rdr = std::io::BufReader::new(file);
+    let mut line = Vec::with_capacity(128);
+    let mut has_any = false;
+    while rdr.read_until(b'\n', &mut line)? > 0 {
+      while line.last().copied() == Some(b'\n') || line.last().copied() == Some(b'\r') {
+        line.pop();
+      }
+      if line.is_empty() {
+        line.clear();
+        continue;
+      }
+      let mut parts = line.splitn(2, |&b| b == b' ');
+      let old = match parts.next() {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+          line.clear();
+          continue;
+        }
+      };
+      let new = match parts.next() {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+          line.clear();
+          continue;
+        }
+      };
+      let old_norm = old.to_ascii_lowercase();
+      let new_entry = if new == NULL_OID { None } else { Some(new.to_ascii_lowercase()) };
+      prefix_index
+        .entry(old_norm[..MIN_SHORT_HASH_LEN.min(old_norm.len())].to_vec())
+        .or_default()
+        .push(old_norm.clone());
+      lookup.insert(old_norm, new_entry);
+      has_any = true;
+      line.clear();
+    }
+    if !has_any {
+      return Ok(None);
+    }
+    let regex = regex::bytes::Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, format!("invalid short-hash regex: {e}"))
+    })?;
+    Ok(Some(Self { lookup, prefix_index, cache: RefCell::new(HashMap::new()), regex }))
+  }
+
+  pub fn rewrite(&self, data: Vec<u8>) -> Vec<u8> {
+    self
+      .regex
+      .replace_all(&data, |caps: &regex::bytes::Captures| {
+        let m = caps.get(0).expect("short hash match");
+        self
+          .translate(m.as_bytes())
+          .unwrap_or_else(|| m.as_bytes().to_vec())
+      })
+      .into_owned()
+  }
+
+  fn translate(&self, candidate: &[u8]) -> Option<Vec<u8>> {
+    if candidate.len() < MIN_SHORT_HASH_LEN {
+      return None;
+    }
+    let key = candidate.to_ascii_lowercase();
+    let mut cache = self.cache.borrow_mut();
+    if let Some(entry) = cache.get(&key) {
+      return entry.clone();
+    }
+    let resolved = if candidate.len() == 40 {
+      self.lookup.get(&key).cloned().flatten()
+    } else {
+      self.lookup_prefix(&key, candidate.len())
+    };
+    cache.insert(key, resolved.clone());
+    resolved
+  }
+
+  pub fn update_mapping(&mut self, old_full: &[u8], new_full: &[u8]) {
+    if old_full.is_empty() || new_full.is_empty() { return; }
+    let old_norm = old_full.to_ascii_lowercase();
+    let new_norm = new_full.to_ascii_lowercase();
+    let prefix_len = MIN_SHORT_HASH_LEN.min(old_norm.len());
+    let prefix = old_norm[..prefix_len].to_vec();
+    let entry = self.prefix_index.entry(prefix).or_default();
+    if !entry.iter().any(|existing| existing == &old_norm) {
+      entry.push(old_norm.clone());
+    }
+    self.lookup.insert(old_norm, Some(new_norm));
+    self.cache.borrow_mut().clear();
+  }
+
+  fn lookup_prefix(&self, short: &[u8], orig_len: usize) -> Option<Vec<u8>> {
+    if short.len() < MIN_SHORT_HASH_LEN {
+      return None;
+    }
+    let key = short[..MIN_SHORT_HASH_LEN].to_vec();
+    let entries = match self.prefix_index.get(&key) {
+      Some(v) => v,
+      None => return None,
+    };
+    let mut matches_iter = entries
+      .iter()
+      .filter(|full| full.len() >= orig_len && &full[..orig_len] == short);
+    let full_old = match matches_iter.next() {
+      Some(m) => m,
+      None => return None,
+    };
+    if matches_iter.next().is_some() {
+      return None;
+    }
+    match self.lookup.get(full_old) {
+      Some(Some(new_full)) => Some(new_full[..orig_len].to_vec()),
+      _ => None,
+    }
+  }
 }
 
 pub fn find_subslice(h: &[u8], n: &[u8]) -> Option<usize> {

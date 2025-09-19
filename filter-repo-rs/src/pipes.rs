@@ -58,7 +58,7 @@ pub fn build_fast_import_cmd(opts: &Options) -> Command {
         cmd.arg(format!("--export-marks={}", marks_path.to_string_lossy()));
     }
     cmd.stdin(Stdio::piped());
-    cmd.stdout(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
+    cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::inherit());
     cmd
 }

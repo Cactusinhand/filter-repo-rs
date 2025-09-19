@@ -438,6 +438,106 @@ fn replace_message_edits_commit_and_tag_messages() {
 }
 
 #[test]
+fn second_run_rewrites_short_hashes_in_messages() {
+    let repo = init_repo();
+    // First commit touching keep/ and drop/ so path filtering rewrites history
+    write_file(&repo, "keep/data.txt", "first keep\n");
+    write_file(&repo, "drop/data.txt", "first drop\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(run_git(&repo, &["commit", "-m", "seed data"]).0, 0);
+
+    let (_c_old, commit1_full, _e_old) = run_git(&repo, &["rev-parse", "HEAD"]);
+    let commit1_full = commit1_full.trim().to_string();
+    assert_eq!(commit1_full.len(), 40, "expected full commit id");
+    let old_short = commit1_full[..7].to_string();
+
+    // Second commit referencing the short id of the first commit
+    write_file(
+        &repo,
+        "keep/data.txt",
+        &format!("updated keep referencing {}\n", old_short),
+    );
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(
+        run_git(
+            &repo,
+            &["commit", "-m", &format!("mention old short {}", old_short)]
+        )
+        .0,
+        0
+    );
+
+    assert_eq!(
+        run_git(
+            &repo,
+            &["tag", "-a", "-m", &format!("tag cites {}", old_short), "v-short"]
+        )
+        .0,
+        0
+    );
+
+    // First run: filter to keep/ (drop/ removed) to rewrite commits and build commit-map
+    let (code1, _, _) = run_tool(&repo, |o| {
+        o.paths.push(b"keep".to_vec());
+    });
+    assert_eq!(code1, 0, "initial filtering run should succeed");
+
+    let commit_map_path = repo.join(".git").join("filter-repo").join("commit-map");
+    let map_contents = fs::read_to_string(&commit_map_path).expect("read commit-map after first run");
+    let mut new_full: Option<String> = None;
+    for line in map_contents.lines() {
+        let mut parts = line.split_whitespace();
+        if let (Some(old), Some(new)) = (parts.next(), parts.next()) {
+            if old == commit1_full {
+                new_full = Some(new.to_string());
+                break;
+            }
+        }
+    }
+    let new_full = new_full.expect("commit-map should contain first commit mapping");
+    assert_eq!(new_full.len(), 40, "expected mapped commit id length");
+    let new_short = new_full[..7].to_string();
+    assert_ne!(
+        new_short, old_short,
+        "filtering should produce a different commit id to exercise rewriting"
+    );
+
+    // Second run should reuse commit-map to rewrite short hashes inside messages
+    let (code2, _, _) = run_tool(&repo, |o| {
+        o.paths.push(b"keep".to_vec());
+    });
+    assert_eq!(code2, 0, "second filtering run should succeed");
+
+    let (_c_msg, msg, _e_msg) = run_git(&repo, &["log", "-1", "--format=%B"]);
+    assert!(
+        msg.contains(&new_short),
+        "expected rewritten commit message to contain new short {}, got: {}",
+        new_short,
+        msg
+    );
+    assert!(
+        !msg.contains(&old_short),
+        "commit message should no longer contain old short {}, got: {}",
+        old_short,
+        msg
+    );
+
+    let (_c_tag, tag_obj, _e_tag) = run_git(&repo, &["cat-file", "-p", "refs/tags/v-short"]);
+    assert!(
+        tag_obj.contains(&new_short),
+        "expected tag message to contain new short {}, got: {}",
+        new_short,
+        tag_obj
+    );
+    assert!(
+        !tag_obj.contains(&old_short),
+        "tag message should not contain old short {}, got: {}",
+        old_short,
+        tag_obj
+    );
+}
+
+#[test]
 fn writes_commit_map_and_ref_map() {
     let repo = init_repo();
     // annotated tag for ref-map

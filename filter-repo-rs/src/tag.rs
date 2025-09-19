@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{ChildStdin, ChildStdout};
 
-use crate::message::MessageReplacer;
+use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
 pub fn precheck_duplicate_tag(
@@ -32,6 +32,7 @@ pub fn process_tag_block(
   filt_file: &mut File,
   mut fi_in: Option<&mut ChildStdin>,
   replacer: &Option<MessageReplacer>,
+  short_mapper: Option<&ShortHashMapper>,
   opts: &Options,
   updated_refs: &mut BTreeSet<Vec<u8>>,
   annotated_tag_refs: &mut BTreeSet<Vec<u8>>,
@@ -92,7 +93,10 @@ pub fn process_tag_block(
         }
       }
 
-      let new_payload = if let Some(r) = replacer { r.apply(payload) } else { payload };
+      let mut new_payload = if let Some(r) = replacer { r.apply(payload) } else { payload };
+      if let Some(mapper) = short_mapper {
+        new_payload = mapper.rewrite(new_payload);
+      }
       let header = format!("data {}\n", new_payload.len());
       filt_file.write_all(header.as_bytes())?; filt_file.write_all(&new_payload)?;
       if let Some(ref mut fi)=fi_in { fi.write_all(header.as_bytes())?; fi.write_all(&new_payload)?; }
