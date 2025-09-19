@@ -113,7 +113,7 @@ fn should_keep(paths: &[&[u8]], opts: &Options) -> bool {
     return true;
   }
   let matched = paths.iter().copied().any(|p| path_matches(p, opts));
-  if opts.invert_paths { !matched } else { matched }
+  opts.invert_paths ^ matched
 }
 
 fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
