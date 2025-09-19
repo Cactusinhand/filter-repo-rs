@@ -1,4 +1,6 @@
-use std::io;
+use std::collections::HashMap;
+use std::io::{self, BufRead};
+use std::path::Path;
 
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer { pub pairs: Vec<(Vec<u8>, Vec<u8>)> }
@@ -26,6 +28,142 @@ impl MessageReplacer {
         for (from, to) in &self.pairs { data = replace_all_bytes(&data, from, to); }
         data
     }
+}
+
+const MIN_SHORT_HASH_LEN: usize = 7;
+
+const NULL_OID: &[u8] = b"0000000000000000000000000000000000000000";
+
+pub struct ShortHashMapper {
+  lookup: HashMap<Vec<u8>, Option<Vec<u8>>>,
+  prefix_index: HashMap<Vec<u8>, Vec<Vec<u8>>>,
+  cache: HashMap<Vec<u8>, Option<Vec<u8>>>,
+  regex: regex::bytes::Regex,
+}
+
+impl ShortHashMapper {
+  pub fn from_debug_dir(dir: &Path) -> io::Result<Option<Self>> {
+    let map_path = dir.join("commit-map");
+    let file = match std::fs::File::open(&map_path) {
+      Ok(f) => f,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+      Err(e) => return Err(e),
+    };
+    let mut lookup: HashMap<Vec<u8>, Option<Vec<u8>>> = HashMap::new();
+    let mut prefix_index: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut rdr = std::io::BufReader::new(file);
+    let mut line = Vec::with_capacity(128);
+    let mut has_any = false;
+    while rdr.read_until(b'\n', &mut line)? > 0 {
+      while line.last().copied() == Some(b'\n') || line.last().copied() == Some(b'\r') {
+        line.pop();
+      }
+      if line.is_empty() {
+        line.clear();
+        continue;
+      }
+      let mut parts = line.splitn(2, |&b| b == b' ');
+      let old = match parts.next() {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+          line.clear();
+          continue;
+        }
+      };
+      let new = match parts.next() {
+        Some(v) if !v.is_empty() => v,
+        _ => {
+          line.clear();
+          continue;
+        }
+      };
+      let old_norm = old.to_ascii_lowercase();
+      let new_entry = if new == NULL_OID { None } else { Some(new.to_ascii_lowercase()) };
+      prefix_index
+        .entry(old_norm[..MIN_SHORT_HASH_LEN.min(old_norm.len())].to_vec())
+        .or_default()
+        .push(old_norm.clone());
+      lookup.insert(old_norm, new_entry);
+      has_any = true;
+      line.clear();
+    }
+    if !has_any {
+      return Ok(None);
+    }
+    let regex = regex::bytes::Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, format!("invalid short-hash regex: {e}"))
+    })?;
+    Ok(Some(Self { lookup, prefix_index, cache: HashMap::new(), regex }))
+  }
+
+  pub fn rewrite(&mut self, data: Vec<u8>) -> Vec<u8> {
+    let mut result: Vec<u8> = Vec::new();
+    let mut last = 0usize;
+    let mut changed = false;
+    let matches: Vec<(usize, usize)> = self
+      .regex
+      .find_iter(&data)
+      .map(|m| (m.start(), m.end()))
+      .collect();
+    for (start, end) in matches {
+      let candidate = &data[start..end];
+      if let Some(repl) = self.translate(candidate) {
+        if !changed {
+          result.reserve(data.len());
+        }
+        result.extend_from_slice(&data[last..start]);
+        result.extend_from_slice(&repl);
+        last = end;
+        changed = true;
+      }
+    }
+    if changed {
+      result.extend_from_slice(&data[last..]);
+      result
+    } else {
+      data
+    }
+  }
+
+  fn translate(&mut self, candidate: &[u8]) -> Option<Vec<u8>> {
+    if candidate.len() < MIN_SHORT_HASH_LEN {
+      return None;
+    }
+    let key = candidate.to_ascii_lowercase();
+    if let Some(entry) = self.cache.get(&key) {
+      return entry.clone();
+    }
+    let resolved = if candidate.len() == 40 {
+      self.lookup.get(&key).cloned().flatten()
+    } else {
+      self.lookup_prefix(&key, candidate.len())
+    };
+    self.cache.insert(key, resolved.clone());
+    resolved
+  }
+
+  fn lookup_prefix(&self, short: &[u8], orig_len: usize) -> Option<Vec<u8>> {
+    if short.len() < MIN_SHORT_HASH_LEN {
+      return None;
+    }
+    let key = short[..MIN_SHORT_HASH_LEN].to_vec();
+    let entries = match self.prefix_index.get(&key) {
+      Some(v) => v,
+      None => return None,
+    };
+    let matches: Vec<&Vec<u8>> = entries
+      .iter()
+      .filter(|full| full.len() >= orig_len && &full[..orig_len] == short)
+      .collect();
+    if matches.len() != 1 {
+      return None;
+    }
+    let full_old = matches[0];
+    match self.lookup.get(full_old) {
+      Some(Some(new_full)) => Some(new_full[..orig_len].to_vec()),
+      _ => None,
+    }
+  }
 }
 
 pub fn find_subslice(h: &[u8], n: &[u8]) -> Option<usize> {

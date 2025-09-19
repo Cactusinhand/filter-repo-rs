@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::gitutil::git_dir;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
-use crate::message::MessageReplacer;
+use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
 const REPORT_SAMPLE_LIMIT: usize = 20;
@@ -379,6 +379,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
         })?),
         None => None,
     };
+    let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
     let content_replacer = match &opts.replace_text_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
             io::Error::new(
@@ -570,6 +571,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
 
         // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
         if line.starts_with(b"tag ") {
+            let short_mapper = short_hash_mapper.as_mut();
             crate::tag::process_tag_block(
                 &line,
                 &mut fe_out,
@@ -581,6 +583,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     None
                 },
                 &replacer,
+                short_mapper,
                 opts,
                 &mut updated_refs,
                 &mut annotated_tag_refs,
@@ -622,6 +625,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                 || line.starts_with(b"blob")
                 || line == b"done\n"
             {
+                let short_mapper = short_hash_mapper.as_mut();
                 match crate::commit::process_commit_line(
                     b"\n",
                     opts,
@@ -634,6 +638,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                         None
                     },
                     &replacer,
+                    short_mapper,
                     &mut commit_buf,
                     &mut commit_has_changes,
                     &mut commit_mark,
@@ -864,6 +869,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     continue;
                 }
             }
+            let short_mapper = short_hash_mapper.as_mut();
             match crate::commit::process_commit_line(
                 &line,
                 opts,
@@ -876,6 +882,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     None
                 },
                 &replacer,
+                short_mapper,
                 &mut commit_buf,
                 &mut commit_has_changes,
                 &mut commit_mark,
