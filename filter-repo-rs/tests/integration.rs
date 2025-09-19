@@ -978,11 +978,7 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
         .join(".git")
         .join("filter-repo")
         .join("commit-map");
-    let mut cm = String::new();
-    File::open(&commit_map)
-        .unwrap()
-        .read_to_string(&mut cm)
-        .unwrap();
+    let cm = std::fs::read_to_string(&commit_map).unwrap();
     assert!(
         cm.contains(&format!("{} {}", old_head, new_head)),
         "commit-map missing HEAD mapping; contents: {}",
