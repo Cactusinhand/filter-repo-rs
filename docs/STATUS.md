@@ -84,8 +84,11 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - Encoding & hash rewriting
   - `--reencode=yes` normalizes messages to UTF-8; there is no short-hash translation in messages.
 
-- Windows path policy
+ - Windows path policy
   - Sanitization is always on for rebuilt lines; no user-selectable policy (sanitize|skip|error) yet.
+  - Integration tests cover the sanitization behavior (mirrors existing always-sanitize policy) alongside
+    path filtering/renames, commit/ref map emission, and ref finalization. Run them with
+    `cargo test -p filter-repo-rs` (requires Git in `PATH`).
 
 ## MVP Scope (target) and Gap
 
