@@ -101,7 +101,7 @@ pub fn process_commit_line(
   filt_file: &mut File,
   mut fi_in: Option<&mut ChildStdin>,
   replacer: &Option<MessageReplacer>,
-  short_mapper: Option<&mut ShortHashMapper>,
+  short_mapper: Option<&ShortHashMapper>,
   commit_buf: &mut Vec<u8>,
   commit_has_changes: &mut bool,
   commit_mark: &mut Option<u32>,
@@ -243,7 +243,7 @@ pub fn handle_commit_data(
   orig_file: &mut File,
   commit_buf: &mut Vec<u8>,
   replacer: &Option<MessageReplacer>,
-  short_mapper: Option<&mut ShortHashMapper>,
+  short_mapper: Option<&ShortHashMapper>,
 ) -> io::Result<()> {
   if !header_line.starts_with(b"data ") { return Ok(()); }
   let size_bytes = &header_line[b"data ".len()..];

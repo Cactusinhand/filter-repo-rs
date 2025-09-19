@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, BufRead};
 use std::path::Path;
@@ -37,7 +38,7 @@ const NULL_OID: &[u8] = b"0000000000000000000000000000000000000000";
 pub struct ShortHashMapper {
   lookup: HashMap<Vec<u8>, Option<Vec<u8>>>,
   prefix_index: HashMap<Vec<u8>, Vec<Vec<u8>>>,
-  cache: HashMap<Vec<u8>, Option<Vec<u8>>>,
+  cache: RefCell<HashMap<Vec<u8>, Option<Vec<u8>>>>,
   regex: regex::bytes::Regex,
 }
 
@@ -93,44 +94,28 @@ impl ShortHashMapper {
     let regex = regex::bytes::Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").map_err(|e| {
       io::Error::new(io::ErrorKind::Other, format!("invalid short-hash regex: {e}"))
     })?;
-    Ok(Some(Self { lookup, prefix_index, cache: HashMap::new(), regex }))
+    Ok(Some(Self { lookup, prefix_index, cache: RefCell::new(HashMap::new()), regex }))
   }
 
-  pub fn rewrite(&mut self, data: Vec<u8>) -> Vec<u8> {
-    let mut result: Vec<u8> = Vec::new();
-    let mut last = 0usize;
-    let mut changed = false;
-    let matches: Vec<(usize, usize)> = self
+  pub fn rewrite(&self, data: Vec<u8>) -> Vec<u8> {
+    self
       .regex
-      .find_iter(&data)
-      .map(|m| (m.start(), m.end()))
-      .collect();
-    for (start, end) in matches {
-      let candidate = &data[start..end];
-      if let Some(repl) = self.translate(candidate) {
-        if !changed {
-          result.reserve(data.len());
-        }
-        result.extend_from_slice(&data[last..start]);
-        result.extend_from_slice(&repl);
-        last = end;
-        changed = true;
-      }
-    }
-    if changed {
-      result.extend_from_slice(&data[last..]);
-      result
-    } else {
-      data
-    }
+      .replace_all(&data, |caps: &regex::bytes::Captures| {
+        let m = caps.get(0).expect("short hash match");
+        self
+          .translate(m.as_bytes())
+          .unwrap_or_else(|| m.as_bytes().to_vec())
+      })
+      .into_owned()
   }
 
-  fn translate(&mut self, candidate: &[u8]) -> Option<Vec<u8>> {
+  fn translate(&self, candidate: &[u8]) -> Option<Vec<u8>> {
     if candidate.len() < MIN_SHORT_HASH_LEN {
       return None;
     }
     let key = candidate.to_ascii_lowercase();
-    if let Some(entry) = self.cache.get(&key) {
+    let mut cache = self.cache.borrow_mut();
+    if let Some(entry) = cache.get(&key) {
       return entry.clone();
     }
     let resolved = if candidate.len() == 40 {
@@ -138,7 +123,7 @@ impl ShortHashMapper {
     } else {
       self.lookup_prefix(&key, candidate.len())
     };
-    self.cache.insert(key, resolved.clone());
+    cache.insert(key, resolved.clone());
     resolved
   }
 
@@ -153,7 +138,7 @@ impl ShortHashMapper {
       entry.push(old_norm.clone());
     }
     self.lookup.insert(old_norm, Some(new_norm));
-    self.cache.clear();
+    self.cache.borrow_mut().clear();
   }
 
   fn lookup_prefix(&self, short: &[u8], orig_len: usize) -> Option<Vec<u8>> {
@@ -165,14 +150,16 @@ impl ShortHashMapper {
       Some(v) => v,
       None => return None,
     };
-    let matches: Vec<&Vec<u8>> = entries
+    let mut matches_iter = entries
       .iter()
-      .filter(|full| full.len() >= orig_len && &full[..orig_len] == short)
-      .collect();
-    if matches.len() != 1 {
+      .filter(|full| full.len() >= orig_len && &full[..orig_len] == short);
+    let full_old = match matches_iter.next() {
+      Some(m) => m,
+      None => return None,
+    };
+    if matches_iter.next().is_some() {
       return None;
     }
-    let full_old = matches[0];
     match self.lookup.get(full_old) {
       Some(Some(new_full)) => Some(new_full[..orig_len].to_vec()),
       _ => None,

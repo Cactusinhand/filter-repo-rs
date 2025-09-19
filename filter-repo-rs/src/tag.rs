@@ -32,7 +32,7 @@ pub fn process_tag_block(
   filt_file: &mut File,
   mut fi_in: Option<&mut ChildStdin>,
   replacer: &Option<MessageReplacer>,
-  short_mapper: Option<&mut ShortHashMapper>,
+  short_mapper: Option<&ShortHashMapper>,
   opts: &Options,
   updated_refs: &mut BTreeSet<Vec<u8>>,
   annotated_tag_refs: &mut BTreeSet<Vec<u8>>,

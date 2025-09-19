@@ -576,7 +576,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
 
         // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
         if line.starts_with(b"tag ") {
-            let short_mapper = short_hash_mapper.as_mut();
+            let short_mapper = short_hash_mapper.as_ref();
             crate::tag::process_tag_block(
                 &line,
                 &mut fe_out,
@@ -630,7 +630,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                 || line.starts_with(b"blob")
                 || line == b"done\n"
             {
-                let short_mapper = short_hash_mapper.as_mut();
+                let short_mapper = short_hash_mapper.as_ref();
                 match crate::commit::process_commit_line(
                     b"\n",
                     opts,
@@ -887,7 +887,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     continue;
                 }
             }
-            let short_mapper = short_hash_mapper.as_mut();
+            let short_mapper = short_hash_mapper.as_ref();
             match crate::commit::process_commit_line(
                 &line,
                 opts,
