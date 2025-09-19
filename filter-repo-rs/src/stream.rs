@@ -1313,6 +1313,7 @@ mod tests {
             paths: Vec::new(),
             invert_paths: false,
             path_globs: Vec::new(),
+            path_regexes: Vec::new(),
             path_renames: Vec::new(),
             tag_rename: None,
             branch_rename: None,

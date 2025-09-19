@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use filter_repo_rs as fr;
+use regex::bytes::Regex;
 
 fn mktemp(prefix: &str) -> PathBuf {
     // Place temp repos under target/ to avoid Windows safe.directory issues
@@ -1121,6 +1122,92 @@ fn path_glob_selects_md_under_src() {
         !tree.contains("docs/x.md"),
         "expected to drop docs/x.md, got: {}",
         tree
+    );
+}
+
+#[test]
+fn path_regex_filters_and_respects_invert() {
+    // Direct regex include (keep *.rs only)
+    let repo = init_repo();
+    write_file(&repo, "src/lib.rs", "fn main() {}
+");
+    write_file(&repo, "README.md", "docs
+");
+    write_file(&repo, "scripts/build.sh", "echo hi
+");
+    run_git(&repo, &["add", "."]).0;
+    assert_eq!(
+        run_git(&repo, &["commit", "-q", "-m", "seed files"]).0,
+        0
+    );
+    let (_c, _o, _e) = run_tool(&repo, |o| {
+        o.path_regexes.push(Regex::new(r".*\.rs$").unwrap());
+    });
+    let (_c_tree, tree, _e_tree) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(tree.contains("src/lib.rs"), "expected regex to keep src/lib.rs: {}", tree);
+    assert!(
+        !tree.contains("README.md"),
+        "expected regex to drop README.md: {}",
+        tree
+    );
+    assert!(
+        !tree.contains("scripts/build.sh"),
+        "expected regex to drop scripts/build.sh: {}",
+        tree
+    );
+
+    // Inverted regex (drop *.md, keep others)
+    let repo2 = init_repo();
+    write_file(&repo2, "src/main.rs", "fn main() {}
+");
+    write_file(&repo2, "docs/readme.md", "docs
+");
+    write_file(&repo2, "notes/todo.txt", "todo
+");
+    run_git(&repo2, &["add", "."]).0;
+    assert_eq!(
+        run_git(&repo2, &["commit", "-q", "-m", "seed docs"]).0,
+        0
+    );
+    let (_c2, _o2, _e2) = run_tool(&repo2, |o| {
+        o.path_regexes.push(Regex::new(r".*\.md$").unwrap());
+        o.invert_paths = true;
+    });
+    let (_c_tree2, tree2, _e_tree2) = run_git(
+        &repo2,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(
+        tree2.contains("src/main.rs"),
+        "expected inverted regex to keep src/main.rs: {}",
+        tree2
+    );
+    assert!(
+        tree2.contains("notes/todo.txt"),
+        "expected inverted regex to keep notes/todo.txt: {}",
+        tree2
+    );
+    assert!(
+        !tree2.contains("docs/readme.md"),
+        "expected inverted regex to drop docs/readme.md: {}",
+        tree2
     );
 }
 

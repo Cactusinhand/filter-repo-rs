@@ -102,13 +102,18 @@ fn path_matches(path: &[u8], opts: &Options) -> bool {
   if !opts.path_globs.is_empty() {
     if opts.path_globs.iter().any(|g| glob_match_bytes(g, path)) { return true; }
   }
+  if !opts.path_regexes.is_empty() {
+    if opts.path_regexes.iter().any(|re| re.is_match(path)) { return true; }
+  }
   false
 }
 
 fn should_keep(paths: &[&[u8]], opts: &Options) -> bool {
-  if opts.paths.is_empty() && opts.path_globs.is_empty() { return true; }
+  if opts.paths.is_empty() && opts.path_globs.is_empty() && opts.path_regexes.is_empty() {
+    return true;
+  }
   let matched = paths.iter().copied().any(|p| path_matches(p, opts));
-  if opts.invert_paths { !matched } else { matched }
+  opts.invert_paths ^ matched
 }
 
 fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use regex::bytes::Regex;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupMode { None, Standard, Aggressive }
@@ -69,6 +71,7 @@ pub struct Options {
   pub paths: Vec<Vec<u8>>,
   pub invert_paths: bool,
   pub path_globs: Vec<Vec<u8>>,
+  pub path_regexes: Vec<Regex>,
   pub path_renames: Vec<(Vec<u8>, Vec<u8>)>,
   pub tag_rename: Option<(Vec<u8>, Vec<u8>)>,
   pub branch_rename: Option<(Vec<u8>, Vec<u8>)>,
@@ -107,6 +110,7 @@ impl Default for Options {
       paths: Vec::new(),
       invert_paths: false,
       path_globs: Vec::new(),
+      path_regexes: Vec::new(),
       path_renames: Vec::new(),
       tag_rename: None,
       branch_rename: None,
@@ -211,6 +215,16 @@ pub fn parse_args() -> Options {
       "--path-glob" => {
         let p = it.next().expect("--path-glob requires value");
         opts.path_globs.push(p.into_bytes());
+      }
+      "--path-regex" => {
+        let p = it.next().expect("--path-regex requires value");
+        match Regex::new(&p) {
+          Ok(re) => opts.path_regexes.push(re),
+          Err(err) => {
+            eprintln!("invalid --path-regex '{}': {}", p, err);
+            std::process::exit(2);
+          }
+        }
       }
       "--path-rename" => {
         let v = it.next().expect("--path-rename requires OLD:NEW");
@@ -368,6 +382,7 @@ Repository & ref selection:\n\
 Path selection & rewriting:\n\
   --path PREFIX               Include-only files under PREFIX (repeatable)\n\
   --path-glob GLOB            Include by glob (repeatable)\n\
+  --path-regex REGEX          Include by Rust regex (repeatable)\n\
   --invert-paths              Invert path selection (drop matches)\n\
   --path-rename OLD:NEW       Rename path prefix in file changes\n\
   --subdirectory-filter D     Equivalent to --path D/ --path-rename D/:\n\
