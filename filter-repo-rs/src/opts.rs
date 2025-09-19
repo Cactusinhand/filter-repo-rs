@@ -374,9 +374,9 @@ Path selection & rewriting:\n\
   --to-subdirectory-filter D  Equivalent to --path-rename :D/\n\
 \n\
 Blob filtering & redaction:\n\
-  --replace-text FILE          Literal/regex (feature-gated) replacements for blobs\n\
-  --max-blob-size BYTES        Drop blobs larger than BYTES\n\
-  --strip-blobs-with-ids FILE  Drop blobs by 40-hex id (one per line)\n\
+  --replace-text FILE         Literal/regex (feature-gated) replacements for blobs\n\
+  --max-blob-size BYTES       Drop blobs larger than BYTES\n\
+  --strip-blobs-with-ids FILE Drop blobs by 40-hex id (one per line)\n\
 \n\
 Commit, tag & ref updates:\n\
   --replace-message FILE      Literal replacements in commit/tag messages\n\
@@ -388,6 +388,27 @@ Execution behavior & output:\n\
   --cleanup MODE              none|standard|aggressive (default: none)\n\
   --quiet                     Reduce output noise\n\
   --no-reset                  Skip final 'git reset --hard' in target\n\
+  --no-reencode               Do not re-encode commit/tag messages\n\
+  --no-quotepath              Disable Git's path quoting for non-ASCII\n\
+  --no-mark-tags              Do not mark annotated tags in fast-export\n\
+  --mark-tags                 Mark annotated tags in fast-export (default)\n\
+  --force, -f                 Bypass safety prompts and checks where applicable\n\
+  --enforce-sanity            Fail early unless repo passes strict preflight\n\
+  --dry-run                   Prepare and validate without writing changes\n\
+  --partial                   Only rewrite current repo; skip remote cleanup\n\
+  --sensitive, --sensitive-data-removal\n\
+                              Enable sensitive-history mode (fetch all refs,\n\
+                              avoid remote cleanup; see --no-fetch)\n\
+  --no-fetch                  In sensitive mode, skip fetching refs from origin\n\
+\n\
+Safety & backup:\n\
+  --backup                    Create a backup bundle of selected refs before\n\
+                              rewriting (skipped with --dry-run)\n\
+  --backup-path PATH          Destination directory or file for the bundle.\n\
+                              If PATH is a directory, a timestamped filename\n\
+                              is generated. If PATH has an extension, that\n\
+                              exact file is written. Defaults to\n\
+                              .git/filter-repo/backup-<timestamp>.bundle\n\
 \n\
 Repository analysis:\n\
   --analyze                   Collect repository metrics instead of rewriting\n\
@@ -405,7 +426,7 @@ Repository analysis:\n\
   --analyze-max-parents-warn N Override max parent count warning threshold\n\
 \n\
 Misc:\n\
-  -h, --help                 Show this help message\n\
+  -h, --help                  Show this help message\n\
 "
   );
 }
