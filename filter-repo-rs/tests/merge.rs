@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::{Command, Stdio};
 
 mod common;
 use common::*;
@@ -42,53 +43,33 @@ fn merge_parents_dedup_when_side_branch_pruned() {
         .join(".git")
         .join("filter-repo")
         .join("fast-export.filtered");
-    let data = fs::read(&filtered_path).expect("read filtered fast-export");
-    let marker = b"merge feature branch";
-    let pos = data
-        .windows(marker.len())
-        .position(|w| w == marker)
-        .expect("merge commit message present");
-    let commit_tag = b"\ncommit ";
-    let commit_start = data[..pos]
-        .windows(commit_tag.len())
-        .rposition(|w| w == commit_tag)
-        .map(|idx| idx + 1)
-        .unwrap_or(0);
 
-    let mut idx = commit_start;
-    let mut parents: Vec<Vec<u8>> = Vec::new();
-    while idx < data.len() {
-        let line_end = match data[idx..].iter().position(|&b| b == b'\n') {
-            Some(end) => idx + end,
-            None => break,
-        };
-        let line = &data[idx..line_end];
-        idx = line_end + 1;
-        if line.is_empty() {
-            break;
-        }
-        if line.starts_with(b"data ") {
-            let len = std::str::from_utf8(&line[b"data ".len()..])
-                .expect("utf8 data header")
-                .trim()
-                .parse::<usize>()
-                .expect("numeric data length");
-            idx = idx.saturating_add(len);
-            if idx < data.len() && data[idx] == b'\n' {
-                idx += 1;
-            }
-            continue;
-        }
-        if line.starts_with(b"from ") || line.starts_with(b"merge ") {
-            parents.push(line.to_vec());
-        }
-    }
+    let import_repo = mktemp("fr_rs_merge_import");
+    fs::create_dir_all(&import_repo).expect("create import repo directory");
+    assert_eq!(run_git(&import_repo, &["init"]).0, 0, "git init failed");
 
+    let stream = fs::File::open(&filtered_path).expect("open filtered fast-export stream");
+    let status = Command::new("git")
+        .current_dir(&import_repo)
+        .arg("fast-import")
+        .stdin(Stdio::from(stream))
+        .status()
+        .expect("run git fast-import");
+    assert!(status.success(), "git fast-import failed: {status:?}");
+
+    let (code, parents, stderr) = run_git(
+        &import_repo,
+        &["log", "--grep=merge feature branch", "-1", "--pretty=%P"],
+    );
+    assert_eq!(code, 0, "git log failed: {}", stderr);
+    let parents: Vec<_> = parents
+        .split_whitespace()
+        .filter(|p| !p.is_empty())
+        .collect();
     assert_eq!(
         parents.len(),
         1,
-        "expected single parent line: {:?}",
+        "expected single parent after filtering, got: {:?}",
         parents
     );
-    assert!(parents[0].starts_with(b"from :"));
 }
