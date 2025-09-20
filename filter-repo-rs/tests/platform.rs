@@ -106,7 +106,7 @@ fn cross_platform_special_characters_in_paths() {
         }
     }
     if files_created > 0 {
-        run_git(&repo, &["commit", "-m", "Special characters in paths"]);
+        assert_eq!(run_git(&repo, &["commit", "-m", "Special characters in paths"]).0, 0);
         run_tool_expect_success(&repo, |o| {
             o.max_blob_size = Some(30);
         });
