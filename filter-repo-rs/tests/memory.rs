@@ -153,15 +153,31 @@ fn memory_management_extreme_path_depth() {
 #[test]
 fn memory_management_unicode_path_heavy_load() {
     let repo = init_repo();
+    let mut files_added = 0;
     for i in 0..200 {
         let name = format!("unicode_{}_é_測試.txt", i);
         if let Some(parent) = std::path::Path::new(&name).parent() {
-            std::fs::create_dir_all(repo.join(parent)).ok();
+            std::fs::create_dir_all(repo.join(parent))
+                .expect("failed to create parent directory for unicode file");
         }
-        let _ = std::fs::write(repo.join(&name), format!("payload {}", i));
-        run_git(&repo, &["add", &name]);
+        std::fs::write(repo.join(&name), format!("payload {}", i))
+            .expect("failed to write unicode file");
+        if run_git(&repo, &["add", &name]).0 == 0 {
+            files_added += 1;
+        }
     }
-    run_git(&repo, &["commit", "-m", "unicode files"]);
+
+    if files_added == 0 {
+        eprintln!(
+            "Warning: could not add any unicode files. Skipping unicode path heavy load test."
+        );
+        return;
+    }
+    assert_eq!(
+        run_git(&repo, &["commit", "-m", "unicode files"]).0,
+        0,
+        "failed to commit unicode files"
+    );
     run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1000);
     });
@@ -176,6 +192,9 @@ fn memory_management_unicode_path_heavy_load() {
             "HEAD",
         ],
     );
-    let files: Vec<&str> = tree.split_whitespace().collect();
-    assert!(!files.is_empty(), "unicode files should be processed");
+    let files: Vec<&str> = tree.lines().filter(|l| !l.is_empty()).collect();
+    assert!(
+        files.iter().any(|f| f.contains("unicode_")),
+        "unicode files should be processed and present in the tree"
+    );
 }
