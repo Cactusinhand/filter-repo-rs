@@ -306,7 +306,7 @@ git symbolic-ref HEAD refs/heads/<branch-from-bundle>
 - `.git/filter-repo/commit-map`：旧提交 → 新提交
 - `.git/filter-repo/ref-map`：旧引用 → 新引用
 - `.git/filter-repo/report.txt`：剔除/修改计数及示例路径（启用 `--write-report` 时）
-- `.git/filer-repo/target-marks`: marks 映射表
+- `.git/filter-repo/target-marks`: marks 映射表
 - `.git/filter-repo/fast-export.original`: git fast-export 原输出
 - `.git/filter-repo/fast-export.filtered`: git fast-export 被过滤后的输出
 - `.git/filter-repo/1758125153-834782600.bundle`: 备份文件
@@ -323,7 +323,7 @@ Windows 注意
 - 未实现合并简化；尚未剪枝退化合并。
 - 尚无 `--state-branch`（仅导出 marks 到文件）。
 - Windows 路径策略固定为 “sanitize”（暂无 skip/error）。
-- 尚无回调 API 与基于 mailmap 的身份重写。
+- 不计划实现回调 API；基于 mailmap 的身份重写仍可作为后续增强考虑。
 - `--replace-message` 仅支持字面值规则；正则支持计划中。
 - 已启用短哈希重写；`--preserve-commit-hashes` 开关计划中。
 - 尚未支持人类可读大小（如 `5M`）。
@@ -334,10 +334,14 @@ Windows 注意
 - 路径能力：`--paths-from-file`、`--use-base-name`、`--path-rename-match`/正则改名
 - 消息：`--replace-message` 支持 `regex:`；`--preserve-commit-hashes`
 - 大小参数：支持 `5M`/`2G` 等，并提供 `--strip-blobs-bigger-than` 别名
-- 身份：mailmap（`--mailmap`、`--use-mailmap`）与姓名/邮箱回调
+- 身份：mailmap（`--mailmap`、`--use-mailmap`）
 - 合并：在保证祖先正确性的前提下裁剪退化合并
 - replace-refs 与增量：`--replace-refs …`、`--state-branch`、stash（`refs/stash`）重写
 - 分析与报告：LFS 相关输出；更丰富的产物
 - Windows 路径策略：`--windows-path-policy=[sanitize|skip|error]` 与报表
-- 回调框架：filename/refname/blob/commit/tag/reset/message/name/email
+- 非目标：回调框架（filename/refname/blob/commit/tag/reset/message/name/email）。本项目不计划提供回调 API，倾向通过显式 CLI 选项覆盖常见需求。
 - 安全默认：考虑默认开启更严格的预检；完善 partial/sensitive 文档
+
+更多背景：
+- 参见 [docs/PARITY.md](docs/PARITY.md)（与 Python 版的对齐状态与安全说明）。
+- 参见 [docs/SCOPE.zh-CN.md](docs/SCOPE.zh-CN.md)（范围与优先级、取舍清单、边界建议）。

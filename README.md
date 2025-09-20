@@ -308,10 +308,11 @@ Artifacts
 - `.git/filter-repo/commit-map`: original commit ID -> new commit ID
 - `.git/filter-repo/ref-map`: original ref -> new ref
 - `.git/filter-repo/report.txt`: counts and sample paths for stripped/modified blobs (when `--write-report`)
-- `.git/filer-repo/target-marks`: marks map table
+- `.git/filter-repo/target-marks`: marks map table
 - `.git/filter-repo/fast-export.original`: git fast-export original output
 - `.git/filter-repo/fast-export.filtered`: git fast-export filtered output
 - `.git/filter-repo/1758125153-834782600.bundle`: backup file
+
 
 Windows notes
 -------------
@@ -325,7 +326,7 @@ Limitations (prototype)
 - Merge simplification not implemented; degenerate merges are not pruned yet.
 - No `--state-branch` (marks are exported to a file only).
 - Windows path policy is fixed to "sanitize"(no skip/error modes yet).
-- Callback API and mailmap-based identity rewriting are not implemented.
+ - Callback API is not planned for this project. Mailmap-based identity rewriting remains a possible future enhancement.
 - `--replace-message` supports literal rules; regex rules are planned.
 - Short-hash rewriting is enabled; a `--preserve-commit-hashes` toggle is planned.
 - Human‑readable size parsing (e.g., `5M`) is not yet supported.
@@ -336,10 +337,14 @@ Roadmap / TODO (parity with Python git-filter-repo)
 - Path features: `--paths-from-file`, `--use-base-name`, `--path-rename-match`/regex renames
 - Messages: `--replace-message` support for `regex:`; `--preserve-commit-hashes`
 - Blob sizes: accept `5M`/`2G` and alias `--strip-blobs-bigger-than`
-- Identity: mailmap (`--mailmap`, `--use-mailmap`) and name/email callbacks
+ - Identity: mailmap (`--mailmap`, `--use-mailmap`)
 - Merges: prune degenerate merges while preserving required ancestry
 - Replace-refs & incremental: `--replace-refs …`, `--state-branch`, stash (`refs/stash`) rewrite
 - Analysis & reports: LFS-related reporting; richer artifacts
 - Windows path policy: `--windows-path-policy=[sanitize|skip|error]` + reporting
-- Callback framework: filename/refname/blob/commit/tag/reset/message/name/email
+- Non-goal: Callback framework (filename/refname/blob/commit/tag/reset/message/name/email) — we do not plan to implement a callback API; prefer explicit CLI options.
 - Safety defaults: consider stricter preflight by default; refine partial/sensitive guidance
+
+More context:
+- See [docs/PARITY.md](docs/PARITY.md) for Python parity and safety notes.
+- See [docs/SCOPE.md](docs/SCOPE.md) for scope, priorities, and trade‑offs.

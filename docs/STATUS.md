@@ -88,10 +88,19 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
     a `--preserve-commit-hashes` flag to disable this behavior is not yet available.
 
  - Windows path policy
-  - Sanitization is always on for rebuilt lines; no user-selectable policy (sanitize|skip|error) yet.
+ - Sanitization is always on for rebuilt lines; no user-selectable policy (sanitize|skip|error) yet.
   - Integration tests cover the sanitization behavior (mirrors existing always-sanitize policy) alongside
     path filtering/renames, commit/ref map emission, and ref finalization. Run them with
     `cargo test -p filter-repo-rs` (requires Git in `PATH`).
+
+## Non-goals
+
+- Callback framework (filename/refname/blob/commit/tag/reset/message/name/email): not planned for this project. We prefer explicit CLI flags and focused features over embedding a general callback API layer.
+
+## Scope & Priorities (overview)
+
+- Value‑focused features: see docs/SCOPE.md (English) and docs/SCOPE.zh-CN.md (Chinese) for high‑value items, pain points → solutions, and “why raw Git is hard”.
+- Boundaries: core vs. non‑goals vs. “re‑evaluate later” are tracked in the SCOPE docs; check alignment before adding new flags.
 
 ## MVP Scope (target) and Gap
 
