@@ -16,7 +16,7 @@ fn replace_message_edits_commit_and_tag_messages() {
     );
     let repl = repo.join("repl.txt");
     std::fs::write(&repl, "FOO==>BAR\n").unwrap();
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.replace_message_file = Some(repl.clone());
         o.no_data = true;
     });
@@ -59,20 +59,25 @@ fn second_run_rewrites_short_hashes_in_messages() {
     assert_eq!(
         run_git(
             &repo,
-            &["tag", "-a", "-m", &format!("tag cites {}", old_short), "v-short"]
+            &[
+                "tag",
+                "-a",
+                "-m",
+                &format!("tag cites {}", old_short),
+                "v-short"
+            ]
         )
         .0,
         0
     );
 
-    let (code1, _, _) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.paths.push(b"keep".to_vec());
     });
-    assert_eq!(code1, 0);
 
     let commit_map_path = repo.join(".git").join("filter-repo").join("commit-map");
-    let map_contents = std::fs::read_to_string(&commit_map_path)
-        .expect("read commit-map after first run");
+    let map_contents =
+        std::fs::read_to_string(&commit_map_path).expect("read commit-map after first run");
     let mut new_full: Option<String> = None;
     for line in map_contents.lines() {
         let mut parts = line.split_whitespace();
@@ -87,10 +92,9 @@ fn second_run_rewrites_short_hashes_in_messages() {
     let new_short = new_full[..7].to_string();
     assert_ne!(new_short, old_short);
 
-    let (code2, _, _) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.paths.push(b"keep".to_vec());
     });
-    assert_eq!(code2, 0);
 
     let (_c_msg, msg, _e_msg) = run_git(&repo, &["log", "-1", "--format=%B"]);
     assert!(msg.contains(&new_short));
@@ -100,4 +104,3 @@ fn second_run_rewrites_short_hashes_in_messages() {
     assert!(tag_obj.contains(&new_short));
     assert!(!tag_obj.contains(&old_short));
 }
-

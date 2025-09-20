@@ -11,7 +11,7 @@ fn path_filter_includes_only_prefix() {
     write_file(&repo, "docs/drop.txt", "d");
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add files"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.paths.push(b"src/".to_vec());
     });
     // Read back with quoting disabled for human-readable output
@@ -47,7 +47,7 @@ fn path_rename_applies_to_paths() {
         run_git(&repo, &["commit", "-q", "-m", "add a/file.txt"]).0,
         0
     );
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.path_renames.push((b"a/".to_vec(), b"x/".to_vec()));
     });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
@@ -75,7 +75,7 @@ fn path_glob_selects_md_under_src() {
         run_git(&repo, &["commit", "-q", "-m", "add various files"]).0,
         0
     );
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.path_globs.push(b"src/**/*.md".to_vec());
     });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
@@ -121,14 +121,12 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
     let (_c_old, old_head, _e_old) = run_git(&repo, &["rev-parse", "HEAD"]);
     let old_head = old_head.trim().to_string();
 
-    let (code, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.paths.push(b"src/".to_vec());
-        o.path_renames
-            .push((b"src/".to_vec(), b"app/".to_vec()));
+        o.path_renames.push((b"src/".to_vec(), b"app/".to_vec()));
         o.branch_rename = Some((b"feature/".to_vec(), b"topics/".to_vec()));
         o.tag_rename = Some((b"v".to_vec(), b"release-".to_vec()));
     });
-    assert_eq!(code, 0, "filter-repo-rs run should succeed");
 
     let (_c_new, new_head, _e_new) = run_git(&repo, &["rev-parse", "HEAD"]);
     let new_head = new_head.trim().to_string();
@@ -145,7 +143,11 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
             "HEAD",
         ],
     );
-    assert!(tree.contains("app/lib.rs"), "expected renamed path in tree: {}", tree);
+    assert!(
+        tree.contains("app/lib.rs"),
+        "expected renamed path in tree: {}",
+        tree
+    );
     assert!(
         !tree.contains("src/lib.rs"),
         "expected original path filtered out: {}",
@@ -153,10 +155,7 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
     );
 
     // commit-map should capture the old -> new HEAD mapping.
-    let commit_map = repo
-        .join(".git")
-        .join("filter-repo")
-        .join("commit-map");
+    let commit_map = repo.join(".git").join("filter-repo").join("commit-map");
     let cm = std::fs::read_to_string(&commit_map).unwrap();
     assert!(
         cm.contains(&format!("{} {}", old_head, new_head)),
@@ -228,7 +227,7 @@ fn invert_paths_drops_prefix() {
         run_git(&repo, &["commit", "-q", "-m", "prepare files"]).0,
         0
     );
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.paths.push(b"drop/".to_vec());
         o.invert_paths = true;
     });
@@ -255,7 +254,7 @@ fn quoted_paths_roundtrip_with_rename() {
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add umlaut"]).0, 0);
     // Move everything into X/ using to-subdirectory behavior; disable our quotepath override
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.quotepath = false; // do NOT pass -c core.quotepath=false
         o.path_renames.push((Vec::new(), b"X/".to_vec()));
         o.no_data = true;
@@ -294,7 +293,7 @@ fn path_regex_filters_and_respects_invert() {
     write_file(&repo, "scripts/build.sh", "echo hi\n");
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "seed files"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.path_regexes.push(Regex::new(r".*\.rs$").unwrap());
     });
     let (_c_tree, tree, _e_tree) = run_git(
@@ -319,7 +318,7 @@ fn path_regex_filters_and_respects_invert() {
     write_file(&repo2, "notes/todo.txt", "todo\n");
     run_git(&repo2, &["add", "."]).0;
     assert_eq!(run_git(&repo2, &["commit", "-q", "-m", "seed docs"]).0, 0);
-    let (_c2, _o2, _e2) = run_tool(&repo2, |o| {
+    run_tool_expect_success(&repo2, |o| {
         o.path_regexes.push(Regex::new(r".*\.md$").unwrap());
         o.invert_paths = true;
     });
@@ -342,7 +341,10 @@ fn path_regex_filters_and_respects_invert() {
 #[test]
 fn windows_path_policy_sanitizes_or_preserves_bytes() {
     let cases = vec![
-        (b"dir/inv:name?.txt ".as_ref(), b"dir/inv_name_.txt".as_ref()),
+        (
+            b"dir/inv:name?.txt ".as_ref(),
+            b"dir/inv_name_.txt".as_ref(),
+        ),
         (b"dir/trailing.dot.".as_ref(), b"dir/trailing.dot".as_ref()),
         (b"simple.txt".as_ref(), b"simple.txt".as_ref()),
     ];

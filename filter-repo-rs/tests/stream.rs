@@ -37,7 +37,7 @@ done
 "#;
     std::fs::write(&stream_path, stream).expect("write custom fast-export stream");
 
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.dry_run = true;
         o.path_renames.push((Vec::new(), b"prefix/".to_vec()));
         #[allow(deprecated)]
@@ -83,7 +83,7 @@ fn inline_replace_text_and_report_modified() {
     let repl = repo.join("repl-inline.txt");
     std::fs::write(&repl, "SECRET-INLINE-123==>REDACTED\n").unwrap();
 
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.replace_text_file = Some(repl.clone());
         o.no_data = false;
         o.write_report = true;

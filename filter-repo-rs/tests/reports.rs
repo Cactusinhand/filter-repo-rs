@@ -16,7 +16,7 @@ fn strip_report_written() {
     drop(f);
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add files"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1024);
         o.write_report = true;
     });
@@ -35,12 +35,15 @@ fn strip_ids_report_written() {
     let repo = init_repo();
     write_file(&repo, "secret.bin", "topsecret\n");
     run_git(&repo, &["add", "."]).0;
-    assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add secret.bin"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["commit", "-q", "-m", "add secret.bin"]).0,
+        0
+    );
     let (_c0, blob_id, _e0) = run_git(&repo, &["rev-parse", "HEAD:secret.bin"]);
     let sha = blob_id.trim();
     let shalist = repo.join("strip-sha.txt");
     std::fs::write(&shalist, format!("{}\n", sha)).unwrap();
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.strip_blobs_with_ids = Some(shalist.clone());
         o.write_report = true;
     });
@@ -52,4 +55,3 @@ fn strip_ids_report_written() {
     assert!(s.contains("Blobs stripped by SHA:"));
     assert!(s.contains("secret.bin"));
 }
-

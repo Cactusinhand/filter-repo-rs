@@ -64,14 +64,17 @@ pub fn init_repo() -> PathBuf {
 }
 
 #[allow(dead_code)]
-pub fn run_tool(dir: &Path, configure: impl FnOnce(&mut fr::Options)) -> (i32, String, String) {
+pub fn run_tool(dir: &Path, configure: impl FnOnce(&mut fr::Options)) -> std::io::Result<()> {
     let mut opts = fr::Options::default();
     opts.source = dir.to_path_buf();
     opts.target = dir.to_path_buf();
     configure(&mut opts);
-    let res = fr::run(&opts);
-    let code = if res.is_ok() { 0 } else { 1 };
-    (code, String::new(), String::new())
+    fr::run(&opts)
+}
+
+#[allow(dead_code)]
+pub fn run_tool_expect_success(dir: &Path, configure: impl FnOnce(&mut fr::Options)) {
+    run_tool(dir, configure).expect("filter-repo-rs run should succeed");
 }
 
 #[allow(dead_code)]

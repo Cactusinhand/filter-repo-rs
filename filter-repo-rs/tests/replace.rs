@@ -9,7 +9,7 @@ fn replace_text_redacts_blob_contents() {
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add secret"]).0, 0);
     let repl = repo.join("repl-blobs.txt");
     std::fs::write(&repl, "SECRET-ABC-123==>REDACTED\n").unwrap();
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.replace_text_file = Some(repl.clone());
         o.no_data = false;
     });
@@ -26,7 +26,7 @@ fn replace_text_regex_redacts_blob() {
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add data"]).0, 0);
     let repl = repo.join("repl-regex.txt");
     std::fs::write(&repl, "regex:foo[0-9]+==>X\n").unwrap();
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.replace_text_file = Some(repl.clone());
         o.no_data = false;
     });
@@ -34,4 +34,3 @@ fn replace_text_regex_redacts_blob() {
     assert!(content.contains("X X"));
     assert!(!content.contains("foo123"));
 }
-

@@ -15,18 +15,16 @@ fn cross_platform_windows_path_handling() {
         let content = format!("Windows path test file {} content", i);
         if let Some(parent) = std::path::Path::new(path_str).parent() {
             if !parent.as_os_str().is_empty() {
-                if let Err(_e) = std::fs::create_dir_all(repo.join(parent)) {
-                    continue;
-                }
+                std::fs::create_dir_all(repo.join(parent))
+                    .expect("Failed to create parent directory");
             }
         }
-        if let Err(_e) = std::fs::write(repo.join(path_str), content) {
-            continue;
-        }
+        std::fs::write(repo.join(path_str), content)
+            .expect("Failed to write test file for Windows path handling");
         run_git(&repo, &["add", path_str]);
     }
     run_git(&repo, &["commit", "-m", "Windows path compatibility test"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(50);
     });
     let (_c2, tree, _e2) = run_git(
@@ -63,7 +61,7 @@ fn cross_platform_case_sensitivity_handling() {
         run_git(&repo, &["add", file_path]);
     }
     run_git(&repo, &["commit", "-m", "Case sensitivity test"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(20);
     });
     let (_c2, tree, _e2) = run_git(
@@ -109,7 +107,7 @@ fn cross_platform_special_characters_in_paths() {
     }
     if files_created > 0 {
         run_git(&repo, &["commit", "-m", "Special characters in paths"]);
-        let (_c, _o, _e) = run_tool(&repo, |o| {
+        run_tool_expect_success(&repo, |o| {
             o.max_blob_size = Some(30);
         });
         let (_c2, tree, _e2) = run_git(
@@ -137,7 +135,11 @@ fn cross_platform_special_characters_in_paths() {
                 break;
             }
         }
-        assert!(found, "expected at least one of {:?} in {:?}", successfully_created, files);
+        assert!(
+            found,
+            "expected at least one of {:?} in {:?}",
+            successfully_created, files
+        );
     }
 }
 
@@ -161,7 +163,7 @@ fn cross_platform_long_file_names() {
         run_git(&repo, &["add", &normalized_path]);
     }
     run_git(&repo, &["commit", "-m", "Long file names test"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(30);
     });
     let (_c2, tree, _e2) = run_git(
@@ -188,7 +190,7 @@ fn cross_platform_long_file_names() {
 fn cross_platform_unicode_normalization() {
     let repo = init_repo();
     // NFC vs NFD for 'é'
-    let nfc = "é";          // U+00E9
+    let nfc = "é"; // U+00E9
     let nfd = "e\u{0301}"; // e + COMBINING ACUTE ACCENT
     let p1 = format!("nfc_{}.txt", nfc);
     let p2 = format!("nfd_{}.txt", nfd);
@@ -196,8 +198,20 @@ fn cross_platform_unicode_normalization() {
     let _ = std::fs::write(repo.join(&p2), "b");
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "unicode normalization"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(10); });
-    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(10);
+    });
+    let (_c2, tree, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree.contains("nfc_") || tree.contains("nfd_"));
 }
 
@@ -210,7 +224,9 @@ fn cross_platform_line_endings() {
     std::fs::write(repo.join("lf.txt"), lf).unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "line endings"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("crlf.txt") && tree.contains("lf.txt"));
 }
@@ -222,11 +238,15 @@ fn cross_platform_file_permissions() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(repo.join("perm.txt")).unwrap().permissions();
+        let mut perms = std::fs::metadata(repo.join("perm.txt"))
+            .unwrap()
+            .permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(repo.join("perm.txt"), perms).unwrap();
     }
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "perms"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
 }

@@ -31,7 +31,17 @@ fn memory_management_path_filtering_memory() {
         ..Default::default()
     };
     let _result = fr::run(&opts);
-    let (_c, tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let (_c, tree, _e) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     let files: Vec<&str> = tree.split_whitespace().collect();
     assert!(files.len() > 0 && files.len() < 1000);
 }
@@ -45,14 +55,27 @@ fn memory_management_blob_size_precomputation_stress() {
             let content = "x".repeat(size);
             let file_path = repo.join(format!("commit{}_file{}.txt", commit, file));
             std::fs::write(file_path, content).unwrap();
-            run_git(&repo, &["add", &format!("commit{}_file{}.txt", commit, file)]);
+            run_git(
+                &repo,
+                &["add", &format!("commit{}_file{}.txt", commit, file)],
+            );
         }
         run_git(&repo, &["commit", "-m", &format!("commit {}", commit)]);
     }
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1000);
     });
-    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    let (_c2, tree, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     let files: Vec<&str> = tree.split_whitespace().collect();
     assert!(files.len() > 0);
 }
@@ -79,7 +102,17 @@ fn memory_management_repeated_operations_same_repository() {
         };
         let _result = fr::run(&opts);
         if iteration % 10 == 0 {
-            let (_c, _tree, _e) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+            let (_c, _tree, _e) = run_git(
+                &repo,
+                &[
+                    "-c",
+                    "core.quotepath=false",
+                    "ls-tree",
+                    "-r",
+                    "--name-only",
+                    "HEAD",
+                ],
+            );
         }
     }
 }
@@ -92,19 +125,29 @@ fn memory_management_edge_case_empty_repositories() {
     run_git(repo_path, &["config", "user.name", "tester"]).0;
     run_git(repo_path, &["config", "user.email", "tester@example.com"]).0;
     run_git(repo_path, &["commit", "--allow-empty", "-m", "empty"]).0;
-    let (_c, _o, _e) = common::run_tool(repo_path, |o| { o.max_blob_size = Some(1000); });
+    common::run_tool(repo_path, |o| {
+        o.max_blob_size = Some(1000);
+    })
+    .expect("filter-repo-rs run should succeed");
 }
 
 #[test]
 fn memory_management_extreme_path_depth() {
     let repo = init_repo();
-    let deep = (0..30).map(|i| format!("d{}", i)).collect::<Vec<_>>().join("/");
+    let deep = (0..30)
+        .map(|i| format!("d{}", i))
+        .collect::<Vec<_>>()
+        .join("/");
     let file = format!("{}/file.txt", deep);
-    if let Some(parent) = std::path::Path::new(&file).parent() { std::fs::create_dir_all(repo.join(parent)).unwrap(); }
+    if let Some(parent) = std::path::Path::new(&file).parent() {
+        std::fs::create_dir_all(repo.join(parent)).unwrap();
+    }
     std::fs::write(repo.join(&file), "content").unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "deep paths"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
 }
 
 #[test]
@@ -112,13 +155,27 @@ fn memory_management_unicode_path_heavy_load() {
     let repo = init_repo();
     for i in 0..200 {
         let name = format!("unicode_{}_é_測試.txt", i);
-        if let Some(parent) = std::path::Path::new(&name).parent() { std::fs::create_dir_all(repo.join(parent)).ok(); }
+        if let Some(parent) = std::path::Path::new(&name).parent() {
+            std::fs::create_dir_all(repo.join(parent)).ok();
+        }
         let _ = std::fs::write(repo.join(&name), format!("payload {}", i));
         run_git(&repo, &["add", &name]);
     }
     run_git(&repo, &["commit", "-m", "unicode files"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
-    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
+    let (_c2, tree, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     let files: Vec<&str> = tree.split_whitespace().collect();
     assert!(!files.is_empty(), "unicode files should be processed");
 }

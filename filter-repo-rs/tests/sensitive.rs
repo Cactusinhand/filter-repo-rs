@@ -6,7 +6,7 @@ fn dry_run_does_not_modify_refs_or_remote() {
     let repo = init_repo();
     let (_c0, head_before, _e0) = run_git(&repo, &["rev-parse", "HEAD"]);
     assert_eq!(run_git(&repo, &["remote", "add", "origin", "."]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.dry_run = true;
         o.write_report = true;
         o.no_data = true;
@@ -24,18 +24,25 @@ fn partial_mode_keeps_origin_and_remote_tracking() {
     let repo = init_repo();
     let (_c, headref, _e) = run_git(&repo, &["symbolic-ref", "-q", "HEAD"]);
     let headref = headref.trim().to_string();
-    let branch = headref.strip_prefix("refs/heads/").unwrap_or(&headref).to_string();
+    let branch = headref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&headref)
+        .to_string();
     assert_eq!(run_git(&repo, &["remote", "add", "origin", "."]).0, 0);
     let spec = format!("+{}:refs/remotes/origin/{}", headref, branch);
     assert_eq!(run_git(&repo, &["fetch", "origin", &spec]).0, 0);
-    let (_code, _, _) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.partial = true;
     });
     let (_c2, remotes, _e2) = run_git(&repo, &["remote"]);
     assert!(remotes.contains("origin"));
     let (_c3, out, _e3) = run_git(
         &repo,
-        &["show-ref", "--verify", &format!("refs/remotes/origin/{}", branch)],
+        &[
+            "show-ref",
+            "--verify",
+            &format!("refs/remotes/origin/{}", branch),
+        ],
     );
     assert!(!out.is_empty());
 }
@@ -62,7 +69,7 @@ fn sensitive_fetch_all_from_bare_remote() {
     assert_eq!(run_git(&repo, &["remote", "add", "origin", &bare_str]).0, 0);
     let (c0, _o0, _e0) = run_git(&repo, &["show-ref", "--verify", "refs/heads/extra"]);
     assert_ne!(c0, 0);
-    let (_code, _, _) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.sensitive = true;
     });
     let (c1, _o1, _e1) = run_git(&repo, &["show-ref", "--verify", "refs/heads/extra"]);
@@ -76,11 +83,14 @@ fn origin_migration_and_removal_nonsensitive() {
     let repo = init_repo();
     let (_c, headref, _e) = run_git(&repo, &["symbolic-ref", "-q", "HEAD"]);
     let headref = headref.trim().to_string();
-    let branch = headref.strip_prefix("refs/heads/").unwrap_or(&headref).to_string();
+    let branch = headref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&headref)
+        .to_string();
     assert_eq!(run_git(&repo, &["remote", "add", "origin", "."]).0, 0);
     let spec = format!("+{}:refs/remotes/origin/{}", headref, branch);
     assert_eq!(run_git(&repo, &["fetch", "origin", &spec]).0, 0);
-    let (_code, _, _) = run_tool(&repo, |_o| {});
+    run_tool_expect_success(&repo, |_o| {});
     let (_c2, remotes, _e2) = run_git(&repo, &["remote"]);
     assert!(!remotes.contains("origin"));
 }
@@ -89,7 +99,7 @@ fn origin_migration_and_removal_nonsensitive() {
 fn sensitive_mode_keeps_origin_remote() {
     let repo = init_repo();
     assert_eq!(run_git(&repo, &["remote", "add", "origin", "."]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.sensitive = true;
         o.no_fetch = true;
         o.no_data = true;

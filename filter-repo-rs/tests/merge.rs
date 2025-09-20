@@ -19,18 +19,24 @@ fn merge_parents_dedup_when_side_branch_pruned() {
 
     assert_eq!(run_git(&repo, &["checkout", &base_branch]).0, 0);
     assert_eq!(
-        run_git(&repo, &["merge", "--no-ff", "--no-commit", "feature-branch"]).0,
+        run_git(
+            &repo,
+            &["merge", "--no-ff", "--no-commit", "feature-branch"]
+        )
+        .0,
         0,
         "expected merge to succeed",
     );
     write_file(&repo, "keep.txt", "merge resolution");
     assert_eq!(run_git(&repo, &["add", "keep.txt"]).0, 0);
-    assert_eq!(run_git(&repo, &["commit", "-m", "merge feature branch"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["commit", "-m", "merge feature branch"]).0,
+        0
+    );
 
-    let (code, _, _) = run_tool(&repo, |opts| {
+    run_tool_expect_success(&repo, |opts| {
         opts.paths.push(b"keep.txt".to_vec());
     });
-    assert_eq!(code, 0, "filter run should succeed");
 
     let filtered_path = repo
         .join(".git")
@@ -78,7 +84,11 @@ fn merge_parents_dedup_when_side_branch_pruned() {
         }
     }
 
-    assert_eq!(parents.len(), 1, "expected single parent line: {:?}", parents);
+    assert_eq!(
+        parents.len(),
+        1,
+        "expected single parent line: {:?}",
+        parents
+    );
     assert!(parents[0].starts_with(b"from :"));
 }
-

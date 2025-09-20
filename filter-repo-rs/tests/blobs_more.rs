@@ -14,7 +14,9 @@ fn max_blob_size_edge_cases() {
     std::fs::write(repo.join("large.bin"), &large_content).unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add edge case files"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(100);
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("empty.txt"));
     assert!(tree.contains("tiny.txt"));
@@ -34,8 +36,14 @@ fn max_blob_size_with_path_filtering() {
     std::fs::write(repo.join("keep/small.txt"), "small content").unwrap();
     std::fs::write(repo.join("drop/small.txt"), "small content").unwrap();
     run_git(&repo, &["add", "."]);
-    run_git(&repo, &["commit", "-m", "add files in different directories"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); o.paths.push(b"keep/".to_vec()); });
+    run_git(
+        &repo,
+        &["commit", "-m", "add files in different directories"],
+    );
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+        o.paths.push(b"keep/".to_vec());
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("keep/small.txt"));
     assert!(!tree.contains("drop/"));
@@ -59,7 +67,10 @@ fn max_blob_size_with_strip_blobs_by_sha() {
     std::fs::write(repo.join("sha_list.txt"), &sha_list_content).unwrap();
     run_git(&repo, &["add", "sha_list.txt"]);
     run_git(&repo, &["commit", "-m", "add sha list"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); o.strip_blobs_with_ids = Some(repo.join("sha_list.txt")); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+        o.strip_blobs_with_ids = Some(repo.join("sha_list.txt"));
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(!tree.contains("file1.txt"));
     assert!(!tree.contains("file2.txt"));
@@ -68,7 +79,9 @@ fn max_blob_size_with_strip_blobs_by_sha() {
 #[test]
 fn max_blob_size_empty_repository() {
     let repo = init_repo();
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("README.md"));
 }
@@ -82,7 +95,9 @@ fn max_blob_size_mixed_blob_types() {
     std::fs::write(repo.join("zeroes.bin"), vec![0u8; 500]).unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add mixed content types"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1000); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1000);
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("zeroes.bin"));
     assert!(!tree.contains("text.txt"));
@@ -101,9 +116,13 @@ fn max_blob_size_batch_optimization_verification() {
     write_file(&repo, "large2.bin", &"b".repeat(3000));
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add many files for batch test"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1500); });
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1500);
+    });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
-    for i in 0..100 { assert!(tree.contains(&format!("file{}.txt", i))); }
+    for i in 0..100 {
+        assert!(tree.contains(&format!("file{}.txt", i)));
+    }
     assert!(!tree.contains("large1.bin"));
     assert!(!tree.contains("large2.bin"));
 }
@@ -115,12 +134,28 @@ fn max_blob_size_fallback_behavior() {
     let (c, _o, e) = run_git(&repo_path, &["init"]);
     assert_eq!(c, 0, "git init failed: {}", e);
     run_git(&repo_path, &["config", "user.name", "A U Thor"]).0;
-    run_git(&repo_path, &["config", "user.email", "a.u.thor@example.com"]).0;
+    run_git(
+        &repo_path,
+        &["config", "user.email", "a.u.thor@example.com"],
+    )
+    .0;
     write_file(&repo_path, "test.txt", "hello");
     run_git(&repo_path, &["add", "."]);
     run_git(&repo_path, &["commit", "-m", "add test file"]);
-    let (_c, _o, _e) = run_tool(&repo_path, |o| { o.max_blob_size = Some(1000); });
-    let (_c2, tree, _e2) = run_git(&repo_path, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo_path, |o| {
+        o.max_blob_size = Some(1000);
+    });
+    let (_c2, tree, _e2) = run_git(
+        &repo_path,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree.contains("test.txt"));
 }
 
@@ -132,10 +167,30 @@ fn max_blob_size_no_git_objects() {
     assert_eq!(c, 0, "git init failed: {}", e);
     run_git(repo_path, &["config", "user.name", "test"]).0;
     run_git(repo_path, &["config", "user.email", "test@example.com"]).0;
-    run_git(repo_path, &["commit", "--allow-empty", "-q", "-m", "empty commit 1"]).0;
-    run_git(repo_path, &["commit", "--allow-empty", "-q", "-m", "empty commit 2"]).0;
-    let (_c, _o, _e) = run_tool(repo_path, |o| { o.max_blob_size = Some(1000); });
-    let (_c2, tree, _e2) = run_git(repo_path, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_git(
+        repo_path,
+        &["commit", "--allow-empty", "-q", "-m", "empty commit 1"],
+    )
+    .0;
+    run_git(
+        repo_path,
+        &["commit", "--allow-empty", "-q", "-m", "empty commit 2"],
+    )
+    .0;
+    run_tool_expect_success(repo_path, |o| {
+        o.max_blob_size = Some(1000);
+    });
+    let (_c2, tree, _e2) = run_git(
+        repo_path,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree.is_empty());
 }
 
@@ -145,8 +200,20 @@ fn max_blob_size_corrupted_git_output() {
     write_file(&repo, "test.txt", "test content");
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add test file"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(5); });
-    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(5);
+    });
+    let (_c2, tree, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(!tree.contains("test.txt"));
 }
 
@@ -159,8 +226,20 @@ fn max_blob_size_extreme_threshold_values() {
     write_file(&repo, "large.txt", &"x".repeat(100000));
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add various sized files"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(1); });
-    let (_c2, tree1, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(1);
+    });
+    let (_c2, tree1, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree1.contains("tiny.txt"));
     assert!(!tree1.contains("small.txt"));
     assert!(!tree1.contains("medium.txt"));
@@ -172,8 +251,20 @@ fn max_blob_size_extreme_threshold_values() {
     write_file(&repo2, "large.txt", &"x".repeat(100000));
     run_git(&repo2, &["add", "."]);
     run_git(&repo2, &["commit", "-m", "add various sized files"]);
-    let (_c, _o, _e) = run_tool(&repo2, |o| { o.max_blob_size = Some(1000000); });
-    let (_c2, tree2, _e2) = run_git(&repo2, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo2, |o| {
+        o.max_blob_size = Some(1000000);
+    });
+    let (_c2, tree2, _e2) = run_git(
+        &repo2,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree2.contains("tiny.txt"));
     assert!(tree2.contains("small.txt"));
     assert!(tree2.contains("medium.txt"));
@@ -189,8 +280,20 @@ fn max_blob_size_precise_threshold_handling() {
     std::fs::write(repo.join("just_over_100.txt"), b"d".repeat(101)).unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "add boundary test files"]);
-    let (_c, _o, _e) = run_tool(&repo, |o| { o.max_blob_size = Some(100); });
-    let (_c2, tree, _e2) = run_git(&repo, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", "HEAD"]);
+    run_tool_expect_success(&repo, |o| {
+        o.max_blob_size = Some(100);
+    });
+    let (_c2, tree, _e2) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
     assert!(tree.contains("exactly_100_bytes.txt"));
     assert!(tree.contains("just_under_100.txt"));
     assert!(!tree.contains("exactly_101_bytes.txt"));

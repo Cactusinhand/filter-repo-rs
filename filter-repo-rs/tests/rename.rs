@@ -5,7 +5,7 @@ use common::*;
 fn tag_rename_lightweight_creates_new_and_deletes_old() {
     let repo = init_repo();
     assert_eq!(run_git(&repo, &["tag", "v1.0"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.no_data = true;
         o.tag_rename = Some((b"v".to_vec(), b"release-".to_vec()));
     });
@@ -17,8 +17,11 @@ fn tag_rename_lightweight_creates_new_and_deletes_old() {
 #[test]
 fn tag_rename_annotated_produces_tag_object() {
     let repo = init_repo();
-    assert_eq!(run_git(&repo, &["tag", "-a", "-m", "hello tag", "v1.0"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    assert_eq!(
+        run_git(&repo, &["tag", "-a", "-m", "hello tag", "v1.0"]).0,
+        0
+    );
+    run_tool_expect_success(&repo, |o| {
         o.no_data = true;
         o.tag_rename = Some((b"v".to_vec(), b"release-".to_vec()));
     });
@@ -33,7 +36,7 @@ fn branch_rename_updates_ref_and_head() {
     let repo = init_repo();
     let (_c0, headref, _e0) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     let headref = headref.trim().to_string();
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((Vec::new(), b"renamed-".to_vec()));
         o.no_data = true;
     });
@@ -50,16 +53,21 @@ fn branch_rename_updates_ref_and_head() {
 #[test]
 fn branch_rename_without_new_commits_updates_refs() {
     let repo = init_repo();
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "feature/plain"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "feature/plain"]).0,
+        0
+    );
     let (_c_before, head_before, _e_before) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(head_before.trim(), "refs/heads/feature/plain");
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"feature/".to_vec(), b"topic/".to_vec()));
         o.no_data = true;
     });
-    let (_c_new, out_new, _e_new) = run_git(&repo, &["show-ref", "--verify", "refs/heads/topic/plain"]);
+    let (_c_new, out_new, _e_new) =
+        run_git(&repo, &["show-ref", "--verify", "refs/heads/topic/plain"]);
     assert!(!out_new.is_empty());
-    let (_c_old, out_old, _e_old) = run_git(&repo, &["show-ref", "--verify", "refs/heads/feature/plain"]);
+    let (_c_old, out_old, _e_old) =
+        run_git(&repo, &["show-ref", "--verify", "refs/heads/feature/plain"]);
     assert!(out_old.is_empty());
     let (_c_head, head_after, _e_head) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(head_after.trim(), "refs/heads/topic/plain");
@@ -68,13 +76,16 @@ fn branch_rename_without_new_commits_updates_refs() {
 #[test]
 fn branch_prefix_rename_preserves_head_to_mapped_target() {
     let repo = init_repo();
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0,
+        0
+    );
     write_file(&repo, "feat.txt", "feat");
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "feat commit"]).0, 0);
     let (_c0, headref, _e0) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(headref.trim(), "refs/heads/features/foo");
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"features/".to_vec(), b"topics/".to_vec()));
         o.no_data = true;
     });
@@ -101,7 +112,7 @@ fn head_preserved_when_branch_unchanged() {
         .0,
         0
     );
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"feature/".to_vec(), b"topic/".to_vec()));
         o.no_data = true;
     });
@@ -119,12 +130,18 @@ fn multi_branch_prefix_rename_maps_all_and_preserves_others() {
         .unwrap_or(&headref)
         .to_string();
 
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0,
+        0
+    );
     write_file(&repo, "f-foo.txt", "foo");
     run_git(&repo, &["add", "."]).0;
     run_git(&repo, &["commit", "-q", "-m", "feat foo"]).0;
     assert_eq!(run_git(&repo, &["checkout", "-q", &def_short]).0, 0);
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0,
+        0
+    );
     write_file(&repo, "f-bar.txt", "bar");
     run_git(&repo, &["add", "."]).0;
     run_git(&repo, &["commit", "-q", "-m", "feat bar"]).0;
@@ -134,7 +151,7 @@ fn multi_branch_prefix_rename_maps_all_and_preserves_others() {
     run_git(&repo, &["add", "."]).0;
     run_git(&repo, &["commit", "-q", "-m", "misc baz"]).0;
 
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"features/".to_vec(), b"topics/".to_vec()));
         o.no_data = true;
     });
@@ -151,8 +168,7 @@ fn multi_branch_prefix_rename_maps_all_and_preserves_others() {
     let (_c4, out_features_bar, _e4) =
         run_git(&repo, &["show-ref", "--verify", "refs/heads/features/bar"]);
     assert!(out_features_bar.is_empty());
-    let (_c5, out_misc_baz, _e5) =
-        run_git(&repo, &["show-ref", "--verify", "refs/heads/misc/baz"]);
+    let (_c5, out_misc_baz, _e5) = run_git(&repo, &["show-ref", "--verify", "refs/heads/misc/baz"]);
     assert!(!out_misc_baz.is_empty());
 }
 
@@ -166,12 +182,18 @@ fn multi_branch_prefix_rename_maps_head_from_deleted_branch() {
         .unwrap_or(&headref)
         .to_string();
 
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "features/foo"]).0,
+        0
+    );
     write_file(&repo, "f-foo.txt", "foo");
     run_git(&repo, &["add", "."]).0;
     run_git(&repo, &["commit", "-q", "-m", "feat foo"]).0;
     assert_eq!(run_git(&repo, &["checkout", "-q", &def_short]).0, 0);
-    assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0,
+        0
+    );
     write_file(&repo, "f-bar.txt", "bar");
     run_git(&repo, &["add", "."]).0;
     run_git(&repo, &["commit", "-q", "-m", "feat bar"]).0;
@@ -179,7 +201,7 @@ fn multi_branch_prefix_rename_maps_head_from_deleted_branch() {
     let (_c_h, head_before, _e_h) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(head_before.trim(), "refs/heads/features/bar");
 
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"features/".to_vec(), b"topics/".to_vec()));
         o.no_data = true;
     });

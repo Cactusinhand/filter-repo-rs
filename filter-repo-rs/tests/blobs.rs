@@ -10,7 +10,7 @@ fn max_blob_size_drops_large_blobs() {
     std::fs::write(repo.join("small.bin"), &small).unwrap();
     run_git(&repo, &["add", "."]).0;
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add blobs"]).0, 0);
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1024);
         o.no_data = false;
     });
@@ -31,11 +31,10 @@ fn max_blob_size_threshold_boundary() {
         run_git(&repo, &["commit", "-q", "-m", "add boundary test files"]).0,
         0
     );
-    let (_c, _o, _e) = run_tool(&repo, |o| {
+    run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1024);
     });
     let (_c2, tree, _e2) = run_git(&repo, &["ls-tree", "-r", "--name-only", "HEAD"]);
     assert!(tree.contains("exact.txt"));
     assert!(!tree.contains("over.txt"));
 }
-

@@ -39,8 +39,17 @@ impl StripShaLookup {
         let mut entries: Vec<ShaBytes> = Vec::new();
         for line in reader.lines() {
             let line = line?;
-            if let Some(bytes) = parse_sha_line(&line) {
-                entries.push(bytes);
+            if line.trim().is_empty() || line.trim_start().starts_with('#') {
+                continue;
+            }
+            match parse_sha_line(&line) {
+                Some(bytes) => entries.push(bytes),
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("invalid SHA entry in {}: {line}", path.display()),
+                    ))
+                }
             }
         }
         if entries.is_empty() {
@@ -369,11 +378,12 @@ pub fn run(opts: &Options) -> io::Result<()> {
     } else {
         None
     };
-    let mut fi_out_opt: Option<BufReader<std::process::ChildStdout>> = if let Some(ref mut child) = fi {
-        child.stdout.take().map(BufReader::new)
-    } else {
-        None
-    };
+    let mut fi_out_opt: Option<BufReader<std::process::ChildStdout>> =
+        if let Some(ref mut child) = fi {
+            child.stdout.take().map(BufReader::new)
+        } else {
+            None
+        };
 
     let replacer = match &opts.replace_message_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
@@ -668,7 +678,9 @@ pub fn run(opts: &Options) -> io::Result<()> {
                             ) {
                                 if let Some((old, Some(mark))) = commit_pairs.last() {
                                     if *mark == m {
-                                        if let Some(new_id) = resolve_mark_oid(fi_in, fi_out, *mark)? {
+                                        if let Some(new_id) =
+                                            resolve_mark_oid(fi_in, fi_out, *mark)?
+                                        {
                                             mapper.update_mapping(old, &new_id);
                                         }
                                     }

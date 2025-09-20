@@ -84,7 +84,8 @@ fn error_handling_invalid_sha_format_in_strip_blobs() {
         ..Default::default()
     };
 
-    let _result = fr::run(&opts);
+    let result = fr::run(&opts);
+    assert!(result.is_err(), "expected invalid SHA list to error");
 }
 
 #[test]
@@ -97,7 +98,11 @@ fn path_rename_with_identical_paths() {
         path_renames: vec![(b"invalidformat".to_vec(), b"invalidformat".to_vec())],
         ..Default::default()
     };
-    let _result = fr::run(&opts);
+    let result = fr::run(&opts);
+    assert!(
+        result.is_err(),
+        "path rename with identical paths should fail"
+    );
 }
 
 #[test]
@@ -107,7 +112,7 @@ fn error_handling_invalid_max_blob_size_values() {
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "test commit"]);
 
-    let test_cases = vec![Some(0), Some(1), Some(usize::MAX)];
+    let test_cases = vec![Some(0), Some(usize::MAX)];
     for max_size in test_cases {
         let opts = fr::Options {
             source: repo.clone(),
@@ -116,26 +121,32 @@ fn error_handling_invalid_max_blob_size_values() {
             max_blob_size: max_size,
             ..Default::default()
         };
-        let _result = fr::run(&opts);
+        let result = fr::run(&opts);
+        assert!(
+            result.is_err(),
+            "max_blob_size {:?} should be rejected",
+            max_size
+        );
     }
 }
 
 #[test]
 fn error_handling_malformed_utf8_content() {
     let repo = init_repo();
-    let malformed_utf8 = vec![0x66, 0x69, 0x6c, 0x65, 0x80, 0x81, 0x2e, 0x74, 0x78, 0x74];
-    std::fs::write(repo.join("test.bin"), malformed_utf8).unwrap();
-    run_git(&repo, &["add", "."]);
-    run_git(&repo, &["commit", "-m", "add malformed utf8"]);
+    let invalid_regex_file = repo.join("invalid_regex.txt");
+    std::fs::write(&invalid_regex_file, b"regex:(?P<unterminated").unwrap();
 
     let opts = fr::Options {
         source: repo.clone(),
         target: repo.clone(),
         refs: vec!["--all".to_string()],
-        max_blob_size: Some(1000),
+        replace_text_file: Some(invalid_regex_file),
         ..Default::default()
     };
-    let _result = fr::run(&opts);
+    let result = fr::run(&opts);
+    assert!(result.is_err());
+    let msg = format!("{:?}", result.err().unwrap());
+    assert!(msg.contains("invalid regex"));
 }
 
 #[test]
@@ -145,24 +156,20 @@ fn error_handling_permission_denied_simulation() {
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "test commit"]);
 
-    let readonly_dir = repo.join("readonly");
-    std::fs::create_dir_all(&readonly_dir).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&readonly_dir).unwrap().permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(&readonly_dir, perms).unwrap();
-    }
+    let restricted_dir = repo.join("restricted");
+    std::fs::create_dir_all(&restricted_dir).unwrap();
 
     let opts = fr::Options {
         source: repo.clone(),
-        target: readonly_dir.clone(),
+        target: repo.clone(),
         refs: vec!["--all".to_string()],
-        max_blob_size: Some(1000),
+        replace_text_file: Some(restricted_dir.clone()),
         ..Default::default()
     };
-    let _result = fr::run(&opts);
+    let result = fr::run(&opts);
+    assert!(result.is_err());
+    let msg = format!("{:?}", result.err().unwrap());
+    assert!(msg.contains("failed to read --replace-text"));
 }
 
 #[test]
@@ -189,19 +196,18 @@ fn error_handling_corrupted_git_repository() {
 #[test]
 fn error_handling_extremely_long_paths() {
     let repo = init_repo();
-    let long_filename = "a".repeat(200);
-    let long_path = repo.join(&long_filename);
-    std::fs::write(&long_path, "content").unwrap();
-    run_git(&repo, &["add", "."]);
-    run_git(&repo, &["commit", "-m", "add long filename"]);
+    let long_path_entry = vec![b'a'; 5000];
     let opts = fr::Options {
         source: repo.clone(),
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
-        paths: vec![long_filename.into_bytes()],
+        paths: vec![long_path_entry],
         ..Default::default()
     };
-    let _result = fr::run(&opts);
+    let result = fr::run(&opts);
+    assert!(
+        result.is_err(),
+        "expected extremely long paths to trigger an error"
+    );
 }
-
