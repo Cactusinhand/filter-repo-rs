@@ -83,7 +83,9 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - No LFS detection/orphan reporting, no size-based skipping.
 
 - Encoding & hash rewriting
-  - `--reencode=yes` normalizes messages to UTF-8; there is no short-hash translation in messages.
+  - Messages are re-encoded to UTF-8 (`--reencode=yes`).
+  - Commit/tag message short/long hash translation is implemented using `commit-map` (old → new);
+    a `--preserve-commit-hashes` flag to disable this behavior is not yet available.
 
  - Windows path policy
   - Sanitization is always on for rebuilt lines; no user-selectable policy (sanitize|skip|error) yet.

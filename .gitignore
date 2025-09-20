@@ -1,1 +1,5 @@
 target/
+.claude/
+.serena/
+CLAUDE.md
+AGENTS.md

@@ -1,304 +1,345 @@
-filter-repo-rs (Rust Prototype)
-===============================
+filter-repo-rs (Rust prototype of git-filter-repo)
+==================================================
 
-This is a Rust reimplementation prototype of git-filter-repo. It streams
-`git fast-export` -> filters -> `git fast-import`, keeps debug streams, and provides
-several core features with Windows compatibility.
+filter-repo-rs is a Rust prototype reimplementation of [git-filter-repo](https://github.com/newren/git-filter-repo).
 
-Build
------
+It streams `git fast-export` -> in‑process filters -> `git fast-import`, writes
+debug streams, and focuses on safe, fast, cross‑platform operation (including Windows).
 
-cargo build -p filter-repo-rs --release
+- [English](README.md) | [中文](README.zh-CN.md)
 
-Run
----
+Status: prototype. Not feature‑complete with Python, but usable for common workflows.
 
-Run from inside a Git repository (or pass `--source`/`--target`):
+To quickly understand this tool, please see Use Cases:
 
-filter-repo-rs \
-  --source . \
-  --target . \
-  --refs --all \
-  --date-order \
-  --replace-message replacements.txt
+Use Cases
+---------
 
-Testing
--------
+1) Remove leaked secrets across history (files and optionally messages)
 
-Integration tests exercise the end-to-end pipeline, spawning temporary Git
-repositories under `target/it/`. They cover path filtering and prefix renames,
-commit/ref map generation, Windows path sanitization policy, and final ref
-topology checks. Run them with:
-
-```
-cargo test -p filter-repo-rs
-```
-
-The suite requires Git in `PATH` and writes debug artifacts (commit-map,
-ref-map, reports) inside each ephemeral repository for verification.
-
-Key Flags (prototype)
----------------------
-
-### Repository & ref selection
-
-- `--source DIR`, `--target DIR`: working directories (default `.`)
-- `--ref|--refs REF`: repeatable; defaults to `--all`
-- `--date-order`, `--no-data`: pass-through to `git fast-export`
-
-### Path selection & rewriting
-
-- `--path PREFIX`: include-only by prefix (repeatable; ORed)
-- `--path-glob GLOB`: include by glob (supports `*`, `?`, `**`; repeatable; ORed)
-- `--path-regex REGEX`: include by regex (Rust `regex` crate in bytes mode; repeatable; ORed)
-- `--invert-paths`: invert selection (drop matches; keep others)
-- `--path-rename OLD:NEW`: rename path prefix in file changes
-- `--subdirectory-filter DIR`: equivalent to `--path DIR/ --path-rename DIR/:`
-- `--to-subdirectory-filter DIR`: equivalent to `--path-rename :DIR/`
-
-Regex path filters do not support look-around or backreferences (crate limitation). Prefer anchored patterns when scanning
-large histories to minimize backtracking costs.
-
-### Blob filtering & redaction
-
-- `--replace-text FILE`: literal replacements applied to blob contents (files). Same syntax
-  as `--replace-message`. Lines starting with `regex:` are treated as regex rules
-  (e.g., `regex:foo[0-9]+==>X`). Enabled in the default build.
-- `--max-blob-size BYTES`: drop blobs larger than BYTES and delete paths that reference them.
-- `--strip-blobs-with-ids FILE`: drop blobs whose 40-hex ids (one per line) are listed.
-
-### Commit, tag & ref updates
-
-- `--replace-message FILE`: literal replacements for commit/tag messages.
-  Each non-empty, non-comment line is `from==>to` or `from` (implies `***REMOVED***`).
-- `--tag-rename OLD:NEW`: rename tags starting with OLD to start with NEW
-- `--branch-rename OLD:NEW`: rename branches starting with OLD to start with NEW
-
-### Execution behavior & output
-
-- `--write-report`: write a summary to `.git/filter-repo/report.txt`.
-- `--cleanup [none|standard|aggressive]`: post-import cleanup (reflog expire + gc). Default `none`.
-- `--quiet`, `--no-reset`: reduce noise / skip post-import reset
-- `--no-reencode`, `--no-quotepath`, `--no-mark-tags`: pass-through fast-export toggles
-- `--backup`: create a git bundle of the selected refs under `.git/filter-repo/` (skipped in `--dry-run`).
-- `--backup-path PATH`: override where the bundle is written (directory or explicit file path).
-
-Use Cases (典型使用场景)
-------------------------
-
-1) 历史记录中误提交了密钥/令牌（API_TOKEN、SECRET 等）
-
-- 目标：从所有提交历史中清除敏感字串（包含文件内容与可选的提交说明），覆盖所有 refs。
-- 建议流程：
-  1. 先备份当前历史（强烈推荐）：
+- Goal: scrub sensitive strings from all commits across all refs.
+- Suggested steps:
+  1. Backup first (strongly recommended):
      ```sh
      filter-repo-rs --backup --refs --all
      ```
-  2. 编写内容替换规则（支持字面值与正则）：
+  2. Author replacement rules (literal + regex both supported for file contents):
      ```sh
      # redact.txt
      SECRET_TOKEN==>REDACTED
      regex:(API|TOKEN|SECRET)[A-Za-z0-9_-]+==>REDACTED
      ```
-  3. 对所有 refs 进行敏感数据清洗（包含远端 refs 时可用 --sensitive 进行全量覆盖）：
+  3. Clean sensitive data across refs (use `--sensitive` to include remote refs if present):
      ```sh
      filter-repo-rs \
        --sensitive \
        --replace-text redact.txt \
        --write-report
      ```
-  4. 如提交信息（commit message）中也包含敏感数据，另备一份消息替换规则并加上：
+  4. If commit/tag messages contain sensitive data, add message rules as well (currently literal rules only):
      ```sh
      filter-repo-rs --replace-message msg_rules.txt
      ```
-  5. 重写历史后需要强制推送：
+  5. Force‑push new history:
      ```sh
      git push --force --all
      git push --force --tags
      ```
-  6. 与团队/CI 协调，清理下游 fork/clone 缓存，防止旧历史回流。
+  6. Coordinate with team/CI to prevent old history from re‑appearing (clear caches, forks, etc.).
 
-2) 提交说明（commit message）里有敏感信息，需要清洗
+2) Scrub sensitive commit/tag messages
 
-- 准备一份消息替换规则：
+- Prepare message rules (literal for now):
   ```sh
   # messages.txt
   password==>[removed]
-  regex:token=[0-9A-Za-z_\-]+==>[removed]
   ```
-- 执行：
+- Run:
   ```sh
   filter-repo-rs --replace-message messages.txt --write-report
   ```
-- 可与 `--backup`、`--sensitive`、`--dry-run` 搭配以安全预演与全量覆盖。
+- Combine with `--backup`, `--sensitive`, and `--dry-run` for safe rehearsal/full coverage.
 
-3) 仓库因大文件/二进制文件膨胀，需要瘦身
+3) Reduce repository size by removing large binaries
 
-- 先分析体积与大对象分布：
+- Inspect first:
   ```sh
-  filter-repo-rs --analyze        # 人类可读
-  filter-repo-rs --analyze --analyze-json   # 机器可读
+  filter-repo-rs --analyze
+  filter-repo-rs --analyze --analyze-json
   ```
-- 直接按阈值移除超大对象（并删除对应路径）：
+- Remove by threshold (and delete referencing paths):
   ```sh
   filter-repo-rs --max-blob-size 5_000_000 --write-report
   ```
-- 或基于分析结果列出 OID 清单后定点移除：
+- Or remove by explicit blob IDs:
   ```sh
   filter-repo-rs --strip-blobs-with-ids big-oids.txt --write-report
   ```
-- 建议将大媒体转移至 Git LFS 或外部存储，避免后续再次膨胀。
+- Consider moving large media to Git LFS or external storage to avoid future bloat.
 
-4) 批量重命名标签/分支
+4) Bulk renaming of tags/branches
 
-- 标签前缀迁移：
+- Rename tag prefixes:
   ```sh
   filter-repo-rs --tag-rename v1.:legacy/v1.
   ```
-- 分支前缀迁移：
+- Rename branch prefixes:
   ```sh
   filter-repo-rs --branch-rename feature/:exp/
   ```
 
-5) 调整仓库目录结构
+5) Adjust directory layout
 
-- 提取子目录为新根（类似 monorepo 拆分某模块）：
+- Extract a subdirectory as the new root (e.g., splitting a monorepo component):
   ```sh
   filter-repo-rs --subdirectory-filter frontend
   ```
-- 将现有根移动到子目录：
+- Move the current root under a subdirectory:
   ```sh
   filter-repo-rs --to-subdirectory-filter app/
   ```
-- 批量路径前缀改名：
+- Bulk rename a path prefix:
   ```sh
   filter-repo-rs --path-rename old/:new/
   ```
 
-6) 安全执行建议与常用开关
+6) Safety tips and common switches
 
-- 预演不落盘：`--dry-run`
-- 产出审计报告：`--write-report`
-- 重写前自动备份：`--backup [--backup-path PATH]`
-- 敏感模式（覆盖所有远端引用）：`--sensitive`（配合 `--no-fetch` 可跳过抓取）
-- 仅重写本地、跳过远端清理：`--partial`
-- 必要时跳过保护：`--force`（谨慎使用）
+- Dry‑run without updating refs: `--dry-run`
+- Write an audit summary: `--write-report`
+- Backup before rewriting: `--backup [--backup-path PATH]`
+- Sensitive mode (cover all remote refs): `--sensitive` (with `--no-fetch` to skip fetching)
+- Partial rewrite (keep existing remotes/refs): `--partial`
+- Bypass protections if required: `--force` (use with care)
 
-7) CI 中的健康度分析预警
+7) CI health checks
 
-- 在 CI 里执行：
+- In CI, run:
   ```sh
   filter-repo-rs --analyze --analyze-json \
     --analyze-large-blob 10_000_000 \
     --analyze-commit-msg-warn 4096 \
     --analyze-max-parents-warn 8
   ```
-- 根据阈值输出 `warnings`，用于阻断超限提交或提醒库体积趋势。
+- Use emitted warnings to block oversize commits and monitor repo growth trends.
 
+Quick start
+-----------
 
-### Restoring from bundle backups
+Run inside a Git repository (or pass `--source`/`--target`):
 
-When `--backup` runs, the tool invokes `git bundle create` with a file name such as
-`backup-20240216-153012-123456789.bundle`. The timestamp is recorded in UTC down to
-nanoseconds so repeated runs cannot collide, and the `.bundle` extension matches what
-`git bundle` expects.
+```sh
+filter-repo-rs \
+  --source . \
+  --target . \
+  --refs --all \
+  --date-order \
+  --replace-message replacements.txt
+```
 
-To recover a repository from one of these backups:
+Features
+--------
 
-1. Create a new directory (it does not need to be a Git repository yet).
-2. Clone the bundle into that directory:
+- Streaming pipeline
+  - `fast-export` -> filters -> `fast-import`, with debug copies saved under `.git/filter-repo/`.
+  - Core fast-export flags enabled: `--show-original-ids`, `--signed-tags=strip`,
+    `--tag-of-filtered-object=rewrite`, `--fake-missing-tagger`,
+    `--reference-excluded-parents`, `--use-done-feature`.
+  - `fast-import` runs with `-c core.ignorecase=false` and exports marks to `.git/filter-repo/target-marks`.
 
-   ```sh
-   git clone /path/to/backup-20240216-153012-123456789.bundle restored-repo
-   ```
+- Path selection & rewriting
+  - Include by prefix `--path`, glob `--path-glob` (`*`, `?`, `**`), or regex `--path-regex` (Rust regex; no look‑around/backrefs).
+  - `--invert-paths` to invert selection; `--path-rename OLD:NEW` for prefix renames.
+  - Helpers: `--subdirectory-filter DIR` and `--to-subdirectory-filter DIR`.
 
-   Alternatively, to import into an existing empty repository, run:
+- Blob filtering & redaction
+  - `--replace-text FILE` for content replacements; supports literal rules and `regex:` rules
+    in the same file (e.g., `regex:api_key-[0-9]+==>REDACTED`).
+  - `--max-blob-size BYTES` drops large blobs and removes paths that reference them.
+  - `--strip-blobs-with-ids FILE` drops listed 40‑hex blob IDs.
 
-   ```sh
-   git init restored-repo
-   cd restored-repo
-   git bundle unbundle /path/to/backup-20240216-153012-123456789.bundle
-   git symbolic-ref HEAD refs/heads/<branch-from-bundle>
-   ```
+- Commit, tag, and refs
+  - `--replace-message FILE` applies literal replacements in commit/tag messages.
+  - Short/long commit hashes in messages are rewritten to new IDs using the generated `commit-map`.
+  - `--tag-rename` and `--branch-rename` rename by prefix; annotated tags are deduped and emitted once.
+  - Empty non‑merge commits are pruned via `alias` to the first parent mark; merges are preserved.
+  - Safe ref updates and HEAD selection after import.
 
-3. Inspect the restored refs (e.g., `git show-ref`) and continue working from the recovered history.
+- Safety, backup, and analysis
+  - Optional preflight checks; `--backup` creates a bundle before rewriting; `--write-report` summarizes actions.
+  - Analyze mode: `--analyze` (human) or `--analyze --analyze-json` (machine) to inspect repository health.
 
-### Safety & advanced modes
+Requirements
+------------
 
-- `--partial`: partial rewrite; disables origin migration, ref cleanup, reflog gc.
-- `--sensitive` (aka sensitive-data removal): enables fetch-all refs to ensure coverage; implies skipping origin removal.
-- `--no-fetch`: do not fetch refs even in `--sensitive` mode.
-- `--force`, `-f`: bypass sanity checks (danger: destructive).
-- `--enforce-sanity`: enable preflight safety checks.
-- `--dry-run`: do not update refs or clean up; preview only.
+- Git available on PATH (a recent version recommended)
+- Rust toolchain (stable)
+- Linux/macOS/Windows supported
 
-Behavior Highlights
--------------------
+Build
+-----
 
-- Saves debug streams to `.git/filter-repo/fast-export.{original,filtered}`.
-- Empty-commit pruning (non-merges) via fast-import `alias` from old mark to first parent mark.
-- Annotated tags: buffered, optionally renamed, deduped, and emitted once.
-- Lightweight tags: `reset ...` + `from ...` pairs buffered and flushed before `done`.
-- Safe deletion policy: old refs (tags/branches) deleted only after verifying the new exists.
-- HEAD: if original HEAD target is missing, set HEAD to the mapped target under `--branch-rename`,
-  otherwise to the first updated branch.
- - Origin migration and remote removal:
-   - For full runs (not `--partial`): migrates `refs/remotes/origin/*` to `refs/heads/*` pre-run.
-   - In non‑sensitive runs, removes the `origin` remote after completion (to prevent accidental pushes to the old history).
-   - In sensitive mode (`--sensitive`), the tool attempts to fetch all refs (unless `--no-fetch`) to ensure complete coverage; origin is not removed.
+```sh
+cargo build -p filter-repo-rs --release
+```
 
-Artifacts
----------
+Testing
+-------
 
-Also writes (when enabled):
-- `.git/filter-repo/report.txt` via `--write-report` with counts for blobs stripped by size/SHA and blobs modified by `--replace-text`.
+```sh
+cargo test -p filter-repo-rs
+```
 
-- `.git/filter-repo/commit-map`: old commit id (original-oid) -> new commit id.
-- `.git/filter-repo/ref-map`: old ref -> new ref for tag/branch renames.
+The suite sets up temporary repos under `target/it/`, requires Git on PATH,
+and writes debug artifacts (commit-map, ref-map, report) in each ephemeral repo.
 
-Limitations (prototype)
+CLI overview (selected)
 -----------------------
 
-- No regex path matching; glob/prefix only.
-- Merge simplification not implemented; we preserve merges but don't trim extra parents.
-- No `--state-branch` yet; marks exported to a file.
-- Windows path policy is always "sanitize" for rebuilt lines (no skip/error modes yet).
+- Repository & refs
+  - `--source DIR`, `--target DIR` (default `.`), `--refs` (repeatable, defaults to `--all`)
+  - `--date-order`, `--no-data` forwarded to fast-export
+
+- Paths
+  - `--path`, `--path-glob`, `--path-regex`, `--invert-paths`
+  - `--path-rename OLD:NEW`, `--subdirectory-filter DIR`, `--to-subdirectory-filter DIR`
+
+- Content & blobs
+  - `--replace-text FILE`, `--max-blob-size BYTES`, `--strip-blobs-with-ids FILE`
+
+- Messages & refs
+  - `--replace-message FILE`, `--tag-rename OLD:NEW`, `--branch-rename OLD:NEW`
+
+- Behavior & output
+  - `--write-report`, `--cleanup [none|standard|aggressive]`, `--quiet`, `--no-reset`
+  - `--no-reencode`, `--no-quotepath`, `--no-mark-tags`, `--mark-tags`
+  - `--backup [--backup-path PATH]`, `--dry-run`
+  - `--partial`, `--sensitive [--no-fetch]`, `--force`, `--enforce-sanity`
 
 Examples
 --------
 
-- Literal message replacement:
+- Remove leaked secrets from history
 
   ```sh
-  echo "FOO==>BAR" > replacements.txt
-  filter-repo-rs --replace-message replacements.txt
+  # 1) Backup (recommended)
+  filter-repo-rs --backup --refs --all
+
+  # 2) Write replacement rules for file contents
+  cat > redact.txt <<EOF
+  SECRET_TOKEN==>REDACTED
+  regex:(API|TOKEN|SECRET)[A-Za-z0-9_-]+==>REDACTED
+  EOF
+
+  # 3) Apply redaction and write a summary report
+  filter-repo-rs --sensitive --replace-text redact.txt --write-report
+
+  # 4) Force-push new history
+  git push --force --all && git push --force --tags
   ```
 
-- Literal blob redaction:
+- Clean up sensitive commit/tag messages (literal rules)
 
   ```sh
-  echo "SECRET_TOKEN==>REDACTED" > redact.txt
-  filter-repo-rs --replace-text redact.txt
+  cat > messages.txt <<EOF
+  password==>[removed]
+  EOF
+  filter-repo-rs --replace-message messages.txt --write-report
   ```
 
-- Regex blob redaction:
+- Shrink repository by removing large blobs
 
   ```sh
-  echo "regex:api_key-[0-9]+==>REDACTED" > redact.txt
-  filter-repo-rs --replace-text redact.txt
+  # Inspect first
+  filter-repo-rs --analyze
+  filter-repo-rs --analyze --analyze-json
+
+  # Drop blobs over 5MB and delete their paths
+  filter-repo-rs --max-blob-size 5_000_000 --write-report
   ```
 
-- Write a report for stripped/modified blobs:
+- Restructure paths
 
   ```sh
-  filter-repo-rs --max-blob-size 1024 --write-report
-  cat .git/filter-repo/report.txt
+  # Extract a subdirectory as the new root
+  filter-repo-rs --subdirectory-filter frontend
+
+  # Move the current root under a subdirectory
+  filter-repo-rs --to-subdirectory-filter app/
+
+  # Bulk rename a path prefix
+  filter-repo-rs --path-rename old/:new/
   ```
 
-- Run cleanup after import:
+Backup and restore
+------------------
 
-  ```sh
-  filter-repo-rs --cleanup standard
-  # or
-  filter-repo-rs --cleanup aggressive
-  ```
+`--backup` creates a timestamped bundle under `.git/filter-repo/` by default.
+
+Restore from bundle:
+
+```sh
+git clone /path/to/backup-YYYYMMDD-HHMMSS-XXXXXXXXX.bundle restored-repo
+# or
+git init restored-repo && cd restored-repo
+git bundle unbundle /path/to/backup-YYYYMMDD-HHMMSS-XXXXXXXXX.bundle
+git symbolic-ref HEAD refs/heads/<branch-from-bundle>
+```
+
+Behavior highlights
+-------------------
+
+- Debug streams: `.git/filter-repo/fast-export.{original,filtered}`.
+- Empty commit pruning via `alias` for non-merge commits; merges are preserved.
+- Tags
+  - Annotated tags: buffered, optionally renamed, deduped, emitted once.
+  - Lightweight tags: `reset`/`from` buffered and flushed before `done`.
+- Refs
+  - Old refs deleted only after the new ones exist; `ref-map` records renames.
+  - HEAD is updated to a valid branch (mapped under `--branch-rename` when possible).
+- Remotes
+  - Full runs (not `--partial`) migrate `refs/remotes/origin/*` to `refs/heads/*` before filtering.
+  - In non‑sensitive runs, the `origin` remote is removed after completion to avoid accidental pushes to old history.
+  - In sensitive mode, all refs may be fetched (unless `--no-fetch`) and origin is kept.
+
+Artifacts
+---------
+
+- `.git/filter-repo/commit-map`: original commit ID -> new commit ID
+- `.git/filter-repo/ref-map`: original ref -> new ref
+- `.git/filter-repo/report.txt`: counts and sample paths for stripped/modified blobs (when `--write-report`)
+- `.git/filer-repo/target-marks`: marks map table
+- `.git/filter-repo/fast-export.original`: git fast-export original output
+- `.git/filter-repo/fast-export.filtered`: git fast-export filtered output
+- `.git/filter-repo/1758125153-834782600.bundle`: backup file
+
+Windows notes
+-------------
+
+- Rebuilt paths are sanitized for Windows (reserved characters are replaced, trailing dots/spaces are trimmed).
+- Some backup tests can be sensitive to MSYS/Cygwin path translation; see tests/README for workarounds.
+
+Limitations (prototype)
+-----------------------
+
+- Merge simplification not implemented; degenerate merges are not pruned yet.
+- No `--state-branch` (marks are exported to a file only).
+- Windows path policy is fixed to "sanitize"(no skip/error modes yet).
+- Callback API and mailmap-based identity rewriting are not implemented.
+- `--replace-message` supports literal rules; regex rules are planned.
+- Short-hash rewriting is enabled; a `--preserve-commit-hashes` toggle is planned.
+- Human‑readable size parsing (e.g., `5M`) is not yet supported.
+
+Roadmap / TODO (parity with Python git-filter-repo)
+--------------------------------------------------
+
+- Path features: `--paths-from-file`, `--use-base-name`, `--path-rename-match`/regex renames
+- Messages: `--replace-message` support for `regex:`; `--preserve-commit-hashes`
+- Blob sizes: accept `5M`/`2G` and alias `--strip-blobs-bigger-than`
+- Identity: mailmap (`--mailmap`, `--use-mailmap`) and name/email callbacks
+- Merges: prune degenerate merges while preserving required ancestry
+- Replace-refs & incremental: `--replace-refs …`, `--state-branch`, stash (`refs/stash`) rewrite
+- Analysis & reports: LFS-related reporting; richer artifacts
+- Windows path policy: `--windows-path-policy=[sanitize|skip|error]` + reporting
+- Callback framework: filename/refname/blob/commit/tag/reset/message/name/email
+- Safety defaults: consider stricter preflight by default; refine partial/sensitive guidance
