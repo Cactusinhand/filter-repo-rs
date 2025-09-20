@@ -131,7 +131,7 @@ fn error_handling_invalid_max_blob_size_values() {
 }
 
 #[test]
-fn error_handling_malformed_utf8_content() {
+fn error_handling_invalid_regex_pattern() {
     let repo = init_repo();
     let invalid_regex_file = repo.join("invalid_regex.txt");
     std::fs::write(&invalid_regex_file, b"regex:(?P<unterminated").unwrap();
