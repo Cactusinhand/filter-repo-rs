@@ -202,28 +202,22 @@ pub mod blob_regex {
                 if raw.starts_with(b"#") { continue; }
                 if let Some(rest) = raw.strip_prefix(b"regex:") {
                     // Split at first occurrence of ==> for pattern/replacement
-                    if let Some(pos) = super::find_subslice(rest, b"==>") {
-                        let pat = &rest[..pos];
-                        let rep = &rest[pos+3..];
-                        // Pattern is bytes; interpret as UTF-8 for regex parser
-                        // (regex bytes API still requires UTF-8 pattern text)
-                        if let Ok(pat_str) = std::str::from_utf8(pat) {
-                            if let Ok(re) = Regex::new(pat_str) {
-                                let rep = rep.to_vec();
-                                let has_dollar = rep.contains(&b'$');
-                                rules.push((re, rep, has_dollar));
-                            }
-                        }
+                    let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
+                        (&rest[..pos], rest[pos + 3..].to_vec())
                     } else {
                         // No replacement specified; default to ***REMOVED***
-                        if let Ok(pat_str) = std::str::from_utf8(rest) {
-                            if let Ok(re) = Regex::new(pat_str) {
-                                let rep = b"***REMOVED***".to_vec();
-                                let has_dollar = rep.contains(&b'$');
-                                rules.push((re, rep, has_dollar));
-                            }
-                        }
-                    }
+                        (&rest[..], b"***REMOVED***".to_vec())
+                    };
+                    // Pattern is bytes; interpret as UTF-8 for regex parser
+                    // (regex bytes API still requires UTF-8 pattern text)
+                    let pat_str = std::str::from_utf8(pat).map_err(|e| {
+                        io::Error::new(io::ErrorKind::InvalidInput, format!("invalid UTF-8 in regex rule: {e}"))
+                    })?;
+                    let re = Regex::new(pat_str).map_err(|e| {
+                        io::Error::new(io::ErrorKind::InvalidInput, format!("invalid regex pattern: {e}"))
+                    })?;
+                    let has_dollar = rep.contains(&b'$');
+                    rules.push((re, rep, has_dollar));
                 }
             }
             if rules.is_empty() { Ok(None) } else { Ok(Some(Self { rules })) }
