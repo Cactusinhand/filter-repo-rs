@@ -47,10 +47,18 @@ pub fn init_repo() -> PathBuf {
     fs::create_dir_all(&repo).unwrap();
     let (c, _o, e) = run_git(&repo, &["init"]);
     assert_eq!(c, 0, "git init failed: {}", e);
-    run_git(&repo, &["config", "user.name", "A U Thor"]).0;
-    run_git(&repo, &["config", "user.email", "a.u.thor@example.com"]).0;
+    assert_eq!(
+        run_git(&repo, &["config", "user.name", "A U Thor"]).0,
+        0,
+        "failed to set user.name"
+    );
+    assert_eq!(
+        run_git(&repo, &["config", "user.email", "a.u.thor@example.com"]).0,
+        0,
+        "failed to set user.email"
+    );
     write_file(&repo, "README.md", "hello");
-    run_git(&repo, &["add", "."]).0;
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0, "git add failed");
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "init commit"]).0, 0);
     repo
 }
