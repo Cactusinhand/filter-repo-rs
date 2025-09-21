@@ -416,7 +416,7 @@ fn warn_legacy_cleanup_usage(mode: &str) {
   use std::sync::{Mutex, OnceLock};
 
   static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-  let mut warned = WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap();
+  let mut warned = WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().expect("Mutex poisoned");
   let key = format!("cleanup:{mode}");
   if !warned.insert(key) {
     return;
