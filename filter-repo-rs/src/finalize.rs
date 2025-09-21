@@ -686,7 +686,13 @@ fn run_repo_cleanup(target: &Path, aggressive: bool) {
         reflog.arg("--expire-unreachable=now");
     }
     reflog.arg("--all");
-    let _ = reflog.status();
+    match reflog.status() {
+        Ok(status) if !status.success() => {
+            eprintln!("warning: git reflog expire failed: {}", status);
+        }
+        Err(e) => eprintln!("warning: failed to execute git reflog expire: {}", e),
+        _ => {}
+    }
 
     let mut gc = Command::new("git");
     gc.arg("-C")
