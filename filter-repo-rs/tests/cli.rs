@@ -120,6 +120,35 @@ fn help_shows_debug_sections_in_debug_mode() {
 }
 
 #[test]
+fn max_blob_size_accepts_numeric_underscores() {
+    let output = cli_command()
+        .arg("--max-blob-size")
+        .arg("2_120_000")
+        .arg("--help")
+        .output()
+        .expect("run filter-repo-rs --max-blob-size with underscores");
+
+    assert!(
+        output.status.success(),
+        "max-blob-size with underscores should succeed"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Usage: filter-repo-rs"),
+        "help output should be printed when requesting --help; got: {}",
+        stdout
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("expects an integer"),
+        "unexpected parse error in stderr: {}",
+        stderr
+    );
+}
+
+#[test]
 fn env_toggle_enables_debug_help() {
     let output = cli_command()
         .env("FRRS_DEBUG", "1")
