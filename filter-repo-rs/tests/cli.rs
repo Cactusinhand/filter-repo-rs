@@ -40,6 +40,26 @@ fn help_hides_debug_sections_without_debug_mode() {
         !stdout.contains("--date-order"),
         "baseline help should hide date-order toggle"
     );
+    assert!(
+        !stdout.contains("--no-reset"),
+        "baseline help should hide cleanup debug flag"
+    );
+    assert!(
+        !stdout.contains("--cleanup-aggressive"),
+        "baseline help should hide aggressive cleanup toggle"
+    );
+    assert!(
+        !stdout.contains("--fe_stream_override"),
+        "baseline help should hide stream override"
+    );
+    assert!(
+        !stdout.contains("Debug / cleanup behavior"),
+        "baseline help should hide cleanup debug section"
+    );
+    assert!(
+        !stdout.contains("Debug / stream overrides"),
+        "baseline help should hide stream override section"
+    );
 }
 
 #[test]
@@ -75,6 +95,26 @@ fn help_shows_debug_sections_in_debug_mode() {
         stdout.contains("--date-order"),
         "debug help should also list date-order toggle"
     );
+    assert!(
+        stdout.contains("Debug / cleanup behavior"),
+        "debug help should list cleanup debug section"
+    );
+    assert!(
+        stdout.contains("--no-reset"),
+        "debug help should surface no-reset flag"
+    );
+    assert!(
+        stdout.contains("--cleanup-aggressive"),
+        "debug help should list cleanup-aggressive flag"
+    );
+    assert!(
+        stdout.contains("Debug / stream overrides"),
+        "debug help should list stream override section"
+    );
+    assert!(
+        stdout.contains("--fe_stream_override"),
+        "debug help should list stream override flag"
+    );
 }
 
 #[test]
@@ -98,30 +138,30 @@ fn analysis_threshold_flags_require_debug_mode() {
 }
 
 #[test]
-fn fast_export_debug_flags_require_debug_mode() {
-    let gated_flags = [
-        "--date-order",
-        "--no-reencode",
-        "--no-quotepath",
-        "--no-mark-tags",
-        "--mark-tags",
+fn debug_only_flags_require_debug_mode() {
+    let gated_cases: &[(&[&str], &str)] = &[
+        (&["--date-order"], "--date-order"),
+        (&["--no-reencode"], "--no-reencode"),
+        (&["--no-quotepath"], "--no-quotepath"),
+        (&["--no-mark-tags"], "--no-mark-tags"),
+        (&["--mark-tags"], "--mark-tags"),
+        (&["--no-reset"], "--no-reset"),
+        (&["--cleanup-aggressive"], "--cleanup-aggressive"),
+        (&["--fe_stream_override", "dummy"], "--fe_stream_override"),
     ];
 
-    for flag in gated_flags {
-        let output = cli_command()
-            .arg(flag)
-            .output()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "failed to run filter-repo-rs with gated flag {}: {}",
-                    flag, e
-                )
-            });
+    for &(args, flag) in gated_cases {
+        let output = cli_command().args(args).output().unwrap_or_else(|e| {
+            panic!(
+                "failed to run filter-repo-rs with gated flag {}: {}",
+                flag, e
+            )
+        });
 
         assert_eq!(
             Some(2),
             output.status.code(),
-            "gated fast-export flag '{}' should exit with code 2",
+            "gated flag '{}' should exit with code 2",
             flag
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -134,19 +174,22 @@ fn fast_export_debug_flags_require_debug_mode() {
 }
 
 #[test]
-fn debug_mode_allows_fast_export_debug_flags() {
-    let gated_flags = [
-        "--date-order",
-        "--no-reencode",
-        "--no-quotepath",
-        "--no-mark-tags",
-        "--mark-tags",
+fn debug_mode_allows_debug_only_flags() {
+    let gated_cases: &[(&[&str], &str)] = &[
+        (&["--date-order"], "--date-order"),
+        (&["--no-reencode"], "--no-reencode"),
+        (&["--no-quotepath"], "--no-quotepath"),
+        (&["--no-mark-tags"], "--no-mark-tags"),
+        (&["--mark-tags"], "--mark-tags"),
+        (&["--no-reset"], "--no-reset"),
+        (&["--cleanup-aggressive"], "--cleanup-aggressive"),
+        (&["--fe_stream_override", "dummy"], "--fe_stream_override"),
     ];
 
-    for flag in gated_flags {
+    for &(args, flag) in gated_cases {
         let output = cli_command()
             .arg("--debug-mode")
-            .arg(flag)
+            .args(args)
             .arg("--help")
             .output()
             .unwrap_or_else(|e| {
@@ -158,7 +201,7 @@ fn debug_mode_allows_fast_export_debug_flags() {
 
         assert!(
             output.status.success(),
-            "debug mode should allow fast-export flag '{}'",
+            "debug mode should allow flag '{}'",
             flag
         );
     }
