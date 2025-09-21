@@ -166,25 +166,68 @@ pub fn finalize(
             if old == new_ {
                 continue;
             }
-            let old_exists = Command::new("git")
+            let old_ref = String::from_utf8_lossy(old).to_string();
+            let resolve = Command::new("git")
                 .arg("-C")
                 .arg(&opts.target)
-                .arg("show-ref")
-                .arg("--verify")
-                .arg(String::from_utf8_lossy(old).to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if old_exists {
+                .arg("for-each-ref")
+                .arg("--format=%(refname)")
+                .arg(&old_ref)
+                .output();
+            let mut delete_old = false;
+            let mut resolved_name: Option<Vec<u8>> = None;
+            match resolve {
+                Ok(output) => {
+                    if output.status.success() {
+                        resolved_name = output
+                            .stdout
+                            .split(|b| *b == b'\n')
+                            .filter_map(|line| {
+                                let mut trimmed = line;
+                                if let Some(b'\r') = trimmed.last() {
+                                    trimmed = &trimmed[..trimmed.len() - 1];
+                                }
+                                if trimmed.is_empty() {
+                                    None
+                                } else {
+                                    Some(trimmed.to_vec())
+                                }
+                            })
+                            .next();
+                        if let Some(refname) = &resolved_name {
+                            if refname.as_slice() == old.as_slice() {
+                                delete_old = true;
+                            }
+                        }
+                    } else {
+                        eprintln!(
+                            "warning: failed to query existing ref {}: {}",
+                            old_ref,
+                            output.status
+                        );
+                    }
+                }
+                Err(err) => {
+                    eprintln!(
+                        "warning: failed to query existing ref {}: {}",
+                        old_ref, err
+                    );
+                }
+            }
+            if delete_old {
                 update_payload.extend_from_slice(b"delete ");
                 update_payload.extend_from_slice(old);
                 update_payload.push(b'\n');
+            } else if let Some(refname) = resolved_name {
+                eprintln!(
+                    "warning: not deleting {} because repository resolves to {}",
+                    old_ref,
+                    String::from_utf8_lossy(&refname),
+                );
             } else {
                 eprintln!(
                     "warning: not deleting {} because it does not exist",
-                    String::from_utf8_lossy(old),
+                    old_ref,
                 );
             }
         }
