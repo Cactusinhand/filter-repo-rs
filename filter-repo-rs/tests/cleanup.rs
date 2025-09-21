@@ -28,9 +28,7 @@ fn cleanup_modes_trigger_expected_git_commands() {
     let cleanup_repo = init_repo();
     let (cleanup_output, cleanup_cmds) = run_cleanup_case(&cleanup_repo, &["--cleanup"]);
     assert!(cleanup_output.status.success(), "--cleanup run should succeed");
-    let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog").cloned();
-    assert!(cleanup_reflog.is_some(), "standard cleanup should expire reflog");
-    let cleanup_reflog = cleanup_reflog.unwrap();
+    let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog").cloned().expect("standard cleanup should expire reflog");
     assert!(
         cleanup_reflog.contains(&"expire".to_string()),
         "reflog invocation should include expire subcommand: {:?}",
