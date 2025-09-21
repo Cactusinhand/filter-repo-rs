@@ -709,106 +709,359 @@ fn parse_usize(s: &str, flag: &str) -> usize {
   })
 }
 
-const BASE_HELP: &str = "filter-repo-rs (prototype)\n\
-Usage: filter-repo-rs [options]\n\
-\n\
-Repository & ref selection:\n\
-  --source DIR                Source Git working directory (default .)\n\
-  --target DIR                Target Git working directory (default .)\n\
-  --refs REF                  Ref to export (repeatable; defaults to --all)\n\
-  --no-data                   Do not include blob data in fast-export\n\
-\n\
-Path selection & rewriting:\n\
-  --path PREFIX               Include-only files under PREFIX (repeatable)\n\
-  --path-glob GLOB            Include by glob (repeatable)\n\
-  --path-regex REGEX          Include by Rust regex (repeatable)\n\
-  --invert-paths              Invert path selection (drop matches)\n\
-  --path-rename OLD:NEW       Rename path prefix in file changes\n\
-  --subdirectory-filter D     Equivalent to --path D/ --path-rename D/:\n\
-  --to-subdirectory-filter D  Equivalent to --path-rename :D/\n\
-\n\
-Blob filtering & redaction:\n\
-  --replace-text FILE         Literal/regex (feature-gated) replacements for blobs\n\
-  --max-blob-size BYTES       Drop blobs larger than BYTES\n\
-  --strip-blobs-with-ids FILE Drop blobs by 40-hex id (one per line)\n\
-\n\
-Commit, tag & ref updates:\n\
-  --replace-message FILE      Literal replacements in commit/tag messages\n\
-  --tag-rename OLD:NEW        Rename tags with given prefix\n\
-  --branch-rename OLD:NEW     Rename branches with given prefix\n\
-\n\
-Execution behavior & output:\n\
-  --write-report              Write .git/filter-repo/report.txt summary\n\
-  --cleanup                   Run post-import cleanup (reflog expire + git gc)\n\
-                              (disabled by default)\n\
-  --quiet                     Reduce output noise\n\
-  --force, -f                 Bypass safety prompts and checks where applicable\n\
-  --enforce-sanity            Fail early unless repo passes strict preflight\n\
-  --dry-run                   Prepare and validate without writing changes\n\
-  --partial                   Only rewrite current repo; skip remote cleanup\n\
-  --sensitive, --sensitive-data-removal\n\
-                              Enable sensitive-history mode (fetch all refs,\n\
-                              avoid remote cleanup; see --no-fetch)\n\
-  --no-fetch                  In sensitive mode, skip fetching refs from origin\n\
-\n\
-Safety & backup:\n\
-  --backup                    Create a backup bundle of selected refs before\n\
-                              rewriting (skipped with --dry-run)\n\
-  --backup-path PATH          Destination directory or file for the bundle.\n\
-                              If PATH is a directory, a timestamped filename\n\
-                              is generated. If PATH has an extension, that\n\
-                              exact file is written. Defaults to\n\
-                              .git/filter-repo/backup-<timestamp>.bundle\n\
-\n\
-Repository analysis:\n\
-  --analyze                   Collect repository metrics instead of rewriting\n\
-  --analyze-json              Emit JSON-formatted analysis report\n\
-  --analyze-top N             Number of largest blobs/trees to show (default 10)\n\
-";
+#[derive(Debug, Clone)]
+struct HelpOption {
+    name: String,
+    description: Vec<String>,
+}
 
-const DEBUG_FAST_EXPORT_HELP: &str = "\n\
-Debug / fast-export passthrough (require --debug-mode or FRRS_DEBUG=1):\n\
-  --date-order                Request date-order traversal from git fast-export\n\
-  --no-reencode               Disable re-encoding of commit/tag messages\n\
-  --no-quotepath              Disable Git's path quoting for non-ASCII\n\
-  --no-mark-tags              Do not mark annotated tags in fast-export\n\
-  --mark-tags                 Explicitly mark annotated tags in fast-export\n\
-";
+#[derive(Debug, Clone)]
+struct HelpSection {
+    title: String,
+    options: Vec<HelpOption>,
+}
 
-const DEBUG_ANALYSIS_HELP: &str = "\n\
-Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):\n\
-  Configure analyze.thresholds.* via .filter-repo-rs.toml or --config.\n\
-  Legacy --analyze-*-warn CLI flags remain for compatibility but emit warnings.\n\
-";
+fn format_help_option(option: &HelpOption, align_width: usize) -> String {
+    let mut result = String::new();
+    let indent = "  ";
 
-const DEBUG_CLEANUP_HELP: &str = "\n\
-Debug / cleanup behavior (require --debug-mode or FRRS_DEBUG=1):\n\
-  --no-reset                  Skip final 'git reset --hard' in target\n\
-  --cleanup-aggressive        Extend cleanup with git gc --aggressive and\n\
-                              --expire-unreachable=now\n\
-";
+    if option.description.is_empty() {
+        return format!("{}{}", indent, option.name);
+    }
 
-const DEBUG_STREAM_HELP: &str = "\n\
-Debug / stream overrides (require --debug-mode or FRRS_DEBUG=1):\n\
-  --fe_stream_override FILE   Read fast-export stream from FILE instead of git\n\
-";
+    // Handle empty name (description-only lines)
+    if option.name.is_empty() {
+        for line in &option.description {
+            result.push_str(&format!("{}{}\n", indent, line));
+        }
+        return result;
+    }
 
-const MISC_HELP: &str = "\n\
-Misc:\n\
-  --config FILE              Load options from TOML config file (default\n\
-                             <source>/.filter-repo-rs.toml)\n\
-  --debug-mode               Enable debug/test flags (same as FRRS_DEBUG=1)\n\
-  -h, --help                 Show this help message\n\
-";
+    let name_padding = " ".repeat(align_width - option.name.len());
+
+    // First line: option name + description
+    result.push_str(&format!("{}{}{}{}\n", indent, option.name, name_padding, option.description[0]));
+
+    // Subsequent lines: just description with proper indentation
+    for line in option.description.iter().skip(1) {
+        result.push_str(&format!("{}{}{}\n", indent, " ".repeat(align_width), line));
+    }
+
+    result
+}
+
+fn format_help_section(section: &HelpSection) -> String {
+    if section.options.is_empty() {
+        return format!("{}\n", section.title);
+    }
+
+    // Calculate the maximum width needed for alignment
+    let max_name_width = section.options.iter()
+        .map(|opt| opt.name.len())
+        .max()
+        .unwrap_or(0);
+
+    // Ensure minimum alignment width for readability
+    let align_width = (max_name_width + 2).max(25);
+
+    let mut result = String::new();
+    result.push_str(&format!("{}\n", section.title));
+
+    for option in &section.options {
+        result.push_str(&format_help_option(option, align_width));
+    }
+
+    result.push('\n');
+    result
+}
+
+fn get_base_help_sections() -> Vec<HelpSection> {
+    vec![
+        HelpSection {
+            title: "Repository & ref selection:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--source DIR".to_string(),
+                    description: vec!["Source Git working directory (default .)".to_string()],
+                },
+                HelpOption {
+                    name: "--target DIR".to_string(),
+                    description: vec!["Target Git working directory (default .)".to_string()],
+                },
+                HelpOption {
+                    name: "--refs REF".to_string(),
+                    description: vec!["Ref to export (repeatable; defaults to --all)".to_string()],
+                },
+                HelpOption {
+                    name: "--no-data".to_string(),
+                    description: vec!["Do not include blob data in fast-export".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Path selection & rewriting:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--path PREFIX".to_string(),
+                    description: vec!["Include-only files under PREFIX (repeatable)".to_string()],
+                },
+                HelpOption {
+                    name: "--path-glob GLOB".to_string(),
+                    description: vec!["Include by glob (repeatable)".to_string()],
+                },
+                HelpOption {
+                    name: "--path-regex REGEX".to_string(),
+                    description: vec!["Include by Rust regex (repeatable)".to_string()],
+                },
+                HelpOption {
+                    name: "--invert-paths".to_string(),
+                    description: vec!["Invert path selection (drop matches)".to_string()],
+                },
+                HelpOption {
+                    name: "--path-rename OLD:NEW".to_string(),
+                    description: vec!["Rename path prefix in file changes".to_string()],
+                },
+                HelpOption {
+                    name: "--subdirectory-filter D".to_string(),
+                    description: vec!["Equivalent to --path D/ --path-rename D/:".to_string()],
+                },
+                HelpOption {
+                    name: "--to-subdirectory-filter D".to_string(),
+                    description: vec!["Equivalent to --path-rename :D/".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Blob filtering & redaction:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--replace-text FILE".to_string(),
+                    description: vec!["Literal/regex (feature-gated) replacements for blobs".to_string()],
+                },
+                HelpOption {
+                    name: "--max-blob-size BYTES".to_string(),
+                    description: vec!["Drop blobs larger than BYTES".to_string()],
+                },
+                HelpOption {
+                    name: "--strip-blobs-with-ids FILE".to_string(),
+                    description: vec!["Drop blobs by 40-hex id (one per line)".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Commit, tag & ref updates:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--replace-message FILE".to_string(),
+                    description: vec!["Literal replacements in commit/tag messages".to_string()],
+                },
+                HelpOption {
+                    name: "--tag-rename OLD:NEW".to_string(),
+                    description: vec!["Rename tags with given prefix".to_string()],
+                },
+                HelpOption {
+                    name: "--branch-rename OLD:NEW".to_string(),
+                    description: vec!["Rename branches with given prefix".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Execution behavior & output:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--write-report".to_string(),
+                    description: vec!["Write .git/filter-repo/report.txt summary".to_string()],
+                },
+                HelpOption {
+                    name: "--cleanup".to_string(),
+                    description: vec![
+                        "Run post-import cleanup (reflog expire + git gc)".to_string(),
+                        "(disabled by default)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--quiet".to_string(),
+                    description: vec!["Reduce output noise".to_string()],
+                },
+                HelpOption {
+                    name: "--force, -f".to_string(),
+                    description: vec!["Bypass safety prompts and checks where applicable".to_string()],
+                },
+                HelpOption {
+                    name: "--enforce-sanity".to_string(),
+                    description: vec!["Fail early unless repo passes strict preflight".to_string()],
+                },
+                HelpOption {
+                    name: "--dry-run".to_string(),
+                    description: vec!["Prepare and validate without writing changes".to_string()],
+                },
+                HelpOption {
+                    name: "--partial".to_string(),
+                    description: vec!["Only rewrite current repo; skip remote cleanup".to_string()],
+                },
+                HelpOption {
+                    name: "--sensitive".to_string(),
+                    description: vec![
+                        "Enable sensitive-history mode (fetch all refs,".to_string(),
+                        "avoid remote cleanup; see --no-fetch)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--no-fetch".to_string(),
+                    description: vec!["In sensitive mode, skip fetching refs from origin".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Safety & backup:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--backup".to_string(),
+                    description: vec![
+                        "Create a backup bundle of selected refs before".to_string(),
+                        "rewriting (skipped with --dry-run)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--backup-path PATH".to_string(),
+                    description: vec![
+                        "Destination directory or file for the bundle.".to_string(),
+                        "If PATH is a directory, a timestamped filename".to_string(),
+                        "is generated. If PATH has an extension, that".to_string(),
+                        "exact file is written. Defaults to".to_string(),
+                        ".git/filter-repo/backup-<timestamp>.bundle".to_string(),
+                    ],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Repository analysis:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--analyze".to_string(),
+                    description: vec!["Collect repository metrics instead of rewriting".to_string()],
+                },
+                HelpOption {
+                    name: "--analyze-json".to_string(),
+                    description: vec!["Emit JSON-formatted analysis report".to_string()],
+                },
+                HelpOption {
+                    name: "--analyze-top N".to_string(),
+                    description: vec!["Number of largest blobs/trees to show (default 10)".to_string()],
+                },
+            ],
+        },
+    ]
+}
+
+fn get_debug_help_sections() -> Vec<HelpSection> {
+    vec![
+        HelpSection {
+            title: "Debug / fast-export passthrough (require --debug-mode or FRRS_DEBUG=1):".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--date-order".to_string(),
+                    description: vec!["Request date-order traversal from git fast-export".to_string()],
+                },
+                HelpOption {
+                    name: "--no-reencode".to_string(),
+                    description: vec!["Disable re-encoding of commit/tag messages".to_string()],
+                },
+                HelpOption {
+                    name: "--no-quotepath".to_string(),
+                    description: vec!["Disable Git's path quoting for non-ASCII".to_string()],
+                },
+                HelpOption {
+                    name: "--no-mark-tags".to_string(),
+                    description: vec!["Do not mark annotated tags in fast-export".to_string()],
+                },
+                HelpOption {
+                    name: "--mark-tags".to_string(),
+                    description: vec!["Explicitly mark annotated tags in fast-export".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "".to_string(), // Empty name for description-only line
+                    description: vec![
+                        "Configure analyze.thresholds.* via .filter-repo-rs.toml or --config.".to_string(),
+                        "Legacy --analyze-*-warn CLI flags remain for compatibility but emit warnings.".to_string(),
+                    ],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Debug / cleanup behavior (require --debug-mode or FRRS_DEBUG=1):".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--no-reset".to_string(),
+                    description: vec!["Skip final 'git reset --hard' in target".to_string()],
+                },
+                HelpOption {
+                    name: "--cleanup-aggressive".to_string(),
+                    description: vec![
+                        "Extend cleanup with git gc --aggressive and".to_string(),
+                        "--expire-unreachable=now".to_string(),
+                    ],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Debug / stream overrides (require --debug-mode or FRRS_DEBUG=1):".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--fe_stream_override FILE".to_string(),
+                    description: vec!["Read fast-export stream from FILE instead of git".to_string()],
+                },
+            ],
+        },
+    ]
+}
+
+fn get_misc_help_section() -> HelpSection {
+    HelpSection {
+        title: "Misc:".to_string(),
+        options: vec![
+            HelpOption {
+                name: "--config FILE".to_string(),
+                description: vec![
+                    "Load options from TOML config file (default".to_string(),
+                    "<source>/.filter-repo-rs.toml)".to_string(),
+                ],
+            },
+            HelpOption {
+                name: "--debug-mode".to_string(),
+                description: vec!["Enable debug/test flags (same as FRRS_DEBUG=1)".to_string()],
+            },
+            HelpOption {
+                name: "-h, --help".to_string(),
+                description: vec!["Show this help message".to_string()],
+            },
+        ],
+    }
+}
 
 #[allow(dead_code)]
 pub fn print_help(debug_mode: bool) {
-  print!("{}", BASE_HELP);
-  if debug_mode {
-    print!("{}", DEBUG_FAST_EXPORT_HELP);
-    print!("{}", DEBUG_ANALYSIS_HELP);
-    print!("{}", DEBUG_CLEANUP_HELP);
-    print!("{}", DEBUG_STREAM_HELP);
-  }
-  print!("{}", MISC_HELP);
+    println!("filter-repo-rs (prototype)");
+    println!("Usage: filter-repo-rs [options]");
+    println!();
+
+    // Print base help sections
+    for section in get_base_help_sections() {
+        print!("{}", format_help_section(&section));
+    }
+
+    // Print debug sections if in debug mode
+    if debug_mode {
+        for section in get_debug_help_sections() {
+            print!("{}", format_help_section(&section));
+        }
+    }
+
+    // Print misc section
+    print!("{}", format_help_section(&get_misc_help_section()));
 }
