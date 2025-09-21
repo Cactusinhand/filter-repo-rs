@@ -117,15 +117,7 @@ fn main() {
     }
     let status = Command::new(real_git).args(&args).status();
     match status {
-        Ok(status) => {
-            if let Some(code) = status.code() {
-                std::process::exit(code);
-            }
-            if status.success() {
-                std::process::exit(0);
-            }
-            std::process::exit(1);
-        }
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(_) => std::process::exit(1),
     }
 }
