@@ -211,7 +211,10 @@ pub fn parse_args() -> Options {
       "--source" => opts.source = PathBuf::from(it.next().expect("--source requires value")),
       "--target" => opts.target = PathBuf::from(it.next().expect("--target requires value")),
       "--ref" | "--refs" => opts.refs.push(it.next().expect("--ref requires value")),
-      "--date-order" => opts.date_order = true,
+      "--date-order" => {
+        guard_debug("--date-order", opts.debug_mode);
+        opts.date_order = true;
+      }
       "--no-data" => opts.no_data = true,
       "--quiet" => opts.quiet = true,
       "--no-reset" => opts.reset = false,
@@ -316,15 +319,19 @@ pub fn parse_args() -> Options {
         };
       }
       "--no-reencode" => {
+        guard_debug("--no-reencode", opts.debug_mode);
         opts.reencode = false;
       }
       "--no-quotepath" => {
+        guard_debug("--no-quotepath", opts.debug_mode);
         opts.quotepath = false;
       }
       "--no-mark-tags" => {
+        guard_debug("--no-mark-tags", opts.debug_mode);
         opts.mark_tags = false;
       }
       "--mark-tags" => {
+        guard_debug("--mark-tags", opts.debug_mode);
         opts.mark_tags = true;
       }
       "--force" | "-f" => {
@@ -389,7 +396,7 @@ fn debug_env_flag_enabled(raw: &str) -> bool {
 fn guard_debug(flag: &str, debug_mode: bool) {
   if !debug_mode {
     eprintln!(
-      "error: {flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to enable analysis threshold overrides."
+      "error: {flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags."
     );
     eprintln!("See docs/cli-convergence.md for the configuration migration plan.");
     std::process::exit(2);
@@ -417,7 +424,6 @@ Repository & ref selection:\n\
   --source DIR                Source Git working directory (default .)\n\
   --target DIR                Target Git working directory (default .)\n\
   --refs REF                  Ref to export (repeatable; defaults to --all)\n\
-  --date-order                Use date-order for fast-export\n\
   --no-data                   Do not include blob data in fast-export\n\
 \n\
 Path selection & rewriting:\n\
@@ -444,10 +450,6 @@ Execution behavior & output:\n\
   --cleanup MODE              none|standard|aggressive (default: none)\n\
   --quiet                     Reduce output noise\n\
   --no-reset                  Skip final 'git reset --hard' in target\n\
-  --no-reencode               Do not re-encode commit/tag messages\n\
-  --no-quotepath              Disable Git's path quoting for non-ASCII\n\
-  --no-mark-tags              Do not mark annotated tags in fast-export\n\
-  --mark-tags                 Mark annotated tags in fast-export (default)\n\
   --force, -f                 Bypass safety prompts and checks where applicable\n\
   --enforce-sanity            Fail early unless repo passes strict preflight\n\
   --dry-run                   Prepare and validate without writing changes\n\
@@ -470,6 +472,15 @@ Repository analysis:\n\
   --analyze                   Collect repository metrics instead of rewriting\n\
   --analyze-json              Emit JSON-formatted analysis report\n\
   --analyze-top N             Number of largest blobs/trees to show (default 10)\n\
+";
+
+const DEBUG_FAST_EXPORT_HELP: &str = "\n\
+Debug / fast-export passthrough (require --debug-mode or FRRS_DEBUG=1):\n\
+  --date-order                Request date-order traversal from git fast-export\n\
+  --no-reencode               Disable re-encoding of commit/tag messages\n\
+  --no-quotepath              Disable Git's path quoting for non-ASCII\n\
+  --no-mark-tags              Do not mark annotated tags in fast-export\n\
+  --mark-tags                 Explicitly mark annotated tags in fast-export\n\
 ";
 
 const DEBUG_ANALYSIS_HELP: &str = "\n\
@@ -496,6 +507,7 @@ Misc:\n\
 pub fn print_help(debug_mode: bool) {
   print!("{}", BASE_HELP);
   if debug_mode {
+    print!("{}", DEBUG_FAST_EXPORT_HELP);
     print!("{}", DEBUG_ANALYSIS_HELP);
   }
   print!("{}", MISC_HELP);

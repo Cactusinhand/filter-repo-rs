@@ -10,7 +10,7 @@ assignees: []
 
 - [ ] Add `--debug-mode` and/or `FRRS_DEBUG=1` to expose hidden/debug flags in `--help`.
 - [ ] Help layering: default (core) vs verbose/debug (hidden) output.
-- [ ] Hide fast‑export low‑level flags unless debug: `--no-reencode`, `--no-quotepath`, `--mark-tags/--no-mark-tags`, `--date-order`.
+- [x] Hide fast‑export low‑level flags unless debug: `--no-reencode`, `--no-quotepath`, `--mark-tags/--no-mark-tags`, `--date-order`.
 - [ ] Hide `--no-reset` and keep `--cleanup-aggressive` only under debug.
 - [ ] Make `--cleanup` boolean (standard), wire finalize path.
 - [ ] Config support for analysis thresholds (`.filter-repo-rs.toml`), CLI overrides config.
