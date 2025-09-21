@@ -1,19 +1,26 @@
+use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::gitutil::git_dir;
 use crate::opts::Options;
 
-pub fn build_fast_export_cmd(opts: &Options) -> Command {
+pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
     // Test override: if provided in opts, read a prebuilt stream from that file
     if let Some(stream_path) = &opts.fe_stream_override {
+        if !opts.debug_mode {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "error: --fe_stream_override is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags.",
+            ));
+        }
         #[cfg(windows)]
         {
             let mut cmd = Command::new("cmd");
             cmd.arg("/C").arg("type").arg(stream_path);
             cmd.stdout(Stdio::piped());
             cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
-            return cmd;
+            return Ok(cmd);
         }
         #[cfg(not(windows))]
         {
@@ -21,7 +28,7 @@ pub fn build_fast_export_cmd(opts: &Options) -> Command {
             cmd.arg(stream_path);
             cmd.stdout(Stdio::piped());
             cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
-            return cmd;
+            return Ok(cmd);
         }
     }
     let mut cmd = Command::new("git");
@@ -41,7 +48,7 @@ pub fn build_fast_export_cmd(opts: &Options) -> Command {
     if opts.mark_tags { cmd.arg("--mark-tags"); }
     cmd.stdout(Stdio::piped());
     cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
-    cmd
+    Ok(cmd)
 }
 
 pub fn build_fast_import_cmd(opts: &Options) -> Command {

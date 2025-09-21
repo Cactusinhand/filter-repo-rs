@@ -359,9 +359,8 @@ pub fn run(opts: &Options) -> io::Result<()> {
     let mut orig_file = File::create(debug_dir.join("fast-export.original"))?;
     let mut filt_file = File::create(debug_dir.join("fast-export.filtered"))?;
 
-    let mut fe = crate::pipes::build_fast_export_cmd(opts)
-        .spawn()
-        .expect("failed to spawn git fast-export");
+    let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
+    let mut fe = fe_cmd.spawn().expect("failed to spawn git fast-export");
     let mut fi = if opts.dry_run {
         None
     } else {

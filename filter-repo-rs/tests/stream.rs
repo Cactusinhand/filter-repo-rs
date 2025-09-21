@@ -38,6 +38,7 @@ done
     std::fs::write(&stream_path, stream).expect("write custom fast-export stream");
 
     run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
         o.dry_run = true;
         o.path_renames.push((Vec::new(), b"prefix/".to_vec()));
         #[allow(deprecated)]
@@ -84,6 +85,7 @@ fn inline_replace_text_and_report_modified() {
     std::fs::write(&repl, "SECRET-INLINE-123==>REDACTED\n").unwrap();
 
     run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
         o.replace_text_file = Some(repl.clone());
         o.no_data = false;
         o.write_report = true;
@@ -105,4 +107,29 @@ fn inline_replace_text_and_report_modified() {
         .unwrap();
     assert!(s.contains("Blobs modified by replace-text"));
     assert!(s.contains("secret.txt"));
+}
+
+#[test]
+fn fe_stream_override_requires_debug_mode() {
+    let repo = init_repo();
+    let stream_path = repo.join("override.stream");
+    std::fs::write(
+        &stream_path,
+        "blob\nmark :1\ndata 0\n\ncommit refs/heads/main\nmark :2\ndata 0\ndone\n",
+    )
+    .expect("write dummy stream");
+
+    let err = run_tool(&repo, |o| {
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    })
+    .expect_err("fe_stream_override without debug should error");
+
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("FRRS_DEBUG"),
+        "gating error should mention FRRS_DEBUG"
+    );
 }

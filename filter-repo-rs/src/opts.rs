@@ -217,7 +217,10 @@ pub fn parse_args() -> Options {
       }
       "--no-data" => opts.no_data = true,
       "--quiet" => opts.quiet = true,
-      "--no-reset" => opts.reset = false,
+      "--no-reset" => {
+        guard_debug("--no-reset", opts.debug_mode);
+        opts.reset = false;
+      }
       "--replace-message" => {
         let p = it.next().expect("--replace-message requires file");
         opts.replace_message_file = Some(PathBuf::from(p));
@@ -311,12 +314,19 @@ pub fn parse_args() -> Options {
         opts.cleanup = match v.as_str() {
           "none" => CleanupMode::None,
           "standard" => CleanupMode::Standard,
-          "aggressive" => CleanupMode::Aggressive,
+          "aggressive" => {
+            guard_debug("--cleanup aggressive", opts.debug_mode);
+            CleanupMode::Aggressive
+          }
           other => {
             eprintln!("--cleanup: unknown mode '{}'", other);
             std::process::exit(2);
           }
         };
+      }
+      "--cleanup-aggressive" => {
+        guard_debug("--cleanup-aggressive", opts.debug_mode);
+        opts.cleanup = CleanupMode::Aggressive;
       }
       "--no-reencode" => {
         guard_debug("--no-reencode", opts.debug_mode);
@@ -362,6 +372,11 @@ pub fn parse_args() -> Options {
           eprintln!("error: --backup-path requires a value");
           std::process::exit(2);
         }
+      }
+      "--fe_stream_override" => {
+        guard_debug("--fe_stream_override", opts.debug_mode);
+        let p = it.next().expect("--fe_stream_override requires FILE");
+        opts.fe_stream_override = Some(PathBuf::from(p));
       }
       "-h" | "--help" => {
         print_help(opts.debug_mode);
@@ -449,7 +464,6 @@ Execution behavior & output:\n\
   --write-report              Write .git/filter-repo/report.txt summary\n\
   --cleanup MODE              none|standard|aggressive (default: none)\n\
   --quiet                     Reduce output noise\n\
-  --no-reset                  Skip final 'git reset --hard' in target\n\
   --force, -f                 Bypass safety prompts and checks where applicable\n\
   --enforce-sanity            Fail early unless repo passes strict preflight\n\
   --dry-run                   Prepare and validate without writing changes\n\
@@ -497,6 +511,17 @@ Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):\n\
   --analyze-max-parents-warn N Override max parent count warning threshold\n\
 ";
 
+const DEBUG_CLEANUP_HELP: &str = "\n\
+Debug / cleanup behavior (require --debug-mode or FRRS_DEBUG=1):\n\
+  --no-reset                  Skip final 'git reset --hard' in target\n\
+  --cleanup-aggressive        Apply aggressive cleanup routines after filtering\n\
+";
+
+const DEBUG_STREAM_HELP: &str = "\n\
+Debug / stream overrides (require --debug-mode or FRRS_DEBUG=1):\n\
+  --fe_stream_override FILE   Read fast-export stream from FILE instead of git\n\
+";
+
 const MISC_HELP: &str = "\n\
 Misc:\n\
   --debug-mode               Enable debug/test flags (same as FRRS_DEBUG=1)\n\
@@ -509,6 +534,8 @@ pub fn print_help(debug_mode: bool) {
   if debug_mode {
     print!("{}", DEBUG_FAST_EXPORT_HELP);
     print!("{}", DEBUG_ANALYSIS_HELP);
+    print!("{}", DEBUG_CLEANUP_HELP);
+    print!("{}", DEBUG_STREAM_HELP);
   }
   print!("{}", MISC_HELP);
 }
