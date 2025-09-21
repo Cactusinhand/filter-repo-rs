@@ -328,25 +328,11 @@ pub fn finalize(
     if !opts.dry_run {
         match opts.cleanup {
             crate::opts::CleanupMode::None => {}
-            crate::opts::CleanupMode::Standard | crate::opts::CleanupMode::Aggressive => {
-                let _ = Command::new("git")
-                    .arg("-C")
-                    .arg(&opts.target)
-                    .arg("reflog")
-                    .arg("expire")
-                    .arg("--expire=now")
-                    .arg("--all")
-                    .status();
-                let mut gc = Command::new("git");
-                gc.arg("-C")
-                    .arg(&opts.target)
-                    .arg("gc")
-                    .arg("--prune=now")
-                    .arg("--quiet");
-                if matches!(opts.cleanup, crate::opts::CleanupMode::Aggressive) {
-                    gc.arg("--aggressive");
-                }
-                let _ = gc.status();
+            crate::opts::CleanupMode::Standard => {
+                run_repo_cleanup(&opts.target, false);
+            }
+            crate::opts::CleanupMode::Aggressive => {
+                run_repo_cleanup(&opts.target, true);
             }
         }
     }
@@ -686,6 +672,44 @@ pub fn finalize(
     // Post-run remote cleanup (non-sensitive parity): remove origin
     migrate::remove_origin_remote_if_applicable(opts);
     Ok(())
+}
+
+fn run_repo_cleanup(target: &Path, aggressive: bool) {
+    let mut reflog = Command::new("git");
+    reflog
+        .arg("-C")
+        .arg(target)
+        .arg("reflog")
+        .arg("expire")
+        .arg("--expire=now");
+    if aggressive {
+        reflog.arg("--expire-unreachable=now");
+    }
+    reflog.arg("--all");
+    match reflog.status() {
+        Ok(status) if !status.success() => {
+            eprintln!("warning: git reflog expire failed: {}", status);
+        }
+        Err(e) => eprintln!("warning: failed to execute git reflog expire: {}", e),
+        _ => {}
+    }
+
+    let mut gc = Command::new("git");
+    gc.arg("-C")
+        .arg(target)
+        .arg("gc")
+        .arg("--prune=now")
+        .arg("--quiet");
+    if aggressive {
+        gc.arg("--aggressive");
+    }
+    match gc.status() {
+        Ok(status) if !status.success() => {
+            eprintln!("warning: git gc failed: {}", status);
+        }
+        Err(e) => eprintln!("warning: failed to execute git gc: {}", e),
+        _ => {}
+    }
 }
 
 fn resolve_reset_target(

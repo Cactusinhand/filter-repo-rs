@@ -225,3 +225,80 @@ fn debug_mode_allows_analysis_threshold_flags() {
         "debug mode should allow threshold overrides"
     );
 }
+
+#[test]
+fn cleanup_flag_supports_new_and_legacy_syntax() {
+    let repo = init_repo();
+
+    let legacy_eq = cli_command()
+        .arg("--cleanup=standard")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup=standard)");
+
+    assert!(legacy_eq.status.success(), "legacy cleanup syntax should still run");
+    let stderr_eq = String::from_utf8_lossy(&legacy_eq.stderr);
+    assert!(
+        stderr_eq.contains("deprecated"),
+        "legacy --cleanup= mode should emit deprecation warning: {}",
+        stderr_eq
+    );
+    assert!(
+        stderr_eq.contains("--cleanup"),
+        "deprecation warning should mention --cleanup guidance: {}",
+        stderr_eq
+    );
+
+    let legacy_split = cli_command()
+        .arg("--cleanup")
+        .arg("none")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup none)");
+
+    assert!(legacy_split.status.success(), "legacy split cleanup syntax should run");
+    let stderr_split = String::from_utf8_lossy(&legacy_split.stderr);
+    assert!(
+        stderr_split.contains("deprecated"),
+        "legacy split syntax should emit deprecation warning: {}",
+        stderr_split
+    );
+
+    let legacy_agg = cli_command()
+        .arg("--debug-mode")
+        .arg("--cleanup=aggressive")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup=aggressive)");
+
+    assert!(legacy_agg.status.success(), "legacy aggressive cleanup syntax should run");
+    let stderr_agg = String::from_utf8_lossy(&legacy_agg.stderr);
+    assert!(
+        stderr_agg.contains("deprecated"),
+        "legacy --cleanup=aggressive mode should emit deprecation warning: {}",
+        stderr_agg
+    );
+    assert!(
+        stderr_agg.contains("--cleanup-aggressive"),
+        "deprecation warning for aggressive should mention --cleanup-aggressive: {}",
+        stderr_agg
+    );
+
+    let new_flag = cli_command()
+        .arg("--cleanup")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with boolean --cleanup");
+
+    assert!(new_flag.status.success(), "boolean --cleanup should succeed");
+    let stderr_new = String::from_utf8_lossy(&new_flag.stderr);
+    assert!(
+        !stderr_new.contains("deprecated"),
+        "boolean --cleanup should not emit deprecation warning: {}",
+        stderr_new
+    );
+}

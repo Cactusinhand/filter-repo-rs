@@ -310,19 +310,22 @@ pub fn parse_args() -> Options {
         opts.write_report = true;
       }
       "--cleanup" => {
-        let v = it.next().expect("--cleanup requires one of: none|standard|aggressive");
-        opts.cleanup = match v.as_str() {
-          "none" => CleanupMode::None,
-          "standard" => CleanupMode::Standard,
-          "aggressive" => {
-            guard_debug("--cleanup aggressive", opts.debug_mode);
-            CleanupMode::Aggressive
+        if let Some(next) = it.clone().next() {
+          if matches!(next.as_str(), "none" | "standard" | "aggressive") {
+            let legacy = it.next().expect("--cleanup legacy value consumed");
+            parse_legacy_cleanup_value(&legacy, &mut opts);
+            continue;
           }
-          other => {
-            eprintln!("--cleanup: unknown mode '{}'", other);
-            std::process::exit(2);
-          }
-        };
+        }
+        opts.cleanup = CleanupMode::Standard;
+      }
+      arg if arg.starts_with("--cleanup=") => {
+        let value = &arg[10..];
+        if value.is_empty() {
+          eprintln!("--cleanup= requires a value of none|standard|aggressive");
+          std::process::exit(2);
+        }
+        parse_legacy_cleanup_value(value, &mut opts);
       }
       "--cleanup-aggressive" => {
         guard_debug("--cleanup-aggressive", opts.debug_mode);
@@ -390,6 +393,47 @@ pub fn parse_args() -> Options {
     }
   }
   opts
+}
+
+fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) {
+  warn_legacy_cleanup_usage(value);
+  opts.cleanup = match value {
+    "none" => CleanupMode::None,
+    "standard" => CleanupMode::Standard,
+    "aggressive" => {
+      guard_debug("--cleanup aggressive", opts.debug_mode);
+      CleanupMode::Aggressive
+    }
+    other => {
+      eprintln!("--cleanup: unknown mode '{}'", other);
+      std::process::exit(2);
+    }
+  };
+}
+
+fn warn_legacy_cleanup_usage(mode: &str) {
+  use std::collections::HashSet;
+  use std::sync::{Mutex, OnceLock};
+
+  static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+  let mut warned = WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().expect("Mutex poisoned");
+  let key = format!("cleanup:{mode}");
+  if !warned.insert(key) {
+    return;
+  }
+
+  let recommendation = match mode {
+    "none" => "omit --cleanup entirely (cleanup defaults to 'none').",
+    "standard" => "use --cleanup (without a value) to enable standard cleanup.",
+    "aggressive" => "use --cleanup-aggressive (requires --debug-mode or FRRS_DEBUG=1).",
+    _ => "use --cleanup or --cleanup-aggressive instead.",
+  };
+
+  eprintln!(
+    "warning: --cleanup with an explicit value is deprecated; {}",
+    recommendation
+  );
+  eprintln!("note: pass --cleanup as a boolean flag for standard cleanup.");
 }
 
 fn debug_mode_enabled(args: &[String]) -> bool {
@@ -462,7 +506,8 @@ Commit, tag & ref updates:\n\
 \n\
 Execution behavior & output:\n\
   --write-report              Write .git/filter-repo/report.txt summary\n\
-  --cleanup MODE              none|standard|aggressive (default: none)\n\
+  --cleanup                   Run post-import cleanup (reflog expire + git gc)\n\
+                              (disabled by default)\n\
   --quiet                     Reduce output noise\n\
   --force, -f                 Bypass safety prompts and checks where applicable\n\
   --enforce-sanity            Fail early unless repo passes strict preflight\n\
@@ -514,7 +559,8 @@ Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):\n\
 const DEBUG_CLEANUP_HELP: &str = "\n\
 Debug / cleanup behavior (require --debug-mode or FRRS_DEBUG=1):\n\
   --no-reset                  Skip final 'git reset --hard' in target\n\
-  --cleanup-aggressive        Apply aggressive cleanup routines after filtering\n\
+  --cleanup-aggressive        Extend cleanup with git gc --aggressive and\n\
+                              --expire-unreachable=now\n\
 ";
 
 const DEBUG_STREAM_HELP: &str = "\n\
