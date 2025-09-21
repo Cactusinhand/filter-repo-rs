@@ -71,6 +71,10 @@ fn help_shows_debug_sections_in_debug_mode() {
         stdout.contains("--no-reencode"),
         "debug help should list fast-export passthrough flags"
     );
+    assert!(
+        stdout.contains("--date-order"),
+        "debug help should also list date-order toggle"
+    );
 }
 
 #[test]
