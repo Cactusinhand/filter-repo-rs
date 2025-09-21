@@ -97,9 +97,21 @@ fn cli_arguments_override_repo_config() {
         "analysis run with config should succeed"
     );
     let stdout_baseline = String::from_utf8_lossy(&baseline.stdout);
+    let (_, blob4_tree, _) = run_git(&repo, &["ls-tree", "HEAD", "blob-4.bin"]);
+    let blob4_oid = blob4_tree
+        .split_whitespace()
+        .nth(2)
+        .expect("ls-tree to report blob oid")
+        .to_string();
     assert!(
         stdout_baseline.contains("Top 4 blobs by size"),
         "config-defined top should appear in baseline output: {}",
+        stdout_baseline
+    );
+    assert!(
+        stdout_baseline.contains(&blob4_oid),
+        "analysis output should include full blob oid {}: {}",
+        blob4_oid,
         stdout_baseline
     );
 

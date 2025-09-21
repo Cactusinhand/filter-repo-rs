@@ -3,6 +3,7 @@ use comfy_table::{
     ContentArrangement, Table,
 };
 use serde::Serialize;
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::io::{self, BufRead, BufReader};
@@ -542,14 +543,20 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
         ],
         vec![
             vec![
-                "Loose objects".to_string(),
-                format_count(report.metrics.loose_objects),
-                format!("{:.2} MiB", to_mib(report.metrics.loose_size_bytes)),
+                Cow::Borrowed("Loose objects"),
+                Cow::Owned(format_count(report.metrics.loose_objects)),
+                Cow::Owned(format!(
+                    "{:.2} MiB",
+                    to_mib(report.metrics.loose_size_bytes)
+                )),
             ],
             vec![
-                "Packed objects".to_string(),
-                format_count(report.metrics.packed_objects),
-                format!("{:.2} MiB", to_mib(report.metrics.packed_size_bytes)),
+                Cow::Borrowed("Packed objects"),
+                Cow::Owned(format_count(report.metrics.packed_objects)),
+                Cow::Owned(format!(
+                    "{:.2} MiB",
+                    to_mib(report.metrics.packed_size_bytes)
+                )),
             ],
         ],
     );
@@ -559,9 +566,12 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
     );
 
     print_section("Object inventory");
-    let mut inventory_rows = Vec::new();
+    let mut inventory_rows: Vec<Vec<Cow<'_, str>>> = Vec::new();
     for (typ, count) in &report.metrics.object_types {
-        inventory_rows.push(vec![typ.clone(), format_count(*count)]);
+        inventory_rows.push(vec![
+            Cow::Borrowed(typ.as_str()),
+            Cow::Owned(format_count(*count)),
+        ]);
     }
     print_table(
         &[
@@ -583,10 +593,13 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .enumerate()
             .map(|(idx, blob)| {
                 vec![
-                    format!("{}", idx + 1),
-                    short_oid(&blob.oid).to_string(),
-                    format!("{:.2} MiB", to_mib(blob.size)),
-                    blob.path.clone().unwrap_or_default(),
+                    Cow::Owned(format!("{}", idx + 1)),
+                    Cow::Borrowed(blob.oid.as_str()),
+                    Cow::Owned(format!("{:.2} MiB", to_mib(blob.size))),
+                    blob.path
+                        .as_deref()
+                        .map(Cow::Borrowed)
+                        .unwrap_or(Cow::Borrowed("")),
                 ]
             })
             .collect();
@@ -612,9 +625,9 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .enumerate()
             .map(|(idx, tree)| {
                 vec![
-                    format!("{}", idx + 1),
-                    short_oid(&tree.oid).to_string(),
-                    format!("{:.2} KiB", tree.size as f64 / 1024.0),
+                    Cow::Owned(format!("{}", idx + 1)),
+                    Cow::Borrowed(tree.oid.as_str()),
+                    Cow::Owned(format!("{:.2} KiB", tree.size as f64 / 1024.0)),
                 ]
             })
             .collect();
@@ -636,42 +649,42 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
         ],
         vec![
             vec![
-                "Total".to_string(),
-                format_count(report.metrics.refs_total as u64),
+                Cow::Borrowed("Total"),
+                Cow::Owned(format_count(report.metrics.refs_total as u64)),
             ],
             vec![
-                "Heads".to_string(),
-                format_count(report.metrics.refs_heads as u64),
+                Cow::Borrowed("Heads"),
+                Cow::Owned(format_count(report.metrics.refs_heads as u64)),
             ],
             vec![
-                "Tags".to_string(),
-                format_count(report.metrics.refs_tags as u64),
+                Cow::Borrowed("Tags"),
+                Cow::Owned(format_count(report.metrics.refs_tags as u64)),
             ],
             vec![
-                "Remotes".to_string(),
-                format_count(report.metrics.refs_remotes as u64),
+                Cow::Borrowed("Remotes"),
+                Cow::Owned(format_count(report.metrics.refs_remotes as u64)),
             ],
             vec![
-                "Other".to_string(),
-                format_count(report.metrics.refs_other as u64),
+                Cow::Borrowed("Other"),
+                Cow::Owned(format_count(report.metrics.refs_other as u64)),
             ],
         ],
     );
 
     print_section("Working tree snapshot (HEAD)");
-    let mut snapshot_rows = Vec::new();
+    let mut snapshot_rows: Vec<Vec<Cow<'_, str>>> = Vec::new();
     if let Some(dir) = &report.metrics.directory_hotspots {
         snapshot_rows.push(vec![
-            "Busiest directory".to_string(),
-            dir.path.clone(),
-            format!("{} entries", format_count(dir.entries as u64)),
+            Cow::Borrowed("Busiest directory"),
+            Cow::Borrowed(dir.path.as_str()),
+            Cow::Owned(format!("{} entries", format_count(dir.entries as u64))),
         ]);
     }
     if let Some(path) = &report.metrics.longest_path {
         snapshot_rows.push(vec![
-            "Longest path".to_string(),
-            path.path.clone(),
-            format!("{} characters", format_count(path.length as u64)),
+            Cow::Borrowed("Longest path"),
+            Cow::Borrowed(path.path.as_str()),
+            Cow::Owned(format!("{} characters", format_count(path.length as u64))),
         ]);
     }
     print_table(
@@ -692,10 +705,13 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .enumerate()
             .map(|(idx, dup)| {
                 vec![
-                    format!("{}", idx + 1),
-                    short_oid(&dup.oid).to_string(),
-                    format_count(dup.paths as u64),
-                    dup.example_path.clone().unwrap_or_default(),
+                    Cow::Owned(format!("{}", idx + 1)),
+                    Cow::Borrowed(dup.oid.as_str()),
+                    Cow::Owned(format_count(dup.paths as u64)),
+                    dup.example_path
+                        .as_deref()
+                        .map(Cow::Borrowed)
+                        .unwrap_or(Cow::Borrowed("")),
                 ]
             })
             .collect();
@@ -717,8 +733,8 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             ("Value", CellAlignment::Right),
         ],
         vec![vec![
-            "Max parents".to_string(),
-            format_count(report.metrics.max_commit_parents as u64),
+            Cow::Borrowed("Max parents"),
+            Cow::Owned(format_count(report.metrics.max_commit_parents as u64)),
         ]],
     );
     if !report.metrics.oversized_commit_messages.is_empty() {
@@ -730,9 +746,9 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .enumerate()
             .map(|(idx, msg)| {
                 vec![
-                    format!("{}", idx + 1),
-                    short_oid(&msg.oid).to_string(),
-                    format_count(msg.length as u64),
+                    Cow::Owned(format!("{}", idx + 1)),
+                    Cow::Borrowed(msg.oid.as_str()),
+                    Cow::Owned(format_count(msg.length as u64)),
                 ]
             })
             .collect();
@@ -752,9 +768,13 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
         .iter()
         .map(|warning| {
             vec![
-                format!("{:?}", warning.level),
-                warning.message.clone(),
-                warning.recommendation.clone().unwrap_or_default(),
+                Cow::Owned(format!("{:?}", warning.level)),
+                Cow::Borrowed(warning.message.as_str()),
+                warning
+                    .recommendation
+                    .as_deref()
+                    .map(Cow::Borrowed)
+                    .unwrap_or(Cow::Borrowed("")),
             ]
         })
         .collect();
@@ -848,7 +868,7 @@ fn print_section(title: &str) {
     println!("{:-^64}", format!(" {} ", title));
 }
 
-fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<String>>) {
+fn print_table<'a>(headers: &[(&str, CellAlignment)], rows: Vec<Vec<Cow<'a, str>>>) {
     if rows.is_empty() {
         return;
     }
@@ -871,7 +891,7 @@ fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<String>>) {
         let cells = headers
             .iter()
             .zip(row.into_iter())
-            .map(|((_, align), value)| Cell::new(value).set_alignment(*align))
+            .map(|((_, align), value)| Cell::new(value.as_ref()).set_alignment(*align))
             .collect::<Vec<_>>();
         table.add_row(cells);
     }
@@ -895,9 +915,4 @@ fn format_count<T: Into<u64>>(value: T) -> String {
 
 fn format_size_gib(bytes: u64) -> String {
     format!("{:.2} GiB", to_gib(bytes))
-}
-
-fn short_oid(oid: &str) -> &str {
-    let end = oid.len().min(12);
-    &oid[..end]
 }
