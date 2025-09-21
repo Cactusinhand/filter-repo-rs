@@ -76,12 +76,20 @@ fn help_shows_debug_sections_in_debug_mode() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("--analyze-total-warn"),
-        "debug help should list threshold flag"
-    );
-    assert!(
         stdout.contains("Debug / analysis thresholds"),
         "debug section header missing"
+    );
+    assert!(
+        stdout.contains("Configure analyze.thresholds.* via"),
+        "debug help should mention config guidance for thresholds"
+    );
+    assert!(
+        stdout.contains("Legacy --analyze-*-warn CLI flags remain for compatibility"),
+        "debug help should include legacy compatibility note"
+    );
+    assert!(
+        !stdout.contains("--analyze-total-warn"),
+        "debug help should omit direct legacy flag listing"
     );
     assert!(
         stdout.contains("Debug / fast-export passthrough"),
@@ -237,7 +245,10 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         .output()
         .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup=standard)");
 
-    assert!(legacy_eq.status.success(), "legacy cleanup syntax should still run");
+    assert!(
+        legacy_eq.status.success(),
+        "legacy cleanup syntax should still run"
+    );
     let stderr_eq = String::from_utf8_lossy(&legacy_eq.stderr);
     assert!(
         stderr_eq.contains("deprecated"),
@@ -258,7 +269,10 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         .output()
         .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup none)");
 
-    assert!(legacy_split.status.success(), "legacy split cleanup syntax should run");
+    assert!(
+        legacy_split.status.success(),
+        "legacy split cleanup syntax should run"
+    );
     let stderr_split = String::from_utf8_lossy(&legacy_split.stderr);
     assert!(
         stderr_split.contains("deprecated"),
@@ -274,7 +288,10 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         .output()
         .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup=aggressive)");
 
-    assert!(legacy_agg.status.success(), "legacy aggressive cleanup syntax should run");
+    assert!(
+        legacy_agg.status.success(),
+        "legacy aggressive cleanup syntax should run"
+    );
     let stderr_agg = String::from_utf8_lossy(&legacy_agg.stderr);
     assert!(
         stderr_agg.contains("deprecated"),
@@ -294,7 +311,10 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         .output()
         .expect("run filter-repo-rs with boolean --cleanup");
 
-    assert!(new_flag.status.success(), "boolean --cleanup should succeed");
+    assert!(
+        new_flag.status.success(),
+        "boolean --cleanup should succeed"
+    );
     let stderr_new = String::from_utf8_lossy(&new_flag.stderr);
     assert!(
         !stderr_new.contains("deprecated"),
