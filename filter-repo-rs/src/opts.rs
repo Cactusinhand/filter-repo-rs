@@ -586,6 +586,7 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
       opts.analyze.top = top.max(1);
     }
     if let Some(thresholds) = analyze.thresholds {
+      guard_debug("analyze.thresholds.*", opts.debug_mode);
       let current = &mut opts.analyze.thresholds;
       if let Some(v) = thresholds.warn_total_bytes {
         current.warn_total_bytes = v;
