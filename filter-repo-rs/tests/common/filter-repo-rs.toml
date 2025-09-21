@@ -1,0 +1,15 @@
+[analyze]
+json = true
+top = 15
+
+[analyze.thresholds]
+warn_total_bytes = 1073741824
+crit_total_bytes = 4294967296
+warn_blob_bytes = 5242880
+warn_ref_count = 15000
+warn_object_count = 5000000
+warn_tree_entries = 1500
+warn_path_length = 180
+warn_duplicate_paths = 750
+warn_commit_msg_bytes = 8000
+warn_max_parents = 6
