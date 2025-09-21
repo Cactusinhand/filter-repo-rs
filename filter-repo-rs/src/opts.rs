@@ -314,7 +314,10 @@ pub fn parse_args() -> Options {
         opts.cleanup = match v.as_str() {
           "none" => CleanupMode::None,
           "standard" => CleanupMode::Standard,
-          "aggressive" => CleanupMode::Aggressive,
+          "aggressive" => {
+            guard_debug("--cleanup aggressive", opts.debug_mode);
+            CleanupMode::Aggressive
+          }
           other => {
             eprintln!("--cleanup: unknown mode '{}'", other);
             std::process::exit(2);
