@@ -183,9 +183,6 @@ pub fn finalize(
                             .stdout
                             .split(|b| *b == b'\n')
                             .filter_map(|line| {
-                                if line.is_empty() {
-                                    return None;
-                                }
                                 let mut trimmed = line;
                                 if let Some(b'\r') = trimmed.last() {
                                     trimmed = &trimmed[..trimmed.len() - 1];
