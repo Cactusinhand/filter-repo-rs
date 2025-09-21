@@ -381,7 +381,7 @@ fn debug_mode_enabled(args: &[String]) -> bool {
 fn debug_env_flag_enabled(raw: &str) -> bool {
   let normalized = raw.trim().to_ascii_lowercase();
   if normalized.is_empty() {
-    return true;
+    return false;
   }
   !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
 }
