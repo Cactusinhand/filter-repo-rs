@@ -250,3 +250,49 @@ fn cross_platform_file_permissions() {
         o.max_blob_size = Some(1000);
     });
 }
+
+fn assert_safe_fast_export_defaults(repo: &std::path::Path) {
+    let (output, invocations) =
+        run_cli_with_git_spy(repo, &["--force", "--path", "README.md"]);
+    assert!(output.status.success(), "filter run should succeed");
+    let commands = git_commands_for_repo(repo, &invocations);
+    let fast_export = find_git_command(&commands, "fast-export")
+        .cloned()
+        .expect("expected fast-export invocation");
+    let has_quotepath = fast_export.windows(2).any(|pair| {
+        pair.len() == 2 && pair[0] == "-c" && pair[1] == "core.quotepath=false"
+    });
+    assert!(
+        has_quotepath,
+        "fast-export should disable core.quotepath by default: {:?}",
+        fast_export
+    );
+    assert!(
+        fast_export.iter().any(|arg| arg == "--reencode=yes"),
+        "fast-export should request reencode=yes by default: {:?}",
+        fast_export
+    );
+    assert!(
+        fast_export.iter().any(|arg| arg == "--mark-tags"),
+        "fast-export should request --mark-tags by default: {:?}",
+        fast_export
+    );
+    assert!(
+        !fast_export.iter().any(|arg| arg == "--no-mark-tags"),
+        "fast-export should not disable mark-tags"
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn unix_safe_defaults_match_git_expectations() {
+    let repo = init_repo();
+    assert_safe_fast_export_defaults(&repo);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_safe_defaults_match_git_expectations() {
+    let repo = init_repo();
+    assert_safe_fast_export_defaults(&repo);
+}

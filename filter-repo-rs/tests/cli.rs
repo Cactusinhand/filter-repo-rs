@@ -1,11 +1,5 @@
-use std::process::Command;
-
 mod common;
 use common::*;
-
-fn cli_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_filter-repo-rs"))
-}
 
 #[test]
 fn help_hides_debug_sections_without_debug_mode() {
@@ -122,6 +116,49 @@ fn help_shows_debug_sections_in_debug_mode() {
     assert!(
         stdout.contains("--fe_stream_override"),
         "debug help should list stream override flag"
+    );
+}
+
+#[test]
+fn env_toggle_enables_debug_help() {
+    let output = cli_command()
+        .env("FRRS_DEBUG", "1")
+        .arg("--help")
+        .output()
+        .expect("run filter-repo-rs FRRS_DEBUG=1 --help");
+
+    assert!(output.status.success(), "help should exit successfully with FRRS_DEBUG");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Debug / cleanup behavior"),
+        "environment debug toggle should expose cleanup section"
+    );
+    assert!(
+        stdout.contains("--cleanup-aggressive"),
+        "environment debug toggle should surface aggressive cleanup flag"
+    );
+    assert!(
+        stdout.contains("Debug / fast-export passthrough"),
+        "environment debug toggle should expose passthrough section"
+    );
+}
+
+#[test]
+fn debug_help_mentions_env_toggle() {
+    let output = cli_command()
+        .arg("--debug-mode")
+        .arg("--help")
+        .output()
+        .expect("run filter-repo-rs --debug-mode --help");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("FRRS_DEBUG=1"),
+        "debug help should mention FRRS_DEBUG environment toggle"
+    );
+    assert!(
+        stdout.contains("same as FRRS_DEBUG=1"),
+        "debug help should clarify CLI/env parity"
     );
 }
 
