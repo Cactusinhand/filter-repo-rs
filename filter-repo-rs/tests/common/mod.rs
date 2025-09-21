@@ -43,6 +43,30 @@ static GIT_SPY: OnceLock<GitSpyPaths> = OnceLock::new();
 #[allow(dead_code)]
 static GIT_SPY_LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+fn canonicalize_for_git(path: &Path) -> PathBuf {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    #[cfg(windows)]
+    {
+        return strip_unc_prefix(&canonical.to_string_lossy());
+    }
+    canonical
+}
+
+#[cfg(windows)]
+fn strip_unc_prefix(path: &str) -> PathBuf {
+    const UNC_PREFIX: &str = "\\\\?\\";
+    if let Some(stripped) = path.strip_prefix(UNC_PREFIX) {
+        PathBuf::from(stripped)
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_unc_prefix(path: &str) -> PathBuf {
+    PathBuf::from(path)
+}
+
 #[allow(dead_code)]
 pub fn cli_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_filter-repo-rs"))
@@ -165,16 +189,13 @@ fn parse_git_invocations(log_path: &Path) -> Vec<GitInvocation> {
         Ok(data) => data,
         Err(_) => return Vec::new(),
     };
-    data.lines()
+    data
+        .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let mut fields: Vec<String> = line.split('\t').map(|s| s.to_string()).collect();
-            let cwd = fields.get(0).cloned().unwrap_or_default();
-            let args = if fields.len() > 1 {
-                fields.split_off(1)
-            } else {
-                Vec::new()
-            };
+            let mut parts = line.split('\t');
+            let cwd = parts.next().unwrap_or("").to_string();
+            let args = parts.map(|s| s.to_string()).collect();
             GitInvocation { cwd, args }
         })
         .collect()
@@ -182,20 +203,21 @@ fn parse_git_invocations(log_path: &Path) -> Vec<GitInvocation> {
 
 #[allow(dead_code)]
 pub fn git_commands_for_repo(repo: &Path, invocations: &[GitInvocation]) -> Vec<Vec<String>> {
-    let repo_abs_buf = repo
-        .canonicalize()
-        .unwrap_or_else(|_| repo.to_path_buf());
-    let repo_abs_str = repo_abs_buf.to_string_lossy().to_string();
+    let repo_abs_buf = canonicalize_for_git(repo);
 
     invocations
         .iter()
         .filter_map(|inv| {
-            if PathBuf::from(&inv.cwd) == repo_abs_buf {
+            if strip_unc_prefix(&inv.cwd) == repo_abs_buf {
                 return Some(inv.args.clone());
             }
 
             if inv.args.get(0).map(|s| s == "-C").unwrap_or(false)
-                && inv.args.get(1).map(|s| s == &repo_abs_str).unwrap_or(false)
+                && inv
+                    .args
+                    .get(1)
+                    .map(|s| strip_unc_prefix(s) == repo_abs_buf)
+                    .unwrap_or(false)
             {
                 return Some(inv.args[2..].to_vec());
             }
@@ -219,7 +241,7 @@ pub fn run_cli_with_git_spy(repo: &Path, extra_args: &[&str]) -> (Output, Vec<Gi
     if log_path.exists() {
         let _ = fs::remove_file(&log_path);
     }
-    let repo_abs = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+    let repo_abs = canonicalize_for_git(repo);
     let repo_str = repo_abs.to_string_lossy().to_string();
     let mut cmd = cli_command();
     let cwd = repo_abs.parent().map(PathBuf::from).unwrap_or_else(|| repo_abs.clone());

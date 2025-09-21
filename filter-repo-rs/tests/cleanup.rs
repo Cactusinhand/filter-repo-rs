@@ -28,7 +28,9 @@ fn cleanup_modes_trigger_expected_git_commands() {
     let cleanup_repo = init_repo();
     let (cleanup_output, cleanup_cmds) = run_cleanup_case(&cleanup_repo, &["--cleanup"]);
     assert!(cleanup_output.status.success(), "--cleanup run should succeed");
-    let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog").cloned().expect("standard cleanup should expire reflog");
+    let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog")
+        .cloned()
+        .expect("standard cleanup should expire reflog");
     assert!(
         cleanup_reflog.contains(&"expire".to_string()),
         "reflog invocation should include expire subcommand: {:?}",
@@ -46,9 +48,9 @@ fn cleanup_modes_trigger_expected_git_commands() {
         !cleanup_reflog.contains(&"--expire-unreachable=now".to_string()),
         "standard cleanup should not force unreachable expiry"
     );
-    let cleanup_gc = find_git_command(&cleanup_cmds, "gc").cloned();
-    assert!(cleanup_gc.is_some(), "standard cleanup should invoke git gc");
-    let cleanup_gc = cleanup_gc.unwrap();
+    let cleanup_gc = find_git_command(&cleanup_cmds, "gc")
+        .cloned()
+        .expect("standard cleanup should invoke git gc");
     assert!(
         cleanup_gc.contains(&"--prune=now".to_string()),
         "standard cleanup should prune immediately"
@@ -66,19 +68,16 @@ fn cleanup_modes_trigger_expected_git_commands() {
         aggressive_output.status.success(),
         "--cleanup-aggressive run should succeed"
     );
-    let aggressive_reflog = find_git_command(&aggressive_cmds, "reflog").cloned();
-    assert!(
-        aggressive_reflog.is_some(),
-        "aggressive cleanup should expire reflog"
-    );
-    let aggressive_reflog = aggressive_reflog.unwrap();
+    let aggressive_reflog = find_git_command(&aggressive_cmds, "reflog")
+        .cloned()
+        .expect("aggressive cleanup should expire reflog");
     assert!(
         aggressive_reflog.contains(&"--expire-unreachable=now".to_string()),
         "aggressive cleanup should expire unreachable entries"
     );
-    let aggressive_gc = find_git_command(&aggressive_cmds, "gc").cloned();
-    assert!(aggressive_gc.is_some(), "aggressive cleanup should invoke git gc");
-    let aggressive_gc = aggressive_gc.unwrap();
+    let aggressive_gc = find_git_command(&aggressive_cmds, "gc")
+        .cloned()
+        .expect("aggressive cleanup should invoke git gc");
     assert!(
         aggressive_gc.contains(&"--aggressive".to_string()),
         "aggressive cleanup should request aggressive gc"
