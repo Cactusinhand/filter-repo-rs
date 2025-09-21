@@ -99,33 +99,69 @@ fn analysis_threshold_flags_require_debug_mode() {
 
 #[test]
 fn fast_export_debug_flags_require_debug_mode() {
-    let output = cli_command()
-        .arg("--date-order")
-        .output()
-        .expect("run filter-repo-rs with gated fast-export flag");
+    let gated_flags = [
+        "--date-order",
+        "--no-reencode",
+        "--no-quotepath",
+        "--no-mark-tags",
+        "--mark-tags",
+    ];
 
-    assert_eq!(
-        Some(2),
-        output.status.code(),
-        "gated fast-export flag should exit with code 2"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("FRRS_DEBUG"),
-        "gated message should mention FRRS_DEBUG"
-    );
+    for flag in gated_flags {
+        let output = cli_command()
+            .arg(flag)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to run filter-repo-rs with gated flag {}: {}",
+                    flag, e
+                )
+            });
+
+        assert_eq!(
+            Some(2),
+            output.status.code(),
+            "gated fast-export flag '{}' should exit with code 2",
+            flag
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("FRRS_DEBUG"),
+            "gated message for flag '{}' should mention FRRS_DEBUG",
+            flag
+        );
+    }
 }
 
 #[test]
 fn debug_mode_allows_fast_export_debug_flags() {
-    let output = cli_command()
-        .arg("--debug-mode")
-        .arg("--date-order")
-        .arg("--help")
-        .output()
-        .expect("run filter-repo-rs --debug-mode --date-order --help");
+    let gated_flags = [
+        "--date-order",
+        "--no-reencode",
+        "--no-quotepath",
+        "--no-mark-tags",
+        "--mark-tags",
+    ];
 
-    assert!(output.status.success(), "debug mode should allow fast-export flag");
+    for flag in gated_flags {
+        let output = cli_command()
+            .arg("--debug-mode")
+            .arg(flag)
+            .arg("--help")
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to run filter-repo-rs --debug-mode with flag {}: {}",
+                    flag, e
+                )
+            });
+
+        assert!(
+            output.status.success(),
+            "debug mode should allow fast-export flag '{}'",
+            flag
+        );
+    }
 }
 
 #[test]
