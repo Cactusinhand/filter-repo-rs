@@ -584,7 +584,7 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .map(|(idx, blob)| {
                 vec![
                     format!("{}", idx + 1),
-                    short_oid(&blob.oid).to_string(),
+                    blob.oid.clone(),
                     format!("{:.2} MiB", to_mib(blob.size)),
                     blob.path.clone().unwrap_or_default(),
                 ]
@@ -613,7 +613,7 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .map(|(idx, tree)| {
                 vec![
                     format!("{}", idx + 1),
-                    short_oid(&tree.oid).to_string(),
+                    tree.oid.clone(),
                     format!("{:.2} KiB", tree.size as f64 / 1024.0),
                 ]
             })
@@ -693,7 +693,7 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .map(|(idx, dup)| {
                 vec![
                     format!("{}", idx + 1),
-                    short_oid(&dup.oid).to_string(),
+                    dup.oid.clone(),
                     format_count(dup.paths as u64),
                     dup.example_path.clone().unwrap_or_default(),
                 ]
@@ -731,7 +731,7 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
             .map(|(idx, msg)| {
                 vec![
                     format!("{}", idx + 1),
-                    short_oid(&msg.oid).to_string(),
+                    msg.oid.clone(),
                     format_count(msg.length as u64),
                 ]
             })
@@ -895,9 +895,4 @@ fn format_count<T: Into<u64>>(value: T) -> String {
 
 fn format_size_gib(bytes: u64) -> String {
     format!("{:.2} GiB", to_gib(bytes))
-}
-
-fn short_oid(oid: &str) -> &str {
-    let end = oid.len().min(12);
-    &oid[..end]
 }
