@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use regex::bytes::Regex;
 use serde::Deserialize;
@@ -631,15 +633,10 @@ fn warn_legacy_cleanup_usage(mode: &str) {
 }
 
 fn legacy_warning_once(key: &str) -> bool {
-  use std::collections::HashSet;
-  use std::sync::{Mutex, OnceLock};
-
   static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-  WARNED
-    .get_or_init(|| Mutex::new(HashSet::new()))
-    .lock()
-    .expect("Mutex poisoned")
-    .insert(key.to_string())
+  let warned_set = WARNED.get_or_init(|| Mutex::new(HashSet::new()));
+  let mut warned = warned_set.lock().expect("Mutex poisoned");
+  warned.insert(key.to_string())
 }
 
 fn enforce_legacy_cleanup_allowed() {
