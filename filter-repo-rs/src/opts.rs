@@ -59,24 +59,10 @@ impl Default for AnalyzeConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct FileAnalyzeThresholds {
-  warn_total_bytes: Option<u64>,
-  crit_total_bytes: Option<u64>,
-  warn_blob_bytes: Option<u64>,
-  warn_ref_count: Option<usize>,
-  warn_object_count: Option<usize>,
-  warn_tree_entries: Option<usize>,
-  warn_path_length: Option<usize>,
-  warn_duplicate_paths: Option<usize>,
-  warn_commit_msg_bytes: Option<usize>,
-  warn_max_parents: Option<usize>,
-}
-
-#[derive(Debug, Default, Deserialize)]
 struct FileAnalyzeConfig {
   json: Option<bool>,
   top: Option<usize>,
-  thresholds: Option<FileAnalyzeThresholds>,
+  thresholds: Option<AnalyzeThresholdOverrides>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -84,7 +70,7 @@ struct FileConfig {
   analyze: Option<FileAnalyzeConfig>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Deserialize)]
 struct AnalyzeThresholdOverrides {
   warn_total_bytes: Option<u64>,
   crit_total_bytes: Option<u64>,
@@ -575,17 +561,7 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
     }
     if let Some(thresholds) = analyze.thresholds {
       guard_debug("analyze.thresholds.*", opts.debug_mode);
-      let current = &mut opts.analyze.thresholds;
-      apply_threshold_field!(current, thresholds, warn_total_bytes);
-      apply_threshold_field!(current, thresholds, crit_total_bytes);
-      apply_threshold_field!(current, thresholds, warn_blob_bytes);
-      apply_threshold_field!(current, thresholds, warn_ref_count);
-      apply_threshold_field!(current, thresholds, warn_object_count);
-      apply_threshold_field!(current, thresholds, warn_tree_entries);
-      apply_threshold_field!(current, thresholds, warn_path_length);
-      apply_threshold_field!(current, thresholds, warn_duplicate_paths);
-      apply_threshold_field!(current, thresholds, warn_commit_msg_bytes);
-      apply_threshold_field!(current, thresholds, warn_max_parents);
+      thresholds.apply(&mut opts.analyze.thresholds);
     }
   }
 
