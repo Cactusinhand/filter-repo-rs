@@ -758,7 +758,7 @@ fn guard_debug(flag: &str, debug_mode: bool) {
     }
 }
 
-fn parse_integer_allowing_underscores<T>(s: &str) -> Result<T, ()>
+fn parse_integer_allowing_underscores<T>(s: &str) -> Result<T, T::Err>
 where
     T: std::str::FromStr,
 {
@@ -768,7 +768,7 @@ where
         Cow::Borrowed(s)
     };
 
-    normalized.parse::<T>().map_err(|_| ())
+    normalized.parse::<T>()
 }
 
 fn parse_u64(s: &str, flag: &str) -> u64 {
