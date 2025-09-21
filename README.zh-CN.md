@@ -192,8 +192,10 @@ cargo test -p filter-repo-rs
 测试会在 `target/it/` 下创建临时仓库；要求 PATH 中有 Git；
 并在每个临时仓库里写入调试产物（commit-map、ref-map、report）。
 
-命令概览（节选）
-----------------
+命令概览：核心 vs 调试分层
+-----------------------------
+
+核心 CLI（默认可见；优先级与场景请参见 [docs/SCOPE.md](docs/SCOPE.md)、安全/对齐说明参见 [docs/PARITY.md](docs/PARITY.md)）：
 
 - 仓库与引用
   - `--source DIR`、`--target DIR`（默认 `.`）、`--refs`（可重复，默认 `--all`）
@@ -213,9 +215,19 @@ cargo test -p filter-repo-rs
   - `--write-report`、`--cleanup [none|standard|aggressive]`、`--quiet`、`--no-reset`
   - `--backup [--backup-path PATH]`、`--dry-run`
   - `--partial`、`--sensitive [--no-fetch]`、`--force`、`--enforce-sanity`
+  - 分析入口：`--analyze`、`--analyze-json`、`--analyze-top`。阈值通过 `.filter-repo-rs.toml` 或 `--config` 配置（参考 [docs/examples/filter-repo-rs.toml](docs/examples/filter-repo-rs.toml) 示例）。
 
-- 调试 / fast-export 透传（需要 `--debug-mode` 或 `FRRS_DEBUG=1`）
+调试覆盖层（通过 `--debug-mode` 或 `FRRS_DEBUG=1` 显示；旧兼容开关默认隐藏）：
+
+- 分析阈值 / 兼容旗标
+  - `--analyze-total-warn`、`--analyze-total-critical`、`--analyze-large-blob`、`--analyze-ref-warn`、`--analyze-object-warn`、`--analyze-tree-entries`、`--analyze-path-length`、`--analyze-duplicate-paths`、`--analyze-commit-msg-warn`、`--analyze-max-parents-warn`
+  - 会提示对应 `.filter-repo-rs.toml` 配置键，方便迁移。
+
+- fast-export 透传
   - `--date-order`、`--no-reencode`、`--no-quotepath`、`--no-mark-tags`、`--mark-tags`
+
+- 清理与流覆盖
+  - `--no-reset`、`--cleanup-aggressive`、`--fe_stream_override`
 
 示例
 ----
