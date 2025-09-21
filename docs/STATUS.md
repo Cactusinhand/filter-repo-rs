@@ -102,6 +102,10 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - Value‑focused features: see docs/SCOPE.md (English) and docs/SCOPE.zh-CN.md (Chinese) for high‑value items, pain points → solutions, and “why raw Git is hard”.
 - Boundaries: core vs. non‑goals vs. “re‑evaluate later” are tracked in the SCOPE docs; check alignment before adding new flags.
 
+## CLI Convergence
+
+- See docs/CLI-CONVERGENCE.zh-CN.md for the proposed CLI consolidation plan (core vs. hidden/debug, merged semantics, config file for analysis thresholds, and deprecation strategy).
+
 ## MVP Scope (target) and Gap
 
 MVP Goal: a stable, performant subset that covers the most common workflows:
