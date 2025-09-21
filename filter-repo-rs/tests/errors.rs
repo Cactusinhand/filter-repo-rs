@@ -28,6 +28,26 @@ fn error_handling_invalid_source_repository() {
 }
 
 #[test]
+fn error_handling_stashed_changes_are_rejected() {
+    let repo = init_repo();
+
+    write_file(&repo, "README.md", "stash me");
+    let (code, _out, err) = run_git(&repo, &["stash", "push", "-m", "temp stash"]);
+    assert_eq!(code, 0, "git stash push failed: {}", err);
+
+    let error = run_tool(&repo, |opts| {
+        opts.enforce_sanity = true;
+    })
+    .expect_err("stash should cause preflight failure");
+    let msg = format!("{:?}", error);
+    assert!(
+        msg.contains("sanity: stashed changes present"),
+        "unexpected error message: {}",
+        msg
+    );
+}
+
+#[test]
 fn error_handling_invalid_target_repository() {
     let repo = init_repo();
     let temp_dir = tempfile::TempDir::new().unwrap();
