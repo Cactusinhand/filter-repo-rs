@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -485,7 +486,7 @@ pub fn parse_args() -> Options {
             }
             "--max-blob-size" => {
                 let v = it.next().expect("--max-blob-size requires BYTES");
-                let n = v.parse::<usize>().unwrap_or_else(|_| {
+                let n = parse_integer_allowing_underscores::<usize>(&v).unwrap_or_else(|_| {
                     eprintln!("--max-blob-size expects an integer number of bytes");
                     std::process::exit(2);
                 });
@@ -757,15 +758,28 @@ fn guard_debug(flag: &str, debug_mode: bool) {
     }
 }
 
+fn parse_integer_allowing_underscores<T>(s: &str) -> Result<T, ()>
+where
+    T: std::str::FromStr,
+{
+    let normalized: Cow<'_, str> = if s.contains('_') {
+        Cow::Owned(s.replace('_', ""))
+    } else {
+        Cow::Borrowed(s)
+    };
+
+    normalized.parse::<T>().map_err(|_| ())
+}
+
 fn parse_u64(s: &str, flag: &str) -> u64 {
-    s.parse::<u64>().unwrap_or_else(|_| {
+    parse_integer_allowing_underscores::<u64>(s).unwrap_or_else(|_| {
         eprintln!("{} expects an integer number", flag);
         std::process::exit(2);
     })
 }
 
 fn parse_usize(s: &str, flag: &str) -> usize {
-    s.parse::<usize>().unwrap_or_else(|_| {
+    parse_integer_allowing_underscores::<usize>(s).unwrap_or_else(|_| {
         eprintln!("{} expects an integer number", flag);
         std::process::exit(2);
     })
