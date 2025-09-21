@@ -266,6 +266,27 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         stderr_split
     );
 
+    let legacy_agg = cli_command()
+        .arg("--debug-mode")
+        .arg("--cleanup=aggressive")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with legacy cleanup syntax (--cleanup=aggressive)");
+
+    assert!(legacy_agg.status.success(), "legacy aggressive cleanup syntax should run");
+    let stderr_agg = String::from_utf8_lossy(&legacy_agg.stderr);
+    assert!(
+        stderr_agg.contains("deprecated"),
+        "legacy --cleanup=aggressive mode should emit deprecation warning: {}",
+        stderr_agg
+    );
+    assert!(
+        stderr_agg.contains("--cleanup-aggressive"),
+        "deprecation warning for aggressive should mention --cleanup-aggressive: {}",
+        stderr_agg
+    );
+
     let new_flag = cli_command()
         .arg("--cleanup")
         .arg("--dry-run")
