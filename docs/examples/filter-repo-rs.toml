@@ -1,0 +1,18 @@
+# Example filter-repo-rs configuration (.filter-repo-rs.toml)
+# Copy this file to the root of the repository you plan to filter.
+# Debug-only knobs (analysis thresholds) require `--debug-mode` or `FRRS_DEBUG=1`.
+
+[analyze]
+top = 10
+
+[analyze.thresholds]
+warn_total_bytes = 1073741824        # 1 GiB
+crit_total_bytes = 5368709120        # 5 GiB
+warn_blob_bytes = 10485760           # 10 MiB
+warn_ref_count = 20000
+warn_object_count = 10000000
+warn_tree_entries = 2000
+warn_path_length = 200
+warn_duplicate_paths = 1000
+warn_commit_msg_bytes = 10000
+warn_max_parents = 8

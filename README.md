@@ -193,8 +193,10 @@ cargo test -p filter-repo-rs
 The suite sets up temporary repos under `target/it/`, requires Git on PATH,
 and writes debug artifacts (commit-map, ref-map, report) in each ephemeral repo.
 
-CLI overview (selected)
------------------------
+CLI overview: core vs debug layers
+----------------------------------
+
+Core CLI (always available; see [docs/SCOPE.md](docs/SCOPE.md) for prioritized scenarios and [docs/PARITY.md](docs/PARITY.md) for parity/safety context):
 
 - Repository & refs
   - `--source DIR`, `--target DIR` (default `.`), `--refs` (repeatable, defaults to `--all`)
@@ -214,9 +216,19 @@ CLI overview (selected)
   - `--write-report`, `--cleanup [none|standard|aggressive]`, `--quiet`, `--no-reset`
   - `--backup [--backup-path PATH]`, `--dry-run`
   - `--partial`, `--sensitive [--no-fetch]`, `--force`, `--enforce-sanity`
+  - Analysis entry points: `--analyze`, `--analyze-json`, `--analyze-top`. Configure thresholds via `.filter-repo-rs.toml` or `--config` (see [docs/examples/filter-repo-rs.toml](docs/examples/filter-repo-rs.toml)).
 
-- Debug / fast-export passthrough *(requires `--debug-mode` or `FRRS_DEBUG=1`)*
+Debug overlays *(enable with `--debug-mode` or `FRRS_DEBUG=1`; legacy compatibility toggles stay hidden by default)*:
+
+- Analysis thresholds / legacy overrides
+  - `--analyze-total-warn`, `--analyze-total-critical`, `--analyze-large-blob`, `--analyze-ref-warn`, `--analyze-object-warn`, `--analyze-tree-entries`, `--analyze-path-length`, `--analyze-duplicate-paths`, `--analyze-commit-msg-warn`, `--analyze-max-parents-warn`
+  - Each emits a warning pointing to the config keys in `.filter-repo-rs.toml`.
+
+- Fast-export passthrough knobs
   - `--date-order`, `--no-reencode`, `--no-quotepath`, `--no-mark-tags`, `--mark-tags`
+
+- Cleanup & stream overrides
+  - `--no-reset`, `--cleanup-aggressive`, `--fe_stream_override`
 
 Examples
 --------

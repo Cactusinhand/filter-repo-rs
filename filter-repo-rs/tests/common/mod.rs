@@ -87,3 +87,13 @@ pub fn current_branch(repo: &Path) -> String {
     }
     branch
 }
+
+#[allow(dead_code)]
+pub fn docs_example_config_path() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("..");
+    path.push("docs");
+    path.push("examples");
+    path.push("filter-repo-rs.toml");
+    path
+}

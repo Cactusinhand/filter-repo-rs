@@ -14,6 +14,10 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - Debug gating: `--debug-mode` / `FRRS_DEBUG` exposes fast-export passthrough knobs and analysis thresholds; baseline `--help` hides them.
   - Fast-import runs with `-c core.ignorecase=false` and exports marks to `.git/filter-repo/target-marks`.
 
+- Configuration & docs/test parity
+  - `.filter-repo-rs.toml` loads from the source repo (or `--config` override); debug-only thresholds stay gated.
+  - Shared example lives at `docs/examples/filter-repo-rs.toml`, and integration tests reference it to prevent drift.
+
 - Refactor & Module Layout
   - `main.rs`: minimal; delegates to `stream::run()`.
   - `stream.rs`: orchestrates the streaming loop (reads from fast-export, routes to modules, writes to fast-import and debug files).
@@ -108,6 +112,13 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - See docs/CLI-CONVERGENCE.zh-CN.md for the proposed CLI consolidation plan (core vs. hidden/debug, merged semantics, config file for analysis thresholds, and deprecation strategy).
 - Analysis threshold "micro-tuning" flags (`--analyze-*-warn`) are now hidden by default and require `--debug-mode` or `FRRS_DEBUG=1`; core help surfaces only `--analyze`, `--analyze-json`, and `--analyze-top`. As of the latest prototype, these legacy flags emit a one-time warning pointing to `analyze.thresholds.*` config keys, and the help text references them only as compatibility shims.
 - Legacy `--cleanup=<mode>` syntax continues to parse for now, but prints a one-time warning steering users to the boolean `--cleanup` or debug-only `--cleanup-aggressive`. Stage-3 toggles exist in the parser to disable the legacy syntax once compatibility can be removed.
+
+### Progress checklist
+
+- [x] Baseline `--help` hides debug-only flags while `--debug-mode` / `FRRS_DEBUG` surfaces fast-export passthrough, cleanup, and analysis overrides.
+- [x] Debug gating is enforced for cleanup semantics (`--no-reset`, `--cleanup-aggressive`) and fast-export knobs; errors guide users to enable debug mode when necessary.
+- [x] `.filter-repo-rs.toml` config loading is wired in with a shared example at `docs/examples/filter-repo-rs.toml`; integration tests consume the same sample to keep docs and behavior aligned.
+- [ ] Stage-3 toggles remain available to drop legacy cleanup/analysis flags entirely once ecosystem consumers finish migrating.
 
 ## MVP Scope (target) and Gap
 

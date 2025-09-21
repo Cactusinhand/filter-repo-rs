@@ -57,6 +57,8 @@ CLI 收敛草案（filter-repo-rs）
 - 面向 CLI 保留：`--analyze`、`--analyze-json`、`--analyze-top N`
 - 将阈值微调迁移到配置文件（默认 `.filter-repo-rs.toml`）：
 
+- 示例配置见 [`docs/examples/filter-repo-rs.toml`](docs/examples/filter-repo-rs.toml)，测试与文档共用以保持一致。
+
 ```toml
 [analyze]
 top = 10
