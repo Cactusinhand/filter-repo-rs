@@ -98,38 +98,26 @@ struct AnalyzeThresholdOverrides {
   warn_max_parents: Option<usize>,
 }
 
+macro_rules! apply_threshold_field {
+  ($dest:expr, $src:expr, $field:ident) => {
+    if let Some(value) = $src.$field {
+      $dest.$field = value;
+    }
+  };
+}
+
 impl AnalyzeThresholdOverrides {
   fn apply(&self, thresholds: &mut AnalyzeThresholds) {
-    if let Some(v) = self.warn_total_bytes {
-      thresholds.warn_total_bytes = v;
-    }
-    if let Some(v) = self.crit_total_bytes {
-      thresholds.crit_total_bytes = v;
-    }
-    if let Some(v) = self.warn_blob_bytes {
-      thresholds.warn_blob_bytes = v;
-    }
-    if let Some(v) = self.warn_ref_count {
-      thresholds.warn_ref_count = v;
-    }
-    if let Some(v) = self.warn_object_count {
-      thresholds.warn_object_count = v;
-    }
-    if let Some(v) = self.warn_tree_entries {
-      thresholds.warn_tree_entries = v;
-    }
-    if let Some(v) = self.warn_path_length {
-      thresholds.warn_path_length = v;
-    }
-    if let Some(v) = self.warn_duplicate_paths {
-      thresholds.warn_duplicate_paths = v;
-    }
-    if let Some(v) = self.warn_commit_msg_bytes {
-      thresholds.warn_commit_msg_bytes = v;
-    }
-    if let Some(v) = self.warn_max_parents {
-      thresholds.warn_max_parents = v;
-    }
+    apply_threshold_field!(thresholds, self, warn_total_bytes);
+    apply_threshold_field!(thresholds, self, crit_total_bytes);
+    apply_threshold_field!(thresholds, self, warn_blob_bytes);
+    apply_threshold_field!(thresholds, self, warn_ref_count);
+    apply_threshold_field!(thresholds, self, warn_object_count);
+    apply_threshold_field!(thresholds, self, warn_tree_entries);
+    apply_threshold_field!(thresholds, self, warn_path_length);
+    apply_threshold_field!(thresholds, self, warn_duplicate_paths);
+    apply_threshold_field!(thresholds, self, warn_commit_msg_bytes);
+    apply_threshold_field!(thresholds, self, warn_max_parents);
   }
 }
 
@@ -588,36 +576,16 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
     if let Some(thresholds) = analyze.thresholds {
       guard_debug("analyze.thresholds.*", opts.debug_mode);
       let current = &mut opts.analyze.thresholds;
-      if let Some(v) = thresholds.warn_total_bytes {
-        current.warn_total_bytes = v;
-      }
-      if let Some(v) = thresholds.crit_total_bytes {
-        current.crit_total_bytes = v;
-      }
-      if let Some(v) = thresholds.warn_blob_bytes {
-        current.warn_blob_bytes = v;
-      }
-      if let Some(v) = thresholds.warn_ref_count {
-        current.warn_ref_count = v;
-      }
-      if let Some(v) = thresholds.warn_object_count {
-        current.warn_object_count = v;
-      }
-      if let Some(v) = thresholds.warn_tree_entries {
-        current.warn_tree_entries = v;
-      }
-      if let Some(v) = thresholds.warn_path_length {
-        current.warn_path_length = v;
-      }
-      if let Some(v) = thresholds.warn_duplicate_paths {
-        current.warn_duplicate_paths = v;
-      }
-      if let Some(v) = thresholds.warn_commit_msg_bytes {
-        current.warn_commit_msg_bytes = v;
-      }
-      if let Some(v) = thresholds.warn_max_parents {
-        current.warn_max_parents = v;
-      }
+      apply_threshold_field!(current, thresholds, warn_total_bytes);
+      apply_threshold_field!(current, thresholds, crit_total_bytes);
+      apply_threshold_field!(current, thresholds, warn_blob_bytes);
+      apply_threshold_field!(current, thresholds, warn_ref_count);
+      apply_threshold_field!(current, thresholds, warn_object_count);
+      apply_threshold_field!(current, thresholds, warn_tree_entries);
+      apply_threshold_field!(current, thresholds, warn_path_length);
+      apply_threshold_field!(current, thresholds, warn_duplicate_paths);
+      apply_threshold_field!(current, thresholds, warn_commit_msg_bytes);
+      apply_threshold_field!(current, thresholds, warn_max_parents);
     }
   }
 
