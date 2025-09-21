@@ -105,6 +105,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 ## CLI Convergence
 
 - See docs/CLI-CONVERGENCE.zh-CN.md for the proposed CLI consolidation plan (core vs. hidden/debug, merged semantics, config file for analysis thresholds, and deprecation strategy).
+- Analysis threshold "micro-tuning" flags (`--analyze-*-warn`) are now hidden by default and require `--debug-mode` or `FRRS_DEBUG=1`; core help surfaces only `--analyze`, `--analyze-json`, and `--analyze-top`.
 
 ## MVP Scope (target) and Gap
 

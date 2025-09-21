@@ -1347,6 +1347,7 @@ mod tests {
             backup_path: None,
             mode: crate::opts::Mode::Filter,
             analyze: crate::opts::AnalyzeConfig::default(),
+            debug_mode: false,
         }
     }
 

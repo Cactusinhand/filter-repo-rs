@@ -93,6 +93,7 @@ pub struct Options {
   pub backup_path: Option<PathBuf>,
   pub mode: Mode,
   pub analyze: AnalyzeConfig,
+  pub debug_mode: bool,
 }
 
 impl Default for Options {
@@ -132,6 +133,7 @@ impl Default for Options {
       backup_path: None,
       mode: Mode::Filter,
       analyze: AnalyzeConfig::default(),
+      debug_mode: false,
     }
   }
 }
@@ -139,8 +141,10 @@ impl Default for Options {
 #[allow(dead_code)]
 pub fn parse_args() -> Options {
   use std::env;
+  let args: Vec<String> = env::args().skip(1).collect();
   let mut opts = Options::default();
-  let mut it = env::args().skip(1);
+  opts.debug_mode = debug_mode_enabled(&args);
+  let mut it = args.into_iter();
   while let Some(arg) = it.next() {
     match arg.as_str() {
       "--analyze" => opts.mode = Mode::Analyze,
@@ -151,44 +155,58 @@ pub fn parse_args() -> Options {
         opts.analyze.top = n.max(1);
       }
       "--analyze-total-warn" => {
+        guard_debug("--analyze-total-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-total-warn requires BYTES");
         opts.analyze.thresholds.warn_total_bytes = parse_u64(&v, "--analyze-total-warn");
       }
       "--analyze-total-critical" => {
+        guard_debug("--analyze-total-critical", opts.debug_mode);
         let v = it.next().expect("--analyze-total-critical requires BYTES");
         opts.analyze.thresholds.crit_total_bytes = parse_u64(&v, "--analyze-total-critical");
       }
       "--analyze-large-blob" => {
+        guard_debug("--analyze-large-blob", opts.debug_mode);
         let v = it.next().expect("--analyze-large-blob requires BYTES");
         opts.analyze.thresholds.warn_blob_bytes = parse_u64(&v, "--analyze-large-blob");
       }
       "--analyze-ref-warn" => {
+        guard_debug("--analyze-ref-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-ref-warn requires COUNT");
         opts.analyze.thresholds.warn_ref_count = parse_usize(&v, "--analyze-ref-warn");
       }
       "--analyze-object-warn" => {
+        guard_debug("--analyze-object-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-object-warn requires COUNT");
         opts.analyze.thresholds.warn_object_count = parse_usize(&v, "--analyze-object-warn");
       }
       "--analyze-tree-entries" => {
+        guard_debug("--analyze-tree-entries", opts.debug_mode);
         let v = it.next().expect("--analyze-tree-entries requires COUNT");
         opts.analyze.thresholds.warn_tree_entries = parse_usize(&v, "--analyze-tree-entries");
       }
       "--analyze-path-length" => {
+        guard_debug("--analyze-path-length", opts.debug_mode);
         let v = it.next().expect("--analyze-path-length requires LENGTH");
         opts.analyze.thresholds.warn_path_length = parse_usize(&v, "--analyze-path-length");
       }
       "--analyze-duplicate-paths" => {
+        guard_debug("--analyze-duplicate-paths", opts.debug_mode);
         let v = it.next().expect("--analyze-duplicate-paths requires COUNT");
         opts.analyze.thresholds.warn_duplicate_paths = parse_usize(&v, "--analyze-duplicate-paths");
       }
       "--analyze-commit-msg-warn" => {
+        guard_debug("--analyze-commit-msg-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-commit-msg-warn requires BYTES");
         opts.analyze.thresholds.warn_commit_msg_bytes = parse_usize(&v, "--analyze-commit-msg-warn");
       }
       "--analyze-max-parents-warn" => {
+        guard_debug("--analyze-max-parents-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-max-parents-warn requires COUNT");
         opts.analyze.thresholds.warn_max_parents = parse_usize(&v, "--analyze-max-parents-warn");
+      }
+      "--debug-mode" => {
+        opts.debug_mode = true;
+        continue;
       }
       "--source" => opts.source = PathBuf::from(it.next().expect("--source requires value")),
       "--target" => opts.target = PathBuf::from(it.next().expect("--target requires value")),
@@ -339,17 +357,43 @@ pub fn parse_args() -> Options {
         }
       }
       "-h" | "--help" => {
-        print_help();
+        print_help(opts.debug_mode);
         std::process::exit(0);
       }
       other => {
         eprintln!("Unknown argument: {}", other);
-        print_help();
+        print_help(opts.debug_mode);
         std::process::exit(2);
       }
     }
   }
   opts
+}
+
+fn debug_mode_enabled(args: &[String]) -> bool {
+  use std::env;
+  if matches!(env::var("FRRS_DEBUG"), Ok(val) if debug_env_flag_enabled(&val)) {
+    return true;
+  }
+  args.iter().any(|arg| arg == "--debug-mode")
+}
+
+fn debug_env_flag_enabled(raw: &str) -> bool {
+  let normalized = raw.trim().to_ascii_lowercase();
+  if normalized.is_empty() {
+    return true;
+  }
+  !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
+}
+
+fn guard_debug(flag: &str, debug_mode: bool) {
+  if !debug_mode {
+    eprintln!(
+      "error: {flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to enable analysis threshold overrides."
+    );
+    eprintln!("See docs/cli-convergence.md for the configuration migration plan.");
+    std::process::exit(2);
+  }
 }
 
 fn parse_u64(s: &str, flag: &str) -> u64 {
@@ -366,10 +410,7 @@ fn parse_usize(s: &str, flag: &str) -> usize {
   })
 }
 
-#[allow(dead_code)]
-pub fn print_help() {
-  println!(
-    "filter-repo-rs (prototype)\n\
+const BASE_HELP: &str = "filter-repo-rs (prototype)\n\
 Usage: filter-repo-rs [options]\n\
 \n\
 Repository & ref selection:\n\
@@ -429,6 +470,10 @@ Repository analysis:\n\
   --analyze                   Collect repository metrics instead of rewriting\n\
   --analyze-json              Emit JSON-formatted analysis report\n\
   --analyze-top N             Number of largest blobs/trees to show (default 10)\n\
+";
+
+const DEBUG_ANALYSIS_HELP: &str = "\n\
+Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):\n\
   --analyze-total-warn BYTES  Override warning threshold for total repo size\n\
   --analyze-total-critical BYTES Override critical threshold for total repo size\n\
   --analyze-large-blob BYTES  Override blob size warning threshold\n\
@@ -439,9 +484,19 @@ Repository analysis:\n\
   --analyze-duplicate-paths N Override duplicate-path warning threshold\n\
   --analyze-commit-msg-warn N Override commit message length warning threshold\n\
   --analyze-max-parents-warn N Override max parent count warning threshold\n\
-\n\
+";
+
+const MISC_HELP: &str = "\n\
 Misc:\n\
-  -h, --help                  Show this help message\n\
-"
-  );
+  --debug-mode               Enable debug/test flags (same as FRRS_DEBUG=1)\n\
+  -h, --help                 Show this help message\n\
+";
+
+#[allow(dead_code)]
+pub fn print_help(debug_mode: bool) {
+  print!("{}", BASE_HELP);
+  if debug_mode {
+    print!("{}", DEBUG_ANALYSIS_HELP);
+  }
+  print!("{}", MISC_HELP);
 }
