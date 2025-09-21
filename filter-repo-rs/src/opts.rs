@@ -1,8 +1,15 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use regex::bytes::Regex;
 use serde::Deserialize;
+
+/// Stage-3 toggle: set to `false` to error out instead of accepting legacy cleanup syntax.
+const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
+/// Stage-3 toggle: set to `false` to disable legacy --analyze-*-warn overrides entirely.
+const LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED: bool = true;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,70 +262,80 @@ pub fn parse_args() -> Options {
         overrides.top = Some(top);
       }
       "--analyze-total-warn" => {
-        guard_debug("--analyze-total-warn", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-total-warn", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-total-warn", "analyze.thresholds.warn_total_bytes");
         let v = it.next().expect("--analyze-total-warn requires BYTES");
         let parsed = parse_u64(&v, "--analyze-total-warn");
         opts.analyze.thresholds.warn_total_bytes = parsed;
         overrides.thresholds.warn_total_bytes = Some(parsed);
       }
       "--analyze-total-critical" => {
-        guard_debug("--analyze-total-critical", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-total-critical", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-total-critical", "analyze.thresholds.crit_total_bytes");
         let v = it.next().expect("--analyze-total-critical requires BYTES");
         let parsed = parse_u64(&v, "--analyze-total-critical");
         opts.analyze.thresholds.crit_total_bytes = parsed;
         overrides.thresholds.crit_total_bytes = Some(parsed);
       }
       "--analyze-large-blob" => {
-        guard_debug("--analyze-large-blob", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-large-blob", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-large-blob", "analyze.thresholds.warn_blob_bytes");
         let v = it.next().expect("--analyze-large-blob requires BYTES");
         let parsed = parse_u64(&v, "--analyze-large-blob");
         opts.analyze.thresholds.warn_blob_bytes = parsed;
         overrides.thresholds.warn_blob_bytes = Some(parsed);
       }
       "--analyze-ref-warn" => {
-        guard_debug("--analyze-ref-warn", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-ref-warn", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-ref-warn", "analyze.thresholds.warn_ref_count");
         let v = it.next().expect("--analyze-ref-warn requires COUNT");
         let parsed = parse_usize(&v, "--analyze-ref-warn");
         opts.analyze.thresholds.warn_ref_count = parsed;
         overrides.thresholds.warn_ref_count = Some(parsed);
       }
       "--analyze-object-warn" => {
-        guard_debug("--analyze-object-warn", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-object-warn", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-object-warn", "analyze.thresholds.warn_object_count");
         let v = it.next().expect("--analyze-object-warn requires COUNT");
         let parsed = parse_usize(&v, "--analyze-object-warn");
         opts.analyze.thresholds.warn_object_count = parsed;
         overrides.thresholds.warn_object_count = Some(parsed);
       }
       "--analyze-tree-entries" => {
-        guard_debug("--analyze-tree-entries", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-tree-entries", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-tree-entries", "analyze.thresholds.warn_tree_entries");
         let v = it.next().expect("--analyze-tree-entries requires COUNT");
         let parsed = parse_usize(&v, "--analyze-tree-entries");
         opts.analyze.thresholds.warn_tree_entries = parsed;
         overrides.thresholds.warn_tree_entries = Some(parsed);
       }
       "--analyze-path-length" => {
-        guard_debug("--analyze-path-length", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-path-length", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-path-length", "analyze.thresholds.warn_path_length");
         let v = it.next().expect("--analyze-path-length requires LENGTH");
         let parsed = parse_usize(&v, "--analyze-path-length");
         opts.analyze.thresholds.warn_path_length = parsed;
         overrides.thresholds.warn_path_length = Some(parsed);
       }
       "--analyze-duplicate-paths" => {
-        guard_debug("--analyze-duplicate-paths", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-duplicate-paths", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-duplicate-paths", "analyze.thresholds.warn_duplicate_paths");
         let v = it.next().expect("--analyze-duplicate-paths requires COUNT");
         let parsed = parse_usize(&v, "--analyze-duplicate-paths");
         opts.analyze.thresholds.warn_duplicate_paths = parsed;
         overrides.thresholds.warn_duplicate_paths = Some(parsed);
       }
       "--analyze-commit-msg-warn" => {
-        guard_debug("--analyze-commit-msg-warn", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-commit-msg-warn", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-commit-msg-warn", "analyze.thresholds.warn_commit_msg_bytes");
         let v = it.next().expect("--analyze-commit-msg-warn requires BYTES");
         let parsed = parse_usize(&v, "--analyze-commit-msg-warn");
         opts.analyze.thresholds.warn_commit_msg_bytes = parsed;
         overrides.thresholds.warn_commit_msg_bytes = Some(parsed);
       }
       "--analyze-max-parents-warn" => {
-        guard_debug("--analyze-max-parents-warn", opts.debug_mode);
+        enforce_legacy_analyze_flag_allowed("--analyze-max-parents-warn", opts.debug_mode);
+        warn_legacy_analyze_threshold("--analyze-max-parents-warn", "analyze.thresholds.warn_max_parents");
         let v = it.next().expect("--analyze-max-parents-warn requires COUNT");
         let parsed = parse_usize(&v, "--analyze-max-parents-warn");
         opts.analyze.thresholds.warn_max_parents = parsed;
@@ -569,6 +586,7 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
 }
 
 fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) {
+  enforce_legacy_cleanup_allowed();
   warn_legacy_cleanup_usage(value);
   opts.cleanup = match value {
     "none" => CleanupMode::None,
@@ -585,28 +603,70 @@ fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) {
 }
 
 fn warn_legacy_cleanup_usage(mode: &str) {
-  use std::collections::HashSet;
-  use std::sync::{Mutex, OnceLock};
-
-  static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-  let mut warned = WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().expect("Mutex poisoned");
-  let key = format!("cleanup:{mode}");
-  if !warned.insert(key) {
+  if !legacy_warning_once(&format!("cleanup:{mode}")) {
     return;
   }
 
-  let recommendation = match mode {
-    "none" => "omit --cleanup entirely (cleanup defaults to 'none').",
-    "standard" => "use --cleanup (without a value) to enable standard cleanup.",
-    "aggressive" => "use --cleanup-aggressive (requires --debug-mode or FRRS_DEBUG=1).",
-    _ => "use --cleanup or --cleanup-aggressive instead.",
-  };
+  match mode {
+    "none" => {
+      eprintln!(
+        "warning: --cleanup=none is deprecated; simply omit --cleanup to keep cleanup disabled."
+      );
+    }
+    "standard" => {
+      eprintln!(
+        "warning: --cleanup=standard is deprecated; use --cleanup (boolean) to request standard cleanup."
+      );
+    }
+    "aggressive" => {
+      eprintln!(
+        "warning: --cleanup=aggressive is deprecated; use --cleanup-aggressive in debug mode if you need the old aggressive behavior."
+      );
+    }
+    _ => {
+      eprintln!(
+        "warning: --cleanup with an explicit value is deprecated; use --cleanup or --cleanup-aggressive instead."
+      );
+    }
+  }
+  eprintln!("note: see docs/CLI-CONVERGENCE.zh-CN.md for the cleanup migration guide.");
+}
+
+fn legacy_warning_once(key: &str) -> bool {
+  static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+  let warned_set = WARNED.get_or_init(|| Mutex::new(HashSet::new()));
+  let mut warned = warned_set.lock().expect("Mutex poisoned");
+  warned.insert(key.to_string())
+}
+
+fn enforce_legacy_cleanup_allowed() {
+  if LEGACY_CLEANUP_SYNTAX_ALLOWED {
+    return;
+  }
+
+  eprintln!("error: legacy --cleanup=<mode> syntax has been removed; use --cleanup or --cleanup-aggressive.");
+  std::process::exit(2);
+}
+
+fn enforce_legacy_analyze_flag_allowed(flag: &str, debug_mode: bool) {
+  if !LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED {
+    eprintln!(
+      "error: {flag} is no longer accepted; configure analyze.thresholds.* in your filter-repo-rs config file instead."
+    );
+    std::process::exit(2);
+  }
+  guard_debug(flag, debug_mode);
+}
+
+fn warn_legacy_analyze_threshold(flag: &str, config_key: &str) {
+  if !legacy_warning_once(flag) {
+    return;
+  }
 
   eprintln!(
-    "warning: --cleanup with an explicit value is deprecated; {}",
-    recommendation
+    "warning: {flag} is deprecated; set {config_key} in your .filter-repo-rs.toml (or --config) file instead."
   );
-  eprintln!("note: pass --cleanup as a boolean flag for standard cleanup.");
+  eprintln!("note: see docs/CLI-CONVERGENCE.zh-CN.md for the analysis threshold migration table.");
 }
 
 fn debug_mode_enabled(args: &[String]) -> bool {
@@ -717,16 +777,8 @@ Debug / fast-export passthrough (require --debug-mode or FRRS_DEBUG=1):\n\
 
 const DEBUG_ANALYSIS_HELP: &str = "\n\
 Debug / analysis thresholds (require --debug-mode or FRRS_DEBUG=1):\n\
-  --analyze-total-warn BYTES  Override warning threshold for total repo size\n\
-  --analyze-total-critical BYTES Override critical threshold for total repo size\n\
-  --analyze-large-blob BYTES  Override blob size warning threshold\n\
-  --analyze-ref-warn COUNT    Override reference count warning threshold\n\
-  --analyze-object-warn COUNT Override object count warning threshold\n\
-  --analyze-tree-entries N    Override tree entry warning threshold\n\
-  --analyze-path-length N     Override path length warning threshold\n\
-  --analyze-duplicate-paths N Override duplicate-path warning threshold\n\
-  --analyze-commit-msg-warn N Override commit message length warning threshold\n\
-  --analyze-max-parents-warn N Override max parent count warning threshold\n\
+  Configure analyze.thresholds.* via .filter-repo-rs.toml or --config.\n\
+  Legacy --analyze-*-warn CLI flags remain for compatibility but emit warnings.\n\
 ";
 
 const DEBUG_CLEANUP_HELP: &str = "\n\

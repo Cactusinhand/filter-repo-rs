@@ -62,19 +62,19 @@ CLI 收敛草案（filter-repo-rs）
 top = 10
 
 [analyze.thresholds]
-total_warn = 1073741824        # 1 GiB
-total_critical = 5368709120    # 5 GiB
-blob_warn = 10485760           # 10 MiB
-ref_warn = 20000
-object_warn = 10000000
-tree_entries_warn = 2000
-path_length_warn = 200
-duplicate_paths_warn = 1000
-commit_msg_warn = 10000
-max_parents_warn = 8
+warn_total_bytes = 1073741824        # 1 GiB
+crit_total_bytes = 5368709120        # 5 GiB
+warn_blob_bytes = 10485760           # 10 MiB
+warn_ref_count = 20000
+warn_object_count = 10000000
+warn_tree_entries = 2000
+warn_path_length = 200
+warn_duplicate_paths = 1000
+warn_commit_msg_bytes = 10000
+warn_max_parents = 8
 ```
 
-- CLI 若显式传入阈值，则覆盖配置文件；否则按配置/默认。
+- CLI 若显式传入阈值，则覆盖配置文件；否则按配置/默认。旧 CLI 阈值旗标进入弃用阶段（见下文“迁移指南”）。
 
 五、弃用与兼容策略
 -------------------
@@ -87,6 +87,26 @@ max_parents_warn = 8
 - `--cleanup aggressive` → 在调试模式使用 `--cleanup-aggressive`（隐藏）；常规场景推荐仅 `--cleanup`。
 - `--no-reset` → 由 `--dry-run` 覆盖；调试模式可显式使用。
 - 分析阈值族 → 对应配置文件键值；CLI 仅保留 `--analyze(-json/top)`。
+
+迁移指南（阶段 1 → 阶段 2）：
+
+| 旧旗标/语法 | 推荐替代 | 告警文案摘要 |
+| --- | --- | --- |
+| `--cleanup=none` | 直接省略 `--cleanup`，保持默认无清理 | `warning: --cleanup=none is deprecated; simply omit --cleanup to keep cleanup disabled.` |
+| `--cleanup=standard` | 使用布尔型 `--cleanup` | `warning: --cleanup=standard is deprecated; use --cleanup (boolean) to request standard cleanup.` |
+| `--cleanup=aggressive` | 在调试模式使用 `--cleanup-aggressive` | `warning: --cleanup=aggressive is deprecated; use --cleanup-aggressive in debug mode if you need the old aggressive behavior.` |
+| `--analyze-total-warn BYTES` | `analyze.thresholds.warn_total_bytes` | `warning: --analyze-total-warn is deprecated; set analyze.thresholds.warn_total_bytes in your .filter-repo-rs.toml (or --config) file instead.` |
+| `--analyze-total-critical BYTES` | `analyze.thresholds.crit_total_bytes` | 同上模式，指向相应配置键 |
+| `--analyze-large-blob BYTES` | `analyze.thresholds.warn_blob_bytes` | 同上模式 |
+| `--analyze-ref-warn COUNT` | `analyze.thresholds.warn_ref_count` | 同上模式 |
+| `--analyze-object-warn COUNT` | `analyze.thresholds.warn_object_count` | 同上模式 |
+| `--analyze-tree-entries N` | `analyze.thresholds.warn_tree_entries` | 同上模式 |
+| `--analyze-path-length N` | `analyze.thresholds.warn_path_length` | 同上模式 |
+| `--analyze-duplicate-paths N` | `analyze.thresholds.warn_duplicate_paths` | 同上模式 |
+| `--analyze-commit-msg-warn N` | `analyze.thresholds.warn_commit_msg_bytes` | 同上模式 |
+| `--analyze-max-parents-warn N` | `analyze.thresholds.warn_max_parents` | 同上模式 |
+
+> 以上告警仅会打印一次，并附带 `note: see docs/CLI-CONVERGENCE.zh-CN.md for the analysis threshold migration table.`，便于脚本在阶段 1/2 内更新。
 
 六、帮助文本分层
 ----------------
