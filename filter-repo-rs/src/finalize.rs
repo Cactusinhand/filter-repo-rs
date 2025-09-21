@@ -703,7 +703,13 @@ fn run_repo_cleanup(target: &Path, aggressive: bool) {
     if aggressive {
         gc.arg("--aggressive");
     }
-    let _ = gc.status();
+    match gc.status() {
+        Ok(status) if !status.success() => {
+            eprintln!("warning: git gc failed: {}", status);
+        }
+        Err(e) => eprintln!("warning: failed to execute git gc: {}", e),
+        _ => {}
+    }
 }
 
 fn resolve_reset_target(
