@@ -8,7 +8,7 @@ fn cli_command() -> Command {
 }
 
 #[test]
-fn help_hides_analysis_thresholds_without_debug() {
+fn help_hides_debug_sections_without_debug_mode() {
     let output = cli_command()
         .arg("--help")
         .output()
@@ -28,10 +28,22 @@ fn help_hides_analysis_thresholds_without_debug() {
         !stdout.contains("--analyze-total-warn"),
         "baseline help should hide threshold overrides"
     );
+    assert!(
+        !stdout.contains("Debug / fast-export passthrough"),
+        "baseline help should hide fast-export passthrough header"
+    );
+    assert!(
+        !stdout.contains("--no-reencode"),
+        "baseline help should hide fast-export passthrough flags"
+    );
+    assert!(
+        !stdout.contains("--date-order"),
+        "baseline help should hide date-order toggle"
+    );
 }
 
 #[test]
-fn help_shows_analysis_thresholds_in_debug_mode() {
+fn help_shows_debug_sections_in_debug_mode() {
     let output = cli_command()
         .arg("--debug-mode")
         .arg("--help")
@@ -50,6 +62,18 @@ fn help_shows_analysis_thresholds_in_debug_mode() {
     assert!(
         stdout.contains("Debug / analysis thresholds"),
         "debug section header missing"
+    );
+    assert!(
+        stdout.contains("Debug / fast-export passthrough"),
+        "debug help should list fast-export passthrough header"
+    );
+    assert!(
+        stdout.contains("--no-reencode"),
+        "debug help should list fast-export passthrough flags"
+    );
+    assert!(
+        stdout.contains("--date-order"),
+        "debug help should also list date-order toggle"
     );
 }
 
@@ -74,10 +98,78 @@ fn analysis_threshold_flags_require_debug_mode() {
 }
 
 #[test]
+fn fast_export_debug_flags_require_debug_mode() {
+    let gated_flags = [
+        "--date-order",
+        "--no-reencode",
+        "--no-quotepath",
+        "--no-mark-tags",
+        "--mark-tags",
+    ];
+
+    for flag in gated_flags {
+        let output = cli_command()
+            .arg(flag)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to run filter-repo-rs with gated flag {}: {}",
+                    flag, e
+                )
+            });
+
+        assert_eq!(
+            Some(2),
+            output.status.code(),
+            "gated fast-export flag '{}' should exit with code 2",
+            flag
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("FRRS_DEBUG"),
+            "gated message for flag '{}' should mention FRRS_DEBUG",
+            flag
+        );
+    }
+}
+
+#[test]
+fn debug_mode_allows_fast_export_debug_flags() {
+    let gated_flags = [
+        "--date-order",
+        "--no-reencode",
+        "--no-quotepath",
+        "--no-mark-tags",
+        "--mark-tags",
+    ];
+
+    for flag in gated_flags {
+        let output = cli_command()
+            .arg("--debug-mode")
+            .arg(flag)
+            .arg("--help")
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to run filter-repo-rs --debug-mode with flag {}: {}",
+                    flag, e
+                )
+            });
+
+        assert!(
+            output.status.success(),
+            "debug mode should allow fast-export flag '{}'",
+            flag
+        );
+    }
+}
+
+#[test]
 fn debug_mode_allows_analysis_threshold_flags() {
     let repo = init_repo();
     let output = cli_command()
         .arg("--debug-mode")
+        .arg("--date-order")
         .arg("--analyze")
         .arg("--analyze-total-warn")
         .arg("1")

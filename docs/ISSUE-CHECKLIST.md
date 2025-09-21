@@ -8,7 +8,7 @@ Legend: [ ] todo, [~] in progress, [x] done
 1) Gating & Help Layering
 - [ ] Add `--debug-mode` flag and/or `FRRS_DEBUG=1` env to expose hidden/debug flags in `--help`.
 - [ ] Split help output: default (core) vs verbose/debug (hidden).
-- [ ] Hide fast‑export low‑level flags (`--no-reencode`, `--no-quotepath`, `--mark-tags/--no-mark-tags`, `--date-order`) unless in debug.
+- [x] Hide fast‑export low‑level flags (`--no-reencode`, `--no-quotepath`, `--mark-tags/--no-mark-tags`, `--date-order`) unless in debug.
 - [ ] Hide `--no-reset`, `--cleanup=aggressive` unless in debug.
 - [ ] Mark `--fe_stream_override` as test‑only (undocumented) unless in debug.
 
@@ -34,13 +34,13 @@ Legend: [ ] todo, [~] in progress, [x] done
 - [ ] Add regression tests for defaults on Windows/Linux/macOS.
 
 6) Docs & Examples
-- [ ] Update README.md / README.zh-CN.md CLI sections to reflect core set.
+- [x] Update README.md / README.zh-CN.md CLI sections to reflect core set.
 - [ ] Link SCOPE & PARITY prominently; add a “Quick recipes” subset.
 - [ ] Provide sample `.filter-repo-rs.toml` in docs and tests.
 - [ ] Update docs/STATUS.md with progress ticks.
 
 7) Tests
-- [ ] Unit tests for gating (`--help`, debug exposure).
+- [x] Unit tests for gating (`--help`, debug exposure).
 - [ ] Integration tests for `--cleanup` semantics.
 - [ ] Config precedence tests (config vs CLI).
 - [ ] Backward‑compat acceptance of deprecated flags with warnings.

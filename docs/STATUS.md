@@ -11,6 +11,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - Saves debug copies at `.git/filter-repo/fast-export.{original,filtered}`.
   - Fast-export flags: `--show-original-ids --signed-tags=strip --tag-of-filtered-object=rewrite --fake-missing-tagger --reference-excluded-parents --use-done-feature`.
   - Also enabled: `-c core.quotepath=false`, `--reencode=yes`, `--mark-tags`.
+  - Debug gating: `--debug-mode` / `FRRS_DEBUG` exposes fast-export passthrough knobs and analysis thresholds; baseline `--help` hides them.
   - Fast-import runs with `-c core.ignorecase=false` and exports marks to `.git/filter-repo/target-marks`.
 
 - Refactor & Module Layout

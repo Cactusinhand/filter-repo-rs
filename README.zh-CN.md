@@ -197,7 +197,7 @@ cargo test -p filter-repo-rs
 
 - 仓库与引用
   - `--source DIR`、`--target DIR`（默认 `.`）、`--refs`（可重复，默认 `--all`）
-  - `--date-order`、`--no-data` 透传给 fast-export
+  - `--no-data` 透传给 fast-export
 
 - 路径
   - `--path`、`--path-glob`、`--path-regex`、`--invert-paths`
@@ -211,9 +211,11 @@ cargo test -p filter-repo-rs
 
 - 行为与输出
   - `--write-report`、`--cleanup [none|standard|aggressive]`、`--quiet`、`--no-reset`
-  - `--no-reencode`、`--no-quotepath`、`--no-mark-tags`、`--mark-tags`
   - `--backup [--backup-path PATH]`、`--dry-run`
   - `--partial`、`--sensitive [--no-fetch]`、`--force`、`--enforce-sanity`
+
+- 调试 / fast-export 透传（需要 `--debug-mode` 或 `FRRS_DEBUG=1`）
+  - `--date-order`、`--no-reencode`、`--no-quotepath`、`--no-mark-tags`、`--mark-tags`
 
 示例
 ----

@@ -198,7 +198,7 @@ CLI overview (selected)
 
 - Repository & refs
   - `--source DIR`, `--target DIR` (default `.`), `--refs` (repeatable, defaults to `--all`)
-  - `--date-order`, `--no-data` forwarded to fast-export
+  - `--no-data` forwarded to fast-export
 
 - Paths
   - `--path`, `--path-glob`, `--path-regex`, `--invert-paths`
@@ -212,9 +212,11 @@ CLI overview (selected)
 
 - Behavior & output
   - `--write-report`, `--cleanup [none|standard|aggressive]`, `--quiet`, `--no-reset`
-  - `--no-reencode`, `--no-quotepath`, `--no-mark-tags`, `--mark-tags`
   - `--backup [--backup-path PATH]`, `--dry-run`
   - `--partial`, `--sensitive [--no-fetch]`, `--force`, `--enforce-sanity`
+
+- Debug / fast-export passthrough *(requires `--debug-mode` or `FRRS_DEBUG=1`)*
+  - `--date-order`, `--no-reencode`, `--no-quotepath`, `--no-mark-tags`, `--mark-tags`
 
 Examples
 --------
