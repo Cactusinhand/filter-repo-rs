@@ -43,13 +43,15 @@ static GIT_SPY: OnceLock<GitSpyPaths> = OnceLock::new();
 #[allow(dead_code)]
 static GIT_SPY_LOG_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(windows)]
 fn canonicalize_for_git(path: &Path) -> PathBuf {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    #[cfg(windows)]
-    {
-        return strip_unc_prefix(&canonical.to_string_lossy());
-    }
-    canonical
+    strip_unc_prefix(&canonical.to_string_lossy())
+}
+
+#[cfg(not(windows))]
+fn canonicalize_for_git(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(windows)]
@@ -172,6 +174,10 @@ fn ensure_git_spy() -> &'static GitSpyPaths {
             let mut perms = fs::metadata(&bin_path).expect("git spy metadata").permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&bin_path, perms).expect("set git spy perms");
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &bin_path;
         }
         GitSpyPaths { bin_dir, real_git }
     })
