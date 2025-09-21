@@ -19,7 +19,11 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
             let mut cmd = Command::new("cmd");
             cmd.arg("/C").arg("type").arg(stream_path);
             cmd.stdout(Stdio::piped());
-            cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
+            cmd.stderr(if opts.quiet {
+                Stdio::null()
+            } else {
+                Stdio::inherit()
+            });
             return Ok(cmd);
         }
         #[cfg(not(windows))]
@@ -27,27 +31,47 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
             let mut cmd = Command::new("cat");
             cmd.arg(stream_path);
             cmd.stdout(Stdio::piped());
-            cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
+            cmd.stderr(if opts.quiet {
+                Stdio::null()
+            } else {
+                Stdio::inherit()
+            });
             return Ok(cmd);
         }
     }
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(&opts.source);
-    if opts.quotepath { cmd.arg("-c").arg("core.quotepath=false"); }
+    if opts.quotepath {
+        cmd.arg("-c").arg("core.quotepath=false");
+    }
     cmd.arg("fast-export");
-    for r in &opts.refs { cmd.arg(r); }
+    for r in &opts.refs {
+        cmd.arg(r);
+    }
     cmd.arg("--show-original-ids")
-       .arg("--signed-tags=strip")
-       .arg("--tag-of-filtered-object=rewrite")
-       .arg("--fake-missing-tagger")
-       .arg("--reference-excluded-parents")
-       .arg("--use-done-feature");
-    if opts.date_order { cmd.arg("--date-order"); }
-    if opts.no_data { cmd.arg("--no-data"); }
-    if opts.reencode { cmd.arg("--reencode=yes"); }
-    if opts.mark_tags { cmd.arg("--mark-tags"); }
+        .arg("--signed-tags=strip")
+        .arg("--tag-of-filtered-object=rewrite")
+        .arg("--fake-missing-tagger")
+        .arg("--reference-excluded-parents")
+        .arg("--use-done-feature");
+    if opts.date_order {
+        cmd.arg("--date-order");
+    }
+    if opts.no_data {
+        cmd.arg("--no-data");
+    }
+    if opts.reencode {
+        cmd.arg("--reencode=yes");
+    }
+    if opts.mark_tags {
+        cmd.arg("--mark-tags");
+    }
     cmd.stdout(Stdio::piped());
-    cmd.stderr(if opts.quiet { Stdio::null() } else { Stdio::inherit() });
+    cmd.stderr(if opts.quiet {
+        Stdio::null()
+    } else {
+        Stdio::inherit()
+    });
     Ok(cmd)
 }
 

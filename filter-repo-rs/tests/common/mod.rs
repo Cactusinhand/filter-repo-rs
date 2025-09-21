@@ -171,7 +171,9 @@ fn ensure_git_spy() -> &'static GitSpyPaths {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&bin_path).expect("git spy metadata").permissions();
+            let mut perms = fs::metadata(&bin_path)
+                .expect("git spy metadata")
+                .permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&bin_path, perms).expect("set git spy perms");
         }
@@ -195,8 +197,7 @@ fn parse_git_invocations(log_path: &Path) -> Vec<GitInvocation> {
         Ok(data) => data,
         Err(_) => return Vec::new(),
     };
-    data
-        .lines()
+    data.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
             let mut parts = line.split('\t');
@@ -250,7 +251,10 @@ pub fn run_cli_with_git_spy(repo: &Path, extra_args: &[&str]) -> (Output, Vec<Gi
     let repo_abs = canonicalize_for_git(repo);
     let repo_str = repo_abs.to_string_lossy().to_string();
     let mut cmd = cli_command();
-    let cwd = repo_abs.parent().map(PathBuf::from).unwrap_or_else(|| repo_abs.clone());
+    let cwd = repo_abs
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_abs.clone());
     cmd.current_dir(cwd);
     cmd.arg("--source").arg(&repo_str);
     cmd.arg("--target").arg(&repo_str);

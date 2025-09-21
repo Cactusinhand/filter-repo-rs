@@ -127,7 +127,10 @@ fn env_toggle_enables_debug_help() {
         .output()
         .expect("run filter-repo-rs FRRS_DEBUG=1 --help");
 
-    assert!(output.status.success(), "help should exit successfully with FRRS_DEBUG");
+    assert!(
+        output.status.success(),
+        "help should exit successfully with FRRS_DEBUG"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("Debug / cleanup behavior"),

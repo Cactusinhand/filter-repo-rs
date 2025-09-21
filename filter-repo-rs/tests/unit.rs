@@ -29,7 +29,10 @@ fn unit_test_tag_processing() {
     run_git(&repo, &["add", "test.txt"]);
     run_git(&repo, &["commit", "-m", "Test commit for tags"]);
     run_git(&repo, &["tag", "lightweight-tag"]);
-    run_git(&repo, &["tag", "-a", "annotated-tag", "-m", "Annotated tag message"]);
+    run_git(
+        &repo,
+        &["tag", "-a", "annotated-tag", "-m", "Annotated tag message"],
+    );
     let mut opts = fr::Options::default();
     opts.tag_rename = Some((b"lightweight-".to_vec(), b"renamed-lightweight-".to_vec()));
     opts.source = repo.clone();
@@ -69,4 +72,3 @@ fn unit_test_git_utilities() {
     let (_c, output, _e) = run_git(&repo, &["show-ref", head_ref]);
     assert!(!output.is_empty());
 }
-

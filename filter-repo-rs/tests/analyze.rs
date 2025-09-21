@@ -11,8 +11,14 @@ fn analyze_mode_produces_human_report() {
     opts.target = repo.clone();
     opts.mode = fr::Mode::Analyze;
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
-    assert!(report.metrics.refs_total >= 1, "expected refs to be counted");
-    assert!(!report.warnings.is_empty(), "expected at least one informational warning");
+    assert!(
+        report.metrics.refs_total >= 1,
+        "expected refs to be counted"
+    );
+    assert!(
+        !report.warnings.is_empty(),
+        "expected at least one informational warning"
+    );
     fr::analysis::run(&opts).expect("analyze mode should render without error");
 }
 
@@ -26,8 +32,16 @@ fn analyze_mode_emits_json() {
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     let json = serde_json::to_string(&report).expect("serialize report");
     let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
-    assert!(v.get("metrics").is_some(), "metrics missing in json: {}", json);
-    assert!(v.get("warnings").is_some(), "warnings missing in json: {}", json);
+    assert!(
+        v.get("metrics").is_some(),
+        "metrics missing in json: {}",
+        json
+    );
+    assert!(
+        v.get("warnings").is_some(),
+        "warnings missing in json: {}",
+        json
+    );
     opts.analyze.json = true;
     fr::analysis::run(&opts).expect("json analyze run should succeed");
 }
@@ -63,12 +77,42 @@ fn analyze_mode_limits_top_entries_and_populates_paths() {
     opts.analyze.thresholds.warn_blob_bytes = 1500;
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
 
-    assert!(report.metrics.largest_blobs.len() <= opts.analyze.top, "largest blobs exceeded top limit");
-    assert!(report.metrics.blobs_over_threshold.len() <= opts.analyze.top, "threshold hits exceeded top limit");
-    assert!(report.metrics.duplicate_blobs.len() <= opts.analyze.top, "duplicate blob list exceeded top limit");
-    assert!(report.metrics.largest_blobs.iter().all(|b| b.path.is_some()), "expected sample paths for top blobs");
-    assert!(report.metrics.blobs_over_threshold.iter().all(|b| b.path.is_some()), "expected sample paths for threshold hits");
-    assert!(report.metrics.duplicate_blobs.iter().all(|d| d.example_path.is_some()), "expected example paths for duplicates");
+    assert!(
+        report.metrics.largest_blobs.len() <= opts.analyze.top,
+        "largest blobs exceeded top limit"
+    );
+    assert!(
+        report.metrics.blobs_over_threshold.len() <= opts.analyze.top,
+        "threshold hits exceeded top limit"
+    );
+    assert!(
+        report.metrics.duplicate_blobs.len() <= opts.analyze.top,
+        "duplicate blob list exceeded top limit"
+    );
+    assert!(
+        report
+            .metrics
+            .largest_blobs
+            .iter()
+            .all(|b| b.path.is_some()),
+        "expected sample paths for top blobs"
+    );
+    assert!(
+        report
+            .metrics
+            .blobs_over_threshold
+            .iter()
+            .all(|b| b.path.is_some()),
+        "expected sample paths for threshold hits"
+    );
+    assert!(
+        report
+            .metrics
+            .duplicate_blobs
+            .iter()
+            .all(|d| d.example_path.is_some()),
+        "expected example paths for duplicates"
+    );
 }
 
 #[test]
@@ -113,7 +157,10 @@ fn analyze_mode_warns_on_commit_thresholds() {
 
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
 
-    assert!(report.metrics.max_commit_parents > 1, "expected merge commit to exceed parent threshold");
+    assert!(
+        report.metrics.max_commit_parents > 1,
+        "expected merge commit to exceed parent threshold"
+    );
     assert!(
         report
             .metrics
@@ -137,4 +184,3 @@ fn analyze_mode_warns_on_commit_thresholds() {
         "expected warning about excessive commit parents"
     );
 }
-

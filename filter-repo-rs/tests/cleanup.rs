@@ -1,7 +1,10 @@
 mod common;
 use common::*;
 
-fn run_cleanup_case(repo: &std::path::Path, args: &[&str]) -> (std::process::Output, Vec<Vec<String>>) {
+fn run_cleanup_case(
+    repo: &std::path::Path,
+    args: &[&str],
+) -> (std::process::Output, Vec<Vec<String>>) {
     let (output, invocations) = run_cli_with_git_spy(repo, args);
     (output, git_commands_for_repo(repo, &invocations))
 }
@@ -27,7 +30,10 @@ fn cleanup_modes_trigger_expected_git_commands() {
 
     let cleanup_repo = init_repo();
     let (cleanup_output, cleanup_cmds) = run_cleanup_case(&cleanup_repo, &["--cleanup"]);
-    assert!(cleanup_output.status.success(), "--cleanup run should succeed");
+    assert!(
+        cleanup_output.status.success(),
+        "--cleanup run should succeed"
+    );
     let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog")
         .cloned()
         .expect("standard cleanup should expire reflog");
@@ -55,7 +61,10 @@ fn cleanup_modes_trigger_expected_git_commands() {
         cleanup_gc.contains(&"--prune=now".to_string()),
         "standard cleanup should prune immediately"
     );
-    assert!(cleanup_gc.contains(&"--quiet".to_string()), "gc should run quietly");
+    assert!(
+        cleanup_gc.contains(&"--quiet".to_string()),
+        "gc should run quietly"
+    );
     assert!(
         !cleanup_gc.contains(&"--aggressive".to_string()),
         "standard cleanup should not request aggressive gc"
@@ -85,7 +94,10 @@ fn cleanup_modes_trigger_expected_git_commands() {
 
     let dry_repo = init_repo();
     let (dry_output, dry_cmds) = run_cleanup_case(&dry_repo, &["--cleanup", "--dry-run"]);
-    assert!(dry_output.status.success(), "dry-run cleanup should succeed");
+    assert!(
+        dry_output.status.success(),
+        "dry-run cleanup should succeed"
+    );
     assert!(
         find_git_command(&dry_cmds, "reflog").is_none(),
         "dry-run should skip reflog expire even with --cleanup: {:?}",

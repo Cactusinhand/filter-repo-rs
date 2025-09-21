@@ -106,7 +106,10 @@ fn cross_platform_special_characters_in_paths() {
         }
     }
     if files_created > 0 {
-        assert_eq!(run_git(&repo, &["commit", "-m", "Special characters in paths"]).0, 0);
+        assert_eq!(
+            run_git(&repo, &["commit", "-m", "Special characters in paths"]).0,
+            0
+        );
         run_tool_expect_success(&repo, |o| {
             o.max_blob_size = Some(30);
         });
@@ -252,16 +255,15 @@ fn cross_platform_file_permissions() {
 }
 
 fn assert_safe_fast_export_defaults(repo: &std::path::Path) {
-    let (output, invocations) =
-        run_cli_with_git_spy(repo, &["--force", "--path", "README.md"]);
+    let (output, invocations) = run_cli_with_git_spy(repo, &["--force", "--path", "README.md"]);
     assert!(output.status.success(), "filter run should succeed");
     let commands = git_commands_for_repo(repo, &invocations);
     let fast_export = find_git_command(&commands, "fast-export")
         .cloned()
         .expect("expected fast-export invocation");
-    let has_quotepath = fast_export.windows(2).any(|pair| {
-        pair.len() == 2 && pair[0] == "-c" && pair[1] == "core.quotepath=false"
-    });
+    let has_quotepath = fast_export
+        .windows(2)
+        .any(|pair| pair.len() == 2 && pair[0] == "-c" && pair[1] == "core.quotepath=false");
     assert!(
         has_quotepath,
         "fast-export should disable core.quotepath by default: {:?}",
