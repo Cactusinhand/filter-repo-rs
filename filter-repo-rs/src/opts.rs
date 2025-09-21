@@ -1,6 +1,8 @@
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use regex::bytes::Regex;
+use serde::Deserialize;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +55,100 @@ pub struct AnalyzeConfig {
 impl Default for AnalyzeConfig {
   fn default() -> Self {
     Self { json: false, top: 10, thresholds: AnalyzeThresholds::default() }
+  }
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileAnalyzeThresholds {
+  warn_total_bytes: Option<u64>,
+  crit_total_bytes: Option<u64>,
+  warn_blob_bytes: Option<u64>,
+  warn_ref_count: Option<usize>,
+  warn_object_count: Option<usize>,
+  warn_tree_entries: Option<usize>,
+  warn_path_length: Option<usize>,
+  warn_duplicate_paths: Option<usize>,
+  warn_commit_msg_bytes: Option<usize>,
+  warn_max_parents: Option<usize>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileAnalyzeConfig {
+  json: Option<bool>,
+  top: Option<usize>,
+  thresholds: Option<FileAnalyzeThresholds>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+  analyze: Option<FileAnalyzeConfig>,
+}
+
+#[derive(Default)]
+struct AnalyzeThresholdOverrides {
+  warn_total_bytes: Option<u64>,
+  crit_total_bytes: Option<u64>,
+  warn_blob_bytes: Option<u64>,
+  warn_ref_count: Option<usize>,
+  warn_object_count: Option<usize>,
+  warn_tree_entries: Option<usize>,
+  warn_path_length: Option<usize>,
+  warn_duplicate_paths: Option<usize>,
+  warn_commit_msg_bytes: Option<usize>,
+  warn_max_parents: Option<usize>,
+}
+
+impl AnalyzeThresholdOverrides {
+  fn apply(&self, thresholds: &mut AnalyzeThresholds) {
+    if let Some(v) = self.warn_total_bytes {
+      thresholds.warn_total_bytes = v;
+    }
+    if let Some(v) = self.crit_total_bytes {
+      thresholds.crit_total_bytes = v;
+    }
+    if let Some(v) = self.warn_blob_bytes {
+      thresholds.warn_blob_bytes = v;
+    }
+    if let Some(v) = self.warn_ref_count {
+      thresholds.warn_ref_count = v;
+    }
+    if let Some(v) = self.warn_object_count {
+      thresholds.warn_object_count = v;
+    }
+    if let Some(v) = self.warn_tree_entries {
+      thresholds.warn_tree_entries = v;
+    }
+    if let Some(v) = self.warn_path_length {
+      thresholds.warn_path_length = v;
+    }
+    if let Some(v) = self.warn_duplicate_paths {
+      thresholds.warn_duplicate_paths = v;
+    }
+    if let Some(v) = self.warn_commit_msg_bytes {
+      thresholds.warn_commit_msg_bytes = v;
+    }
+    if let Some(v) = self.warn_max_parents {
+      thresholds.warn_max_parents = v;
+    }
+  }
+}
+
+#[derive(Default)]
+struct AnalyzeOverrides {
+  json: Option<bool>,
+  top: Option<usize>,
+  thresholds: AnalyzeThresholdOverrides,
+}
+
+impl AnalyzeOverrides {
+  fn apply(&self, analyze: &mut AnalyzeConfig) {
+    if let Some(json) = self.json {
+      analyze.json = json;
+    }
+    if let Some(top) = self.top {
+      analyze.top = top;
+    }
+    self.thresholds.apply(&mut analyze.thresholds);
   }
 }
 
@@ -141,68 +237,118 @@ impl Default for Options {
 #[allow(dead_code)]
 pub fn parse_args() -> Options {
   use std::env;
-  let args: Vec<String> = env::args().skip(1).collect();
+  let mut args: Vec<String> = env::args().skip(1).collect();
+  let mut config_override = env::var("FILTER_REPO_RS_CONFIG").ok().map(PathBuf::from);
+
+  let mut idx = 0;
+  while idx < args.len() {
+    if args[idx] == "--config" {
+      if idx + 1 >= args.len() {
+        eprintln!("error: --config requires a file path");
+        std::process::exit(2);
+      }
+      config_override = Some(PathBuf::from(args.remove(idx + 1)));
+      args.remove(idx);
+      continue;
+    } else if let Some(path) = args[idx].strip_prefix("--config=") {
+      if path.is_empty() {
+        eprintln!("error: --config= requires a file path");
+        std::process::exit(2);
+      }
+      config_override = Some(PathBuf::from(path));
+      args.remove(idx);
+      continue;
+    }
+    idx += 1;
+  }
+
   let mut opts = Options::default();
   opts.debug_mode = debug_mode_enabled(&args);
+  let mut overrides = AnalyzeOverrides::default();
   let mut it = args.into_iter();
   while let Some(arg) = it.next() {
     match arg.as_str() {
       "--analyze" => opts.mode = Mode::Analyze,
-      "--analyze-json" => opts.analyze.json = true,
+      "--analyze-json" => {
+        opts.analyze.json = true;
+        overrides.json = Some(true);
+      }
       "--analyze-top" => {
         let v = it.next().expect("--analyze-top requires COUNT");
         let n = parse_usize(&v, "--analyze-top");
-        opts.analyze.top = n.max(1);
+        let top = n.max(1);
+        opts.analyze.top = top;
+        overrides.top = Some(top);
       }
       "--analyze-total-warn" => {
         guard_debug("--analyze-total-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-total-warn requires BYTES");
-        opts.analyze.thresholds.warn_total_bytes = parse_u64(&v, "--analyze-total-warn");
+        let parsed = parse_u64(&v, "--analyze-total-warn");
+        opts.analyze.thresholds.warn_total_bytes = parsed;
+        overrides.thresholds.warn_total_bytes = Some(parsed);
       }
       "--analyze-total-critical" => {
         guard_debug("--analyze-total-critical", opts.debug_mode);
         let v = it.next().expect("--analyze-total-critical requires BYTES");
-        opts.analyze.thresholds.crit_total_bytes = parse_u64(&v, "--analyze-total-critical");
+        let parsed = parse_u64(&v, "--analyze-total-critical");
+        opts.analyze.thresholds.crit_total_bytes = parsed;
+        overrides.thresholds.crit_total_bytes = Some(parsed);
       }
       "--analyze-large-blob" => {
         guard_debug("--analyze-large-blob", opts.debug_mode);
         let v = it.next().expect("--analyze-large-blob requires BYTES");
-        opts.analyze.thresholds.warn_blob_bytes = parse_u64(&v, "--analyze-large-blob");
+        let parsed = parse_u64(&v, "--analyze-large-blob");
+        opts.analyze.thresholds.warn_blob_bytes = parsed;
+        overrides.thresholds.warn_blob_bytes = Some(parsed);
       }
       "--analyze-ref-warn" => {
         guard_debug("--analyze-ref-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-ref-warn requires COUNT");
-        opts.analyze.thresholds.warn_ref_count = parse_usize(&v, "--analyze-ref-warn");
+        let parsed = parse_usize(&v, "--analyze-ref-warn");
+        opts.analyze.thresholds.warn_ref_count = parsed;
+        overrides.thresholds.warn_ref_count = Some(parsed);
       }
       "--analyze-object-warn" => {
         guard_debug("--analyze-object-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-object-warn requires COUNT");
-        opts.analyze.thresholds.warn_object_count = parse_usize(&v, "--analyze-object-warn");
+        let parsed = parse_usize(&v, "--analyze-object-warn");
+        opts.analyze.thresholds.warn_object_count = parsed;
+        overrides.thresholds.warn_object_count = Some(parsed);
       }
       "--analyze-tree-entries" => {
         guard_debug("--analyze-tree-entries", opts.debug_mode);
         let v = it.next().expect("--analyze-tree-entries requires COUNT");
-        opts.analyze.thresholds.warn_tree_entries = parse_usize(&v, "--analyze-tree-entries");
+        let parsed = parse_usize(&v, "--analyze-tree-entries");
+        opts.analyze.thresholds.warn_tree_entries = parsed;
+        overrides.thresholds.warn_tree_entries = Some(parsed);
       }
       "--analyze-path-length" => {
         guard_debug("--analyze-path-length", opts.debug_mode);
         let v = it.next().expect("--analyze-path-length requires LENGTH");
-        opts.analyze.thresholds.warn_path_length = parse_usize(&v, "--analyze-path-length");
+        let parsed = parse_usize(&v, "--analyze-path-length");
+        opts.analyze.thresholds.warn_path_length = parsed;
+        overrides.thresholds.warn_path_length = Some(parsed);
       }
       "--analyze-duplicate-paths" => {
         guard_debug("--analyze-duplicate-paths", opts.debug_mode);
         let v = it.next().expect("--analyze-duplicate-paths requires COUNT");
-        opts.analyze.thresholds.warn_duplicate_paths = parse_usize(&v, "--analyze-duplicate-paths");
+        let parsed = parse_usize(&v, "--analyze-duplicate-paths");
+        opts.analyze.thresholds.warn_duplicate_paths = parsed;
+        overrides.thresholds.warn_duplicate_paths = Some(parsed);
       }
       "--analyze-commit-msg-warn" => {
         guard_debug("--analyze-commit-msg-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-commit-msg-warn requires BYTES");
-        opts.analyze.thresholds.warn_commit_msg_bytes = parse_usize(&v, "--analyze-commit-msg-warn");
+        let parsed = parse_usize(&v, "--analyze-commit-msg-warn");
+        opts.analyze.thresholds.warn_commit_msg_bytes = parsed;
+        overrides.thresholds.warn_commit_msg_bytes = Some(parsed);
       }
       "--analyze-max-parents-warn" => {
         guard_debug("--analyze-max-parents-warn", opts.debug_mode);
         let v = it.next().expect("--analyze-max-parents-warn requires COUNT");
-        opts.analyze.thresholds.warn_max_parents = parse_usize(&v, "--analyze-max-parents-warn");
+        let parsed = parse_usize(&v, "--analyze-max-parents-warn");
+        opts.analyze.thresholds.warn_max_parents = parsed;
+        overrides.thresholds.warn_max_parents = Some(parsed);
       }
       "--debug-mode" => {
         opts.debug_mode = true;
@@ -392,7 +538,89 @@ pub fn parse_args() -> Options {
       }
     }
   }
+
+  let config_target = if let Some(path) = config_override {
+    Some((path, true))
+  } else {
+    Some((opts.source.join(".filter-repo-rs.toml"), false))
+  };
+
+  if let Some((path, explicit)) = config_target {
+    match apply_config_from_file(&mut opts, &path) {
+      Ok(()) => {}
+      Err(ConfigError::Io(err)) => {
+        use std::io::ErrorKind;
+        if explicit || err.kind() != ErrorKind::NotFound {
+          eprintln!("error: failed to read config at {}: {}", path.display(), err);
+          std::process::exit(2);
+        }
+      }
+      Err(ConfigError::Parse(err)) => {
+        eprintln!("error: failed to parse config at {}: {}", path.display(), err);
+        eprintln!(
+          "note: example key: analyze.thresholds.warn_total_bytes (see docs/cli-convergence.md)"
+        );
+        std::process::exit(2);
+      }
+    }
+  }
+
+  overrides.apply(&mut opts.analyze);
   opts
+}
+
+enum ConfigError {
+  Io(std::io::Error),
+  Parse(toml::de::Error),
+}
+
+fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigError> {
+  let raw = fs::read_to_string(path).map_err(ConfigError::Io)?;
+  let config: FileConfig = toml::from_str(&raw).map_err(ConfigError::Parse)?;
+
+  if let Some(analyze) = config.analyze {
+    if let Some(json) = analyze.json {
+      opts.analyze.json = json;
+    }
+    if let Some(top) = analyze.top {
+      opts.analyze.top = top.max(1);
+    }
+    if let Some(thresholds) = analyze.thresholds {
+      let current = &mut opts.analyze.thresholds;
+      if let Some(v) = thresholds.warn_total_bytes {
+        current.warn_total_bytes = v;
+      }
+      if let Some(v) = thresholds.crit_total_bytes {
+        current.crit_total_bytes = v;
+      }
+      if let Some(v) = thresholds.warn_blob_bytes {
+        current.warn_blob_bytes = v;
+      }
+      if let Some(v) = thresholds.warn_ref_count {
+        current.warn_ref_count = v;
+      }
+      if let Some(v) = thresholds.warn_object_count {
+        current.warn_object_count = v;
+      }
+      if let Some(v) = thresholds.warn_tree_entries {
+        current.warn_tree_entries = v;
+      }
+      if let Some(v) = thresholds.warn_path_length {
+        current.warn_path_length = v;
+      }
+      if let Some(v) = thresholds.warn_duplicate_paths {
+        current.warn_duplicate_paths = v;
+      }
+      if let Some(v) = thresholds.warn_commit_msg_bytes {
+        current.warn_commit_msg_bytes = v;
+      }
+      if let Some(v) = thresholds.warn_max_parents {
+        current.warn_max_parents = v;
+      }
+    }
+  }
+
+  Ok(())
 }
 
 fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) {
@@ -570,6 +798,8 @@ Debug / stream overrides (require --debug-mode or FRRS_DEBUG=1):\n\
 
 const MISC_HELP: &str = "\n\
 Misc:\n\
+  --config FILE              Load options from TOML config file (default\n\
+                             <source>/.filter-repo-rs.toml)\n\
   --debug-mode               Enable debug/test flags (same as FRRS_DEBUG=1)\n\
   -h, --help                 Show this help message\n\
 ";
