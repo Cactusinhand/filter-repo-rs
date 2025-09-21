@@ -60,19 +60,12 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
 
   // Determine whether the repository is bare; we only flag working tree
   // cleanliness issues for non-bare repositories.
-  let is_bare = Command::new("git")
-    .arg("-C")
-    .arg(dir)
-    .arg("rev-parse")
-    .arg("--is-bare-repository")
-    .output()
-    .ok()
-    .and_then(|out| if out.status.success() {
-      Some(String::from_utf8_lossy(&out.stdout).trim().eq_ignore_ascii_case("true"))
-    } else {
-      None
-    })
-    .unwrap_or(false);
+  let is_bare = run(&mut Command::new("git")
+      .arg("-C")
+      .arg(dir)
+      .arg("rev-parse")
+      .arg("--is-bare-repository"))
+      .map_or(false, |s| s.trim().eq_ignore_ascii_case("true"));
 
   if !is_bare {
     // 5) no untracked (ignore the interpreter-generated __pycache__ artifacts
