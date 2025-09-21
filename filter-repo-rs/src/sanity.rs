@@ -70,19 +70,14 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
   if !is_bare {
     // 5) no untracked (ignore the interpreter-generated __pycache__ artifacts
     //     created when running git-filter-repo itself)
-    if let Some(out) = run(Command::new("git").arg("-C").arg(dir).arg("ls-files").arg("-o")) {
-      let mut relevant = false;
-      for line in out.lines() {
-        let l = line.trim();
-        if l.is_empty() { continue; }
-        if l.starts_with("__pycache__/git_filter_repo.") { continue; }
-        relevant = true;
-        break;
+    if let Some(out) = run(&mut Command::new("git").arg("-C").arg(dir).arg("ls-files").arg("-o")) {
+      if out.lines().any(|line| {
+          let l = line.trim();
+          !l.is_empty() && !l.starts_with("__pycache__/git_filter_repo.")
+      }) {
+          return Err(std::io::Error::new(std::io::ErrorKind::Other, "sanity: untracked files present"));
       }
-      if relevant {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "sanity: untracked files present"));
-      }
-    }
+  }
   }
 
   // 6) single worktree
