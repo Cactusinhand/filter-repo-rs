@@ -182,18 +182,26 @@ fn parse_git_invocations(log_path: &Path) -> Vec<GitInvocation> {
 
 #[allow(dead_code)]
 pub fn git_commands_for_repo(repo: &Path, invocations: &[GitInvocation]) -> Vec<Vec<String>> {
-    let repo_abs = repo
+    let repo_abs_buf = repo
         .canonicalize()
-        .unwrap_or_else(|_| repo.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+        .unwrap_or_else(|_| repo.to_path_buf());
+    let repo_abs_str = repo_abs_buf.to_string_lossy().to_string();
+
     invocations
         .iter()
-        .filter(|inv| {
-            inv.args.get(0).map(|s| s == "-C").unwrap_or(false)
-                && inv.args.get(1).map(|s| s == &repo_abs).unwrap_or(false)
+        .filter_map(|inv| {
+            if PathBuf::from(&inv.cwd) == repo_abs_buf {
+                return Some(inv.args.clone());
+            }
+
+            if inv.args.get(0).map(|s| s == "-C").unwrap_or(false)
+                && inv.args.get(1).map(|s| s == &repo_abs_str).unwrap_or(false)
+            {
+                return Some(inv.args[2..].to_vec());
+            }
+
+            None
         })
-        .map(|inv| inv.args[2..].to_vec())
         .collect()
 }
 
