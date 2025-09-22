@@ -835,6 +835,128 @@ fn check_replace_refs_in_loose_objects(
     Ok(freshly_packed)
 }
 
+/// Check remote configuration using context
+fn check_remote_configuration_with_context(
+    ctx: &SanityCheckContext,
+) -> Result<(), SanityCheckError> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(&ctx.repo_path).arg("remote");
+    let remotes = run(&mut cmd).unwrap_or_default();
+    let remote_trim = remotes.trim();
+
+    if remote_trim != "origin" && !remote_trim.is_empty() {
+        let remote_list: Vec<String> = remotes.lines().map(|s| s.trim().to_string()).collect();
+        return Err(SanityCheckError::InvalidRemotes {
+            remotes: remote_list,
+        });
+    }
+
+    Ok(())
+}
+
+/// Check for stash presence using context
+fn check_stash_presence_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(&ctx.repo_path)
+        .arg("rev-parse")
+        .arg("--verify")
+        .arg("--quiet")
+        .arg("refs/stash")
+        .status()
+        .map_err(SanityCheckError::from)?;
+
+    if status.success() {
+        return Err(SanityCheckError::StashedChanges);
+    }
+
+    Ok(())
+}
+
+/// Check working tree cleanliness using context
+fn check_working_tree_cleanliness_with_context(
+    ctx: &SanityCheckContext,
+) -> Result<(), SanityCheckError> {
+    let staged_dirty = !Command::new("git")
+        .arg("-C")
+        .arg(&ctx.repo_path)
+        .arg("diff")
+        .arg("--staged")
+        .arg("--quiet")
+        .status()
+        .map_err(SanityCheckError::from)?
+        .success();
+
+    let dirty = !Command::new("git")
+        .arg("-C")
+        .arg(&ctx.repo_path)
+        .arg("diff")
+        .arg("--quiet")
+        .status()
+        .map_err(SanityCheckError::from)?
+        .success();
+
+    if staged_dirty || dirty {
+        return Err(SanityCheckError::WorkingTreeNotClean {
+            staged_dirty,
+            unstaged_dirty: dirty,
+        });
+    }
+
+    Ok(())
+}
+
+/// Check for untracked files using context
+fn check_untracked_files_with_context(
+    ctx: &SanityCheckContext,
+) -> Result<(), SanityCheckError> {
+    if ctx.is_bare {
+        return Ok(());
+    }
+
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(&ctx.repo_path)
+        .arg("ls-files")
+        .arg("-o");
+
+    if let Some(out) = run(&mut cmd) {
+        let untracked_files: Vec<String> = out
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with("__pycache__/git_filter_repo."))
+            .collect();
+
+        if !untracked_files.is_empty() {
+            return Err(SanityCheckError::UntrackedFiles {
+                files: untracked_files,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Check worktree count using context
+fn check_worktree_count_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(&ctx.repo_path)
+        .arg("worktree")
+        .arg("list");
+
+    if let Some(out) = run(&mut cmd) {
+        let worktree_count = out.lines().count();
+        if worktree_count > 1 {
+            return Err(SanityCheckError::MultipleWorktrees {
+                count: worktree_count,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// Branch mapping structure to organize local and remote branches
 struct BranchMappings {
     local_branches: HashMap<String, String>,
@@ -1081,110 +1203,39 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
     }
 
     // Continue with remaining existing checks...
-    let remotes = run(Command::new("git").arg("-C").arg(dir).arg("remote")).unwrap_or_default();
-    let remote_trim = remotes.trim();
-    if !(remote_trim == "origin" || remote_trim.is_empty()) {
-        let remote_list: Vec<String> = remotes.lines().map(|s| s.trim().to_string()).collect();
-        let err = SanityCheckError::InvalidRemotes {
-            remotes: remote_list,
-        };
+    if let Err(err) = check_remote_configuration_with_context(&ctx) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             err.to_string(),
         ));
     }
 
-    // Continue with remaining checks (stash, working tree, etc.)
-    let stash_present = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .arg("rev-parse")
-        .arg("--verify")
-        .arg("--quiet")
-        .arg("refs/stash")
-        .status()
-        .ok()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if stash_present {
-        let err = SanityCheckError::StashedChanges;
+    if let Err(err) = check_stash_presence_with_context(&ctx) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             err.to_string(),
         ));
     }
 
-    let staged_dirty = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .arg("diff")
-        .arg("--staged")
-        .arg("--quiet")
-        .status()
-        .ok()
-        .map(|s| !s.success())
-        .unwrap_or(false);
-    let dirty = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .arg("diff")
-        .arg("--quiet")
-        .status()
-        .ok()
-        .map(|s| !s.success())
-        .unwrap_or(false);
-    if staged_dirty || dirty {
-        let err = SanityCheckError::WorkingTreeNotClean {
-            staged_dirty,
-            unstaged_dirty: dirty,
-        };
+    if let Err(err) = check_working_tree_cleanliness_with_context(&ctx) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             err.to_string(),
         ));
     }
 
-    if !ctx.is_bare {
-        if let Some(out) = run(&mut Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .arg("ls-files")
-            .arg("-o"))
-        {
-            let untracked_files: Vec<String> = out
-                .lines()
-                .map(|line| line.trim().to_string())
-                .filter(|l| !l.is_empty() && !l.starts_with("__pycache__/git_filter_repo."))
-                .collect();
-
-            if !untracked_files.is_empty() {
-                let err = SanityCheckError::UntrackedFiles {
-                    files: untracked_files,
-                };
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    err.to_string(),
-                ));
-            }
-        }
+    if let Err(err) = check_untracked_files_with_context(&ctx) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            err.to_string(),
+        ));
     }
 
-    if let Some(out) = run(Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .arg("worktree")
-        .arg("list"))
-    {
-        let worktree_count = out.lines().count();
-        if worktree_count > 1 {
-            let err = SanityCheckError::MultipleWorktrees {
-                count: worktree_count,
-            };
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                err.to_string(),
-            ));
-        }
+    if let Err(err) = check_worktree_count_with_context(&ctx) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            err.to_string(),
+        ));
     }
 
     Ok(())
