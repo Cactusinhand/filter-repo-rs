@@ -108,13 +108,12 @@ impl GitConfig {
             let stderr_message = String::from_utf8_lossy(&output.stderr);
             let stderr_trimmed = stderr_message.trim();
             let message = if stderr_trimmed.is_empty() {
-                format!("failed to read git config '{}': git exited with status {}", key, output.status)
-            } else {
                 format!(
-                    "failed to read git config '{}': {}",
-                    key,
-                    stderr_trimmed
+                    "failed to read git config '{}': git exited with status {}",
+                    key, output.status
                 )
+            } else {
+                format!("failed to read git config '{}': {}", key, stderr_trimmed)
             };
 
             return Err(io::Error::new(io::ErrorKind::Other, message));
@@ -165,13 +164,12 @@ impl GitConfig {
             let stderr_message = String::from_utf8_lossy(&output.stderr);
             let stderr_trimmed = stderr_message.trim();
             let message = if stderr_trimmed.is_empty() {
-                format!("failed to read git config '{}': git exited with status {}", key, output.status)
-            } else {
                 format!(
-                    "failed to read git config '{}': {}",
-                    key,
-                    stderr_trimmed
+                    "failed to read git config '{}': git exited with status {}",
+                    key, output.status
                 )
+            } else {
+                format!("failed to read git config '{}': {}", key, stderr_trimmed)
             };
 
             return Err(io::Error::new(io::ErrorKind::Other, message));

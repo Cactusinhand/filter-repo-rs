@@ -10,6 +10,7 @@ use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -200,12 +201,9 @@ fn gather_object_inventory(
 }
 
 fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
-    let output = run_git_capture(repo, &["for-each-ref", "--format=%(refname)"])?;
-    for line in output.lines() {
-        let name = line.trim();
-        if name.is_empty() {
-            continue;
-        }
+    let refs = gitutil::get_all_refs(repo)?;
+    for name in refs.keys() {
+        let name = name.as_str();
         metrics.refs_total += 1;
         if name.starts_with("refs/heads/") {
             metrics.refs_heads += 1;
