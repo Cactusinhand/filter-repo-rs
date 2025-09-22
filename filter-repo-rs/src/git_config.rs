@@ -319,10 +319,15 @@ mod tests {
 
         let config = GitConfig::read_from_repo(temp_repo.path())?;
 
-        // Note: core.ignorecase may be automatically set by Git on case-insensitive filesystems
-        // So we just verify that we can read the config without error
-        // and that missing configs return None for origin_url
-        assert_eq!(config.precompose_unicode, false);
+        // Note: core.ignorecase and core.precomposeunicode may be automatically
+        // configured by Git depending on the filesystem. We just verify that we
+        // can read the config without error and that missing configs fall back
+        // to the same value we would obtain directly from git-config. We also
+        // ensure that unspecified string configs return None.
+        let expected_precompose =
+            GitConfig::get_bool_config(temp_repo.path(), "core.precomposeunicode")?
+                .unwrap_or(false);
+        assert_eq!(config.precompose_unicode, expected_precompose);
         assert_eq!(config.origin_url, None);
 
         Ok(())
@@ -336,8 +341,12 @@ mod tests {
 
         let config = GitConfig::read_from_repo(temp_repo.path())?;
 
+        let expected_precompose =
+            GitConfig::get_bool_config(temp_repo.path(), "core.precomposeunicode")?
+                .unwrap_or(false);
+
         assert_eq!(config.ignore_case, true);
-        assert_eq!(config.precompose_unicode, false); // default
+        assert_eq!(config.precompose_unicode, expected_precompose);
         assert_eq!(config.origin_url, None); // default
 
         Ok(())
