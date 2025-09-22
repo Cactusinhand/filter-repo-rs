@@ -31,6 +31,37 @@ fn error_handling_invalid_source_repository() {
 fn error_handling_stashed_changes_are_rejected() {
     let repo = init_repo();
 
+    // Set up a remote to avoid unpushed changes error
+    let (code, _out, err) = run_git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ],
+    );
+    assert_eq!(code, 0, "git remote add failed: {}", err);
+
+    // Get current branch name and create matching remote tracking branch
+    let (code, branch_output, err) = run_git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    assert_eq!(code, 0, "git rev-parse failed: {}", err);
+    let current_branch = branch_output.trim();
+
+    let (code, hash_output, err) = run_git(&repo, &["rev-parse", "HEAD"]);
+    assert_eq!(code, 0, "git rev-parse HEAD failed: {}", err);
+    let current_hash = hash_output.trim();
+
+    let (code, _out, err) = run_git(
+        &repo,
+        &[
+            "update-ref",
+            &format!("refs/remotes/origin/{}", current_branch),
+            current_hash,
+        ],
+    );
+    assert_eq!(code, 0, "git update-ref failed: {}", err);
+
     write_file(&repo, "README.md", "stash me");
     let (code, _out, err) = run_git(&repo, &["stash", "push", "-m", "temp stash"]);
     assert_eq!(code, 0, "git stash push failed: {}", err);
@@ -41,7 +72,7 @@ fn error_handling_stashed_changes_are_rejected() {
     .expect_err("stash should cause preflight failure");
     let msg = format!("{:?}", error);
     assert!(
-        msg.contains("sanity: stashed changes present"),
+        msg.contains("Stashed changes present"),
         "unexpected error message: {}",
         msg
     );

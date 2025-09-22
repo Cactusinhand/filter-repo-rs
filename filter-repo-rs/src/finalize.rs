@@ -202,16 +202,12 @@ pub fn finalize(
                     } else {
                         eprintln!(
                             "warning: failed to query existing ref {}: {}",
-                            old_ref,
-                            output.status
+                            old_ref, output.status
                         );
                     }
                 }
                 Err(err) => {
-                    eprintln!(
-                        "warning: failed to query existing ref {}: {}",
-                        old_ref, err
-                    );
+                    eprintln!("warning: failed to query existing ref {}: {}", old_ref, err);
                 }
             }
             if delete_old {
