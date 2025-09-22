@@ -782,22 +782,22 @@ fn check_replace_refs_in_loose_objects_with_context(
     // If there are no replace refs, use normal freshness logic
     if replace_refs.is_empty() {
         let freshly_packed =
-            (packs <= 1 && (packs == 0 || loose_count == 0)) || (packs == 0 && loose_count < 100);
+            (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
         return Ok(freshly_packed);
     }
 
     // If all loose objects are replace refs, consider the repo freshly packed
     if loose_count <= replace_refs.len() {
         // Apply the same logic but treat effective loose count as 0
-        let freshly_packed = (packs <= 1 && (packs == 0 || 0 == 0)) || (packs == 0 && 0 < 100);
+        let freshly_packed = (packs == 1 && 0 == 0) || (packs == 0 && 0 < 100);
         return Ok(freshly_packed);
     }
 
     // If there are more loose objects than replace refs, apply normal rules
     // but account for replace refs in the count
     let non_replace_loose_count = loose_count.saturating_sub(replace_refs.len());
-    let freshly_packed = (packs <= 1 && (packs == 0 || non_replace_loose_count == 0))
-        || (packs == 0 && non_replace_loose_count < 100);
+    let freshly_packed =
+        (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100);
 
     Ok(freshly_packed)
 }
@@ -821,22 +821,22 @@ fn check_replace_refs_in_loose_objects(
     // If there are no replace refs, use normal freshness logic
     if replace_refs.is_empty() {
         let freshly_packed =
-            (packs <= 1 && (packs == 0 || loose_count == 0)) || (packs == 0 && loose_count < 100);
+            (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
         return Ok(freshly_packed);
     }
 
     // If all loose objects are replace refs, consider the repo freshly packed
     if loose_count <= replace_refs.len() {
         // Apply the same logic but treat effective loose count as 0
-        let freshly_packed = (packs <= 1 && (packs == 0 || 0 == 0)) || (packs == 0 && 0 < 100);
+        let freshly_packed = (packs == 1 && 0 == 0) || (packs == 0 && 0 < 100);
         return Ok(freshly_packed);
     }
 
     // If there are more loose objects than replace refs, apply normal rules
     // but account for replace refs in the count
     let non_replace_loose_count = loose_count.saturating_sub(replace_refs.len());
-    let freshly_packed = (packs <= 1 && (packs == 0 || non_replace_loose_count == 0))
-        || (packs == 0 && non_replace_loose_count < 100);
+    let freshly_packed =
+        (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100);
 
     Ok(freshly_packed)
 }
