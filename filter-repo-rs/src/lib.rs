@@ -3,13 +3,14 @@ mod backup;
 mod commit;
 mod filechange;
 mod finalize;
-mod gitutil;
+pub mod git_config;
+pub mod gitutil;
 mod message;
 mod migrate;
 pub mod opts;
 pub mod pathutil;
 mod pipes;
-mod sanity;
+pub mod sanity;
 mod stream;
 mod tag;
 

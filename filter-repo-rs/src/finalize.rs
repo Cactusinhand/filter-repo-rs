@@ -4,6 +4,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 
+use crate::gitutil;
 use crate::migrate;
 use crate::opts::Options;
 use crate::stream::BlobSizeTracker;
@@ -156,6 +157,7 @@ pub fn finalize(
             }
         }
         let mut update_payload: Vec<u8> = Vec::new();
+        let repo_refs_before = gitutil::get_all_refs(&opts.target)?;
         for (refname, oid) in &resolved_updates {
             let ref_str = String::from_utf8_lossy(refname);
             let oid_str = String::from_utf8_lossy(oid);
@@ -167,53 +169,16 @@ pub fn finalize(
                 continue;
             }
             let old_ref = String::from_utf8_lossy(old).to_string();
-            let resolve = Command::new("git")
-                .arg("-C")
-                .arg(&opts.target)
-                .arg("for-each-ref")
-                .arg("--format=%(refname)")
-                .arg(&old_ref)
-                .output();
-            let mut delete_old = false;
-            let mut resolved_name: Option<Vec<u8>> = None;
-            match resolve {
-                Ok(output) => {
-                    if output.status.success() {
-                        resolved_name = output
-                            .stdout
-                            .split(|b| *b == b'\n')
-                            .filter_map(|line| {
-                                let mut trimmed = line;
-                                if let Some(b'\r') = trimmed.last() {
-                                    trimmed = &trimmed[..trimmed.len() - 1];
-                                }
-                                if trimmed.is_empty() {
-                                    None
-                                } else {
-                                    Some(trimmed.to_vec())
-                                }
-                            })
-                            .next();
-                        if let Some(refname) = &resolved_name {
-                            if refname.as_slice() == old.as_slice() {
-                                delete_old = true;
-                            }
-                        }
-                    } else {
-                        eprintln!(
-                            "warning: failed to query existing ref {}: {}",
-                            old_ref,
-                            output.status
-                        );
-                    }
-                }
-                Err(err) => {
-                    eprintln!(
-                        "warning: failed to query existing ref {}: {}",
-                        old_ref, err
-                    );
-                }
-            }
+            let mut matches: Vec<&String> = repo_refs_before
+                .keys()
+                .filter(|name| name.starts_with(&old_ref))
+                .collect();
+            matches.sort();
+            let resolved_name = matches.into_iter().next().cloned();
+            let delete_old = resolved_name
+                .as_ref()
+                .map(|name| name == &old_ref)
+                .unwrap_or(false);
             if delete_old {
                 update_payload.extend_from_slice(b"delete ");
                 update_payload.extend_from_slice(old);
@@ -221,8 +186,7 @@ pub fn finalize(
             } else if let Some(refname) = resolved_name {
                 eprintln!(
                     "warning: not deleting {} because repository resolves to {}",
-                    old_ref,
-                    String::from_utf8_lossy(&refname),
+                    old_ref, refname,
                 );
             } else {
                 eprintln!(
@@ -606,21 +570,10 @@ pub fn finalize(
         .stderr(Stdio::null())
         .output()?;
     if !opts.dry_run {
+        let repo_refs_after = gitutil::get_all_refs(&opts.target)?;
         if head_ref.status.success() {
             let head = String::from_utf8_lossy(&head_ref.stdout).trim().to_string();
-            // If current HEAD target exists, keep as-is
-            let ok = Command::new("git")
-                .arg("-C")
-                .arg(&opts.target)
-                .arg("show-ref")
-                .arg("--verify")
-                .arg(&head)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()?
-                .success();
-            if !ok {
-                // Try to map HEAD using branch_rename if applicable
+            if !repo_refs_after.contains_key(&head) {
                 let mut updated_head: Option<String> = None;
                 if let Some((ref old, ref new_)) = opts.branch_rename {
                     if let Some(tail) = head.strip_prefix("refs/heads/") {
@@ -635,23 +588,12 @@ pub fn finalize(
                             new_full.extend_from_slice(&new_);
                             new_full.extend_from_slice(&tail_b[old.len()..]);
                             let new_str = String::from_utf8_lossy(&new_full).to_string();
-                            let exists = Command::new("git")
-                                .arg("-C")
-                                .arg(&opts.target)
-                                .arg("show-ref")
-                                .arg("--verify")
-                                .arg(&new_str)
-                                .stdout(Stdio::null())
-                                .stderr(Stdio::null())
-                                .status()?
-                                .success();
-                            if exists {
+                            if repo_refs_after.contains_key(&new_str) {
                                 updated_head = Some(new_str);
                             }
                         }
                     }
                 }
-                // Choose a suitable branch: updated branch, or first existing branch
                 let fallback = updated_head
                     .or_else(|| {
                         updated_branch_refs
@@ -660,20 +602,12 @@ pub fn finalize(
                             .map(|b| String::from_utf8_lossy(b).to_string())
                     })
                     .or_else(|| {
-                        let out = Command::new("git")
-                            .arg("-C")
-                            .arg(&opts.target)
-                            .arg("for-each-ref")
-                            .arg("--count=1")
-                            .arg("--format=%(refname)")
-                            .arg("refs/heads")
-                            .output()
-                            .ok()?;
-                        if out.status.success() {
-                            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                        } else {
-                            None
-                        }
+                        let mut branches: Vec<&String> = repo_refs_after
+                            .keys()
+                            .filter(|name| name.starts_with("refs/heads/"))
+                            .collect();
+                        branches.sort();
+                        branches.into_iter().next().map(|name| name.clone())
                     });
                 if let Some(refstr) = fallback.filter(|s| !s.is_empty()) {
                     let status = Command::new("git")
@@ -688,20 +622,17 @@ pub fn finalize(
                     }
                 }
             }
-        } else {
-            // Detached HEAD: if we updated branches, prefer setting HEAD to one
-            if let Some(first) = updated_branch_refs.iter().next() {
-                let refstr = String::from_utf8_lossy(first).to_string();
-                let status = Command::new("git")
-                    .arg("-C")
-                    .arg(&opts.target)
-                    .arg("symbolic-ref")
-                    .arg("HEAD")
-                    .arg(&refstr)
-                    .status()?;
-                if !status.success() {
-                    eprintln!("warning: failed to update HEAD to {}: {}", refstr, status);
-                }
+        } else if let Some(first) = updated_branch_refs.iter().next() {
+            let refstr = String::from_utf8_lossy(first).to_string();
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(&opts.target)
+                .arg("symbolic-ref")
+                .arg("HEAD")
+                .arg(&refstr)
+                .status()?;
+            if !status.success() {
+                eprintln!("warning: failed to update HEAD to {}: {}", refstr, status);
             }
         }
     }

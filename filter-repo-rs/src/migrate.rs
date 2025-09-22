@@ -1,6 +1,8 @@
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 
+use crate::git_config::GitConfig;
+use crate::gitutil;
 use crate::opts::Options;
 
 #[allow(dead_code)]
@@ -47,29 +49,19 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
         return Ok(());
     }
     // List refs under refs/remotes/origin/*
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(&opts.source)
-        .arg("for-each-ref")
-        .arg("--format=%(refname) %(objectname)")
-        .arg("refs/remotes/origin")
-        .output()
-        .ok();
-    let out = match out {
-        Some(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return Ok(()),
+    let refs = match gitutil::get_all_refs(&opts.source) {
+        Ok(refs) => refs,
+        Err(_) => return Ok(()),
     };
     let mut to_create: Vec<(String, String)> = Vec::new();
     let mut to_delete: Vec<(String, String)> = Vec::new();
-    for line in out.lines() {
-        let mut it = line.split_whitespace();
-        let r = match (it.next(), it.next()) {
-            (Some(r), Some(h)) => (r.to_string(), h.to_string()),
-            _ => continue,
-        };
-        let (refname, hash) = r;
+    for (refname, hash) in refs
+        .iter()
+        .filter(|(name, _)| name.starts_with("refs/remotes/origin/"))
+    {
+        let hash = hash.clone();
         if refname == "refs/remotes/origin/HEAD" {
-            to_delete.push((refname, hash));
+            to_delete.push((refname.clone(), hash));
             continue;
         }
         let suffix = refname
@@ -77,22 +69,11 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
             .unwrap_or(&refname);
         let newref = format!("refs/heads/{}", suffix);
         // Only create if newref does not exist
-        let exist = Command::new("git")
-            .arg("-C")
-            .arg(&opts.source)
-            .arg("show-ref")
-            .arg("--verify")
-            .arg(&newref)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .ok()
-            .map(|s| s.success())
-            .unwrap_or(false);
+        let exist = refs.contains_key(&newref);
         if !exist {
             to_create.push((newref, hash.clone()));
         }
-        to_delete.push((refname, hash));
+        to_delete.push((refname.clone(), hash));
     }
     if to_create.is_empty() && to_delete.is_empty() {
         return Ok(());
@@ -140,21 +121,9 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) {
         return;
     }
     // Print URL for context if available
-    let url = Command::new("git")
-        .arg("-C")
-        .arg(&opts.target)
-        .arg("config")
-        .arg("--get")
-        .arg("remote.origin.url")
-        .output()
+    let url = GitConfig::get_string_config(&opts.target, "remote.origin.url")
         .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+        .and_then(|value| value)
         .unwrap_or_default();
     if url.is_empty() {
         eprintln!("NOTICE: Removing 'origin' remote; see docs if you want to push back there.");
