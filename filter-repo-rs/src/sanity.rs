@@ -772,7 +772,7 @@ fn check_replace_refs_in_loose_objects_with_context(
     ctx: &SanityCheckContext,
     packs: usize,
     loose_count: usize,
-) -> io::Result<bool> {
+) -> bool {
     // Use cached replace refs from context
     let replace_refs = &ctx.replace_refs;
 
