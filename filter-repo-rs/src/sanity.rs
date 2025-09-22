@@ -814,8 +814,7 @@ fn check_replace_refs_in_loose_objects(
 
     // If there are no replace refs, use normal freshness logic
     if replace_refs.is_empty() {
-        let freshly_packed =
-            (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
+        let freshly_packed = (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
         return Ok(freshly_packed);
     }
 
@@ -829,8 +828,8 @@ fn check_replace_refs_in_loose_objects(
     // If there are more loose objects than replace refs, apply normal rules
     // but account for replace refs in the count
     let non_replace_loose_count = loose_count.saturating_sub(replace_refs.len());
-    let freshly_packed =
-        (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100);
+    let freshly_packed = (packs == 1 && non_replace_loose_count == 0)
+        || (packs == 0 && non_replace_loose_count < 100);
 
     Ok(freshly_packed)
 }
@@ -907,18 +906,13 @@ fn check_working_tree_cleanliness_with_context(
 }
 
 /// Check for untracked files using context
-fn check_untracked_files_with_context(
-    ctx: &SanityCheckContext,
-) -> Result<(), SanityCheckError> {
+fn check_untracked_files_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
     if ctx.is_bare {
         return Ok(());
     }
 
     let mut cmd = Command::new("git");
-    cmd.arg("-C")
-        .arg(&ctx.repo_path)
-        .arg("ls-files")
-        .arg("-o");
+    cmd.arg("-C").arg(&ctx.repo_path).arg("ls-files").arg("-o");
 
     if let Some(out) = run(&mut cmd) {
         let untracked_files: Vec<String> = out
@@ -1135,39 +1129,27 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
         return Ok(());
     }
 
+    do_preflight_checks(opts).map_err(convert_sanity_error)
+}
+
+fn convert_sanity_error(err: SanityCheckError) -> std::io::Error {
+    match err {
+        SanityCheckError::IoError(inner) => inner,
+        other => std::io::Error::new(std::io::ErrorKind::InvalidData, other.to_string()),
+    }
+}
+
+fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
     let dir = &opts.target;
 
     // Create context once to avoid repeated Git command executions
     let ctx = SanityCheckContext::new(dir)?;
 
     // Run all context-based checks with enhanced error handling
-    if let Err(err) = check_git_dir_structure_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_reference_conflicts_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_reflog_entries_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_unpushed_changes_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
+    check_git_dir_structure_with_context(&ctx)?;
+    check_reference_conflicts_with_context(&ctx)?;
+    check_reflog_entries_with_context(&ctx)?;
+    check_unpushed_changes_with_context(&ctx)?;
 
     // Continue with existing loose object counting logic using context
     if let Some(out) = run(Command::new("git")
@@ -1190,53 +1172,20 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
         // Use context-based replace references validation for freshness check
         let freshly_packed = check_replace_refs_in_loose_objects_with_context(&ctx, packs, count);
         if !freshly_packed {
-            let err = SanityCheckError::NotFreshlyPacked {
+            return Err(SanityCheckError::NotFreshlyPacked {
                 packs,
                 loose_count: count,
                 replace_refs_count: ctx.replace_refs.len(),
-            };
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                err.to_string(),
-            ));
+            });
         }
     }
 
     // Continue with remaining existing checks...
-    if let Err(err) = check_remote_configuration_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_stash_presence_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_working_tree_cleanliness_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_untracked_files_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
-
-    if let Err(err) = check_worktree_count_with_context(&ctx) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            err.to_string(),
-        ));
-    }
+    check_remote_configuration_with_context(&ctx)?;
+    check_stash_presence_with_context(&ctx)?;
+    check_working_tree_cleanliness_with_context(&ctx)?;
+    check_untracked_files_with_context(&ctx)?;
+    check_worktree_count_with_context(&ctx)?;
 
     Ok(())
 }
