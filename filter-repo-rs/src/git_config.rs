@@ -95,12 +95,28 @@ impl GitConfig {
             .arg("--bool")
             .arg(key)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .output()?;
 
         if !output.status.success() {
-            // Config key doesn't exist or other error - return None
-            return Ok(None);
+            if output.status.code() == Some(1) {
+                // Config key doesn't exist or other known "not found" error
+                return Ok(None);
+            }
+
+            let stderr_message = String::from_utf8_lossy(&output.stderr);
+            let stderr_trimmed = stderr_message.trim();
+            let message = if stderr_trimmed.is_empty() {
+                format!("failed to read git config '{}': git exited with status {}", key, output.status)
+            } else {
+                format!(
+                    "failed to read git config '{}': {}",
+                    key,
+                    stderr_trimmed
+                )
+            };
+
+            return Err(io::Error::new(io::ErrorKind::Other, message));
         }
 
         let value = String::from_utf8_lossy(&output.stdout)
@@ -135,12 +151,28 @@ impl GitConfig {
             .arg("config")
             .arg(key)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .output()?;
 
         if !output.status.success() {
-            // Config key doesn't exist or other error - return None
-            return Ok(None);
+            if output.status.code() == Some(1) {
+                // Config key doesn't exist or other known "not found" error
+                return Ok(None);
+            }
+
+            let stderr_message = String::from_utf8_lossy(&output.stderr);
+            let stderr_trimmed = stderr_message.trim();
+            let message = if stderr_trimmed.is_empty() {
+                format!("failed to read git config '{}': git exited with status {}", key, output.status)
+            } else {
+                format!(
+                    "failed to read git config '{}': {}",
+                    key,
+                    stderr_trimmed
+                )
+            };
+
+            return Err(io::Error::new(io::ErrorKind::Other, message));
         }
 
         let value = String::from_utf8_lossy(&output.stdout).trim().to_string();

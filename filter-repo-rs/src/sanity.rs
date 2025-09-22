@@ -781,25 +781,19 @@ fn check_replace_refs_in_loose_objects_with_context(
 
     // If there are no replace refs, use normal freshness logic
     if replace_refs.is_empty() {
-        let freshly_packed =
-            (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
-        return Ok(freshly_packed);
+        return (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
     }
 
     // If all loose objects are replace refs, consider the repo freshly packed
     if loose_count <= replace_refs.len() {
         // Apply the same logic but treat effective loose count as 0
-        let freshly_packed = (packs == 1 && 0 == 0) || (packs == 0 && 0 < 100);
-        return Ok(freshly_packed);
+        return (packs == 1 && 0 == 0) || (packs == 0 && 0 < 100);
     }
 
     // If there are more loose objects than replace refs, apply normal rules
     // but account for replace refs in the count
     let non_replace_loose_count = loose_count.saturating_sub(replace_refs.len());
-    let freshly_packed =
-        (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100);
-
-    Ok(freshly_packed)
+    (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100)
 }
 
 /// Check replace references in loose objects (legacy function for backward compatibility)
@@ -1072,7 +1066,7 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
         }
 
         // Use context-based replace references validation for freshness check
-        let freshly_packed = check_replace_refs_in_loose_objects_with_context(&ctx, packs, count)?;
+        let freshly_packed = check_replace_refs_in_loose_objects_with_context(&ctx, packs, count);
         if !freshly_packed {
             let err = SanityCheckError::NotFreshlyPacked {
                 packs,
@@ -1933,7 +1927,7 @@ mod tests {
 
         let result = check_replace_refs_in_loose_objects(temp_repo.path(), 0, 150);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true); // 0 packs = always fresh in original logic
+        assert_eq!(result.unwrap(), false); // 0 packs, >=100 loose objects = not fresh
 
         let result = check_replace_refs_in_loose_objects(temp_repo.path(), 1, 0);
         assert!(result.is_ok());
@@ -1971,7 +1965,7 @@ mod tests {
 
         let result = check_replace_refs_in_loose_objects(temp_repo.path(), 0, 150);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true); // 0 packs = always fresh in original logic
+        assert_eq!(result.unwrap(), false); // 0 packs, >=100 loose objects (after replace refs) = not fresh
 
         // Test with packs
         let result = check_replace_refs_in_loose_objects(temp_repo.path(), 1, 1);
@@ -2180,8 +2174,7 @@ mod tests {
 
         // Test with no replace refs
         let result = check_replace_refs_in_loose_objects_with_context(&ctx, 0, 0);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), true);
+        assert!(result);
 
         Ok(())
     }
