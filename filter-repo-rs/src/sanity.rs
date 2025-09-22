@@ -672,6 +672,11 @@ fn check_unpushed_changes_with_context(ctx: &SanityCheckContext) -> Result<(), S
     // Build mapping of local branches to their remote counterparts using cached refs
     let branch_mappings = build_branch_mappings(&ctx.refs)?;
 
+    // If there are no remote tracking branches, skip the unpushed check.
+    if branch_mappings.remote_branches.is_empty() {
+        return Ok(());
+    }
+
     // Check each local branch against its remote
     let mut unpushed_branches = Vec::new();
 
@@ -727,6 +732,11 @@ fn check_unpushed_changes(repo_path: &Path) -> io::Result<()> {
 
     // Build mapping of local branches to their remote counterparts
     let branch_mappings = build_branch_mappings(&refs)?;
+
+    // If there are no remote tracking branches, skip the unpushed check.
+    if branch_mappings.remote_branches.is_empty() {
+        return Ok(());
+    }
 
     // Check each local branch against its remote
     let mut unpushed_branches = Vec::new();
@@ -1725,12 +1735,9 @@ mod tests {
         let temp_repo = create_test_repo()?;
         create_commit(temp_repo.path())?;
 
-        // Repository with no remotes should fail (local branch exists but no origin)
+        // Repository with no remotes should skip the unpushed changes check
         let result = check_unpushed_changes(temp_repo.path());
-        assert!(result.is_err());
-        let error_msg = result.unwrap_err().to_string();
-        assert!(error_msg.contains("Unpushed changes"));
-        assert!(error_msg.contains("exists locally but not on origin"));
+        assert!(result.is_ok());
 
         Ok(())
     }
@@ -1783,10 +1790,36 @@ mod tests {
             .output()?;
 
         // Create a remote tracking branch with different hash
+        let current_branch = get_current_branch_name(temp_repo.path())?;
+        let initial_hash = get_current_commit_hash(temp_repo.path())?;
+
+        // Create an extra commit to represent the remote state diverging from local
+        fs::write(temp_repo.path().join("remote.txt"), "remote content")?;
+        Command::new("git")
+            .arg("add")
+            .arg("remote.txt")
+            .current_dir(temp_repo.path())
+            .output()?;
+        Command::new("git")
+            .arg("commit")
+            .arg("-m")
+            .arg("Remote commit")
+            .current_dir(temp_repo.path())
+            .output()?;
+        let remote_hash = get_current_commit_hash(temp_repo.path())?;
+
+        // Reset local branch back to the initial commit so local != remote
+        Command::new("git")
+            .arg("reset")
+            .arg("--hard")
+            .arg(&initial_hash)
+            .current_dir(temp_repo.path())
+            .output()?;
+
         Command::new("git")
             .arg("update-ref")
-            .arg("refs/remotes/origin/master")
-            .arg("0000000000000000000000000000000000000000")
+            .arg(&format!("refs/remotes/origin/{}", current_branch))
+            .arg(&remote_hash)
             .current_dir(temp_repo.path())
             .output()?;
 
@@ -2158,9 +2191,9 @@ mod tests {
 
         let ctx = SanityCheckContext::new(temp_repo.path())?;
 
-        // Should fail for repo with no remotes (unpushed changes)
+        // Should succeed for repo with no remotes (unpushed check is skipped)
         let result = check_unpushed_changes_with_context(&ctx);
-        assert!(result.is_err());
+        assert!(result.is_ok());
 
         Ok(())
     }
