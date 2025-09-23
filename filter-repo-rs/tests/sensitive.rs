@@ -125,8 +125,11 @@ fn sensitive_mode_validation_rejects_stream_override() {
     let error = filter_repo_rs::sanity::preflight(&opts)
         .expect_err("sensitive mode with stream override should fail");
 
-    let error_msg = format!("{:?}", error);
-    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+    let error_msg = error.to_string();
+    assert!(
+        error_msg.contains("Sensitive data removal mode is incompatible"),
+        "unexpected error: {error_msg}"
+    );
 }
 
 #[test]
@@ -146,8 +149,11 @@ fn sensitive_mode_validation_rejects_custom_paths() {
     let error = filter_repo_rs::sanity::preflight(&opts)
         .expect_err("sensitive mode with custom source should fail");
 
-    let error_msg = format!("{:?}", error);
-    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+    let error_msg = error.to_string();
+    assert!(
+        error_msg.contains("Sensitive data removal mode is incompatible"),
+        "unexpected error: {error_msg}"
+    );
 
     // Test that sensitive mode with custom target fails
     let opts = filter_repo_rs::Options {
@@ -160,6 +166,9 @@ fn sensitive_mode_validation_rejects_custom_paths() {
     let error = filter_repo_rs::sanity::preflight(&opts)
         .expect_err("sensitive mode with custom target should fail");
 
-    let error_msg = format!("{:?}", error);
-    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+    let error_msg = error.to_string();
+    assert!(
+        error_msg.contains("Sensitive data removal mode is incompatible"),
+        "unexpected error: {error_msg}"
+    );
 }

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use filter_repo_rs as fr;
+use filter_repo_rs::FilterRepoError;
 
 pub fn mktemp(prefix: &str) -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -295,7 +296,10 @@ pub fn init_repo() -> PathBuf {
 }
 
 #[allow(dead_code)]
-pub fn run_tool(dir: &Path, configure: impl FnOnce(&mut fr::Options)) -> std::io::Result<()> {
+pub fn run_tool(
+    dir: &Path,
+    configure: impl FnOnce(&mut fr::Options),
+) -> Result<(), FilterRepoError> {
     let mut opts = fr::Options::default();
     opts.source = dir.to_path_buf();
     opts.target = dir.to_path_buf();
