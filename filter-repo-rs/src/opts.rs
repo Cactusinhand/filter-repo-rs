@@ -7,6 +7,8 @@ use std::sync::{Mutex, OnceLock};
 use regex::bytes::Regex;
 use serde::Deserialize;
 
+use crate::gitutil::{self, GitCapabilities};
+
 /// Stage-3 toggle: set to `false` to error out instead of accepting legacy cleanup syntax.
 const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
 /// Stage-3 toggle: set to `false` to disable legacy --analyze-*-warn overrides entirely.
@@ -169,8 +171,10 @@ pub struct Options {
     pub write_report: bool,
     pub cleanup: CleanupMode,
     pub reencode: bool,
+    pub reencode_requested: Option<bool>,
     pub quotepath: bool,
     pub mark_tags: bool,
+    pub mark_tags_requested: Option<bool>,
     pub fe_stream_override: Option<PathBuf>,
     pub force: bool,
     pub enforce_sanity: bool,
@@ -183,6 +187,7 @@ pub struct Options {
     pub mode: Mode,
     pub analyze: AnalyzeConfig,
     pub debug_mode: bool,
+    pub git_caps: GitCapabilities,
 }
 
 impl Default for Options {
@@ -209,8 +214,10 @@ impl Default for Options {
             write_report: false,
             cleanup: CleanupMode::None,
             reencode: true,
+            reencode_requested: None,
             quotepath: true,
             mark_tags: true,
+            mark_tags_requested: None,
             fe_stream_override: None,
             force: false,
             enforce_sanity: true,
@@ -223,7 +230,85 @@ impl Default for Options {
             mode: Mode::Filter,
             analyze: AnalyzeConfig::default(),
             debug_mode: false,
+            git_caps: GitCapabilities::default(),
         }
+    }
+}
+
+impl Options {
+    pub fn apply_git_capabilities(&mut self, caps: GitCapabilities) -> Result<(), String> {
+        self.git_caps = caps.clone();
+
+        if !caps.diff_tree_combined_all_paths {
+            return Err("need git >= 2.22.0: git diff-tree lacks --combined-all-paths".to_string());
+        }
+
+        if !caps.fast_export_reencode {
+            if matches!(self.reencode_requested, Some(true)) {
+                return Err("need git >= 2.23.0: git fast-export lacks --reencode".to_string());
+            }
+            self.reencode = false;
+        }
+
+        if !caps.fast_export_mark_tags {
+            if matches!(self.mark_tags_requested, Some(true)) {
+                return Err("need git >= 2.24.0: git fast-export lacks --mark-tags".to_string());
+            }
+            self.mark_tags = false;
+        }
+
+        if self.sensitive && !caps.cat_file_batch_command {
+            return Err(
+                "need git >= 2.36.0: --sensitive requires 'git cat-file --batch-command'"
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_git_capabilities_disables_defaults() {
+        let mut opts = Options::default();
+        let mut caps = GitCapabilities::default();
+        caps.fast_export_mark_tags = false;
+        caps.fast_export_reencode = false;
+
+        assert!(opts.apply_git_capabilities(caps.clone()).is_ok());
+        assert!(!opts.mark_tags);
+        assert!(!opts.reencode);
+        assert_eq!(opts.git_caps, caps);
+    }
+
+    #[test]
+    fn apply_git_capabilities_errors_when_mark_tags_requested() {
+        let mut opts = Options::default();
+        opts.mark_tags_requested = Some(true);
+        let mut caps = GitCapabilities::default();
+        caps.fast_export_mark_tags = false;
+
+        let err = opts
+            .apply_git_capabilities(caps)
+            .expect_err("mark-tags request should fail");
+        assert!(err.contains("git >= 2.24.0"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn apply_git_capabilities_errors_for_sensitive_mode() {
+        let mut opts = Options::default();
+        opts.sensitive = true;
+        let mut caps = GitCapabilities::default();
+        caps.cat_file_batch_command = false;
+
+        let err = opts
+            .apply_git_capabilities(caps)
+            .expect_err("sensitive should require batch-command");
+        assert!(err.contains("git >= 2.36.0"), "unexpected error: {err}");
     }
 }
 
@@ -524,6 +609,7 @@ pub fn parse_args() -> Options {
             "--no-reencode" => {
                 guard_debug("--no-reencode", opts.debug_mode);
                 opts.reencode = false;
+                opts.reencode_requested = Some(false);
             }
             "--no-quotepath" => {
                 guard_debug("--no-quotepath", opts.debug_mode);
@@ -532,10 +618,12 @@ pub fn parse_args() -> Options {
             "--no-mark-tags" => {
                 guard_debug("--no-mark-tags", opts.debug_mode);
                 opts.mark_tags = false;
+                opts.mark_tags_requested = Some(false);
             }
             "--mark-tags" => {
                 guard_debug("--mark-tags", opts.debug_mode);
                 opts.mark_tags = true;
+                opts.mark_tags_requested = Some(true);
             }
             "--force" | "-f" => {
                 opts.force = true;
@@ -618,6 +706,18 @@ pub fn parse_args() -> Options {
     }
 
     overrides.apply(&mut opts.analyze);
+    let caps = match gitutil::probe_git_capabilities() {
+        Ok(caps) => caps,
+        Err(err) => {
+            eprintln!("error: failed to probe git capabilities: {err}");
+            std::process::exit(2);
+        }
+    };
+    if let Err(msg) = opts.apply_git_capabilities(caps) {
+        eprintln!("error: {msg}");
+        std::process::exit(2);
+    }
+
     opts
 }
 

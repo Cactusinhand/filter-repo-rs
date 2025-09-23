@@ -1314,43 +1314,13 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_opts(source: &str) -> Options {
-        Options {
-            source: PathBuf::from(source),
-            target: PathBuf::from("."),
-            refs: vec!["--all".to_string()],
-            date_order: false,
-            no_data: false,
-            quiet: false,
-            reset: true,
-            replace_message_file: None,
-            replace_text_file: None,
-            paths: Vec::new(),
-            invert_paths: false,
-            path_globs: Vec::new(),
-            path_regexes: Vec::new(),
-            path_renames: Vec::new(),
-            tag_rename: None,
-            branch_rename: None,
-            max_blob_size: None,
-            strip_blobs_with_ids: None,
-            write_report: false,
-            cleanup: crate::opts::CleanupMode::None,
-            reencode: true,
-            quotepath: true,
-            mark_tags: true,
-            fe_stream_override: None,
-            force: false,
-            enforce_sanity: false,
-            dry_run: false,
-            partial: false,
-            sensitive: false,
-            no_fetch: false,
-            backup: false,
-            backup_path: None,
-            mode: crate::opts::Mode::Filter,
-            analyze: crate::opts::AnalyzeConfig::default(),
-            debug_mode: false,
-        }
+        let mut opts = Options::default();
+        opts.source = PathBuf::from(source);
+        opts.target = PathBuf::from(".");
+        opts.refs = vec!["--all".to_string()];
+        opts.cleanup = crate::opts::CleanupMode::None;
+        opts.enforce_sanity = false;
+        opts
     }
 
     #[test]
