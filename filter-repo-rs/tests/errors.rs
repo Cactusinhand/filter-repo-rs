@@ -13,6 +13,7 @@ fn error_handling_invalid_source_repository() {
         target: temp_dir.path().to_path_buf(),
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
 
@@ -66,10 +67,14 @@ fn error_handling_stashed_changes_are_rejected() {
     let (code, _out, err) = run_git(&repo, &["stash", "push", "-m", "temp stash"]);
     assert_eq!(code, 0, "git stash push failed: {}", err);
 
-    let error = run_tool(&repo, |opts| {
-        opts.enforce_sanity = true;
-    })
-    .expect_err("stash should cause preflight failure");
+    // Test preflight directly to ensure stash detection works
+    let opts = fr::Options {
+        target: repo.clone(),
+        enforce_sanity: true, // Explicitly enable sanity checks
+        force: false,         // Don't use force so sanity checks run
+        ..Default::default()
+    };
+    let error = fr::sanity::preflight(&opts).expect_err("stash should cause preflight failure");
     let msg = format!("{:?}", error);
     assert!(
         msg.contains("Stashed changes present"),
@@ -93,6 +98,7 @@ fn error_handling_invalid_target_repository() {
         target: invalid_target,
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
 
@@ -110,6 +116,7 @@ fn error_handling_nonexistent_replace_message_file() {
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         replace_message_file: Some(nonexistent_file),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
 
@@ -132,6 +139,7 @@ fn error_handling_invalid_sha_format_in_strip_blobs() {
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         strip_blobs_with_ids: Some(invalid_sha_file),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
 
@@ -147,6 +155,7 @@ fn path_rename_with_identical_paths() {
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         path_renames: vec![(b"invalidformat".to_vec(), b"invalidformat".to_vec())],
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
     let result = fr::run(&opts);
@@ -170,6 +179,7 @@ fn error_handling_invalid_max_blob_size_values() {
             target: repo.clone(),
             refs: vec!["--all".to_string()],
             max_blob_size: max_size,
+            force: true, // Use --force to bypass sanity checks for error handling tests
             ..Default::default()
         };
         let result = fr::run(&opts);
@@ -192,6 +202,7 @@ fn error_handling_invalid_regex_pattern() {
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         replace_text_file: Some(invalid_regex_file),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
     let result = fr::run(&opts);
@@ -215,6 +226,7 @@ fn error_handling_permission_denied_simulation() {
         target: repo.clone(),
         refs: vec!["--all".to_string()],
         replace_text_file: Some(restricted_dir.clone()),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
     let result = fr::run(&opts);
@@ -238,6 +250,7 @@ fn error_handling_corrupted_git_repository() {
         target: repo_path.to_path_buf(),
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
     let result = fr::run(&opts);
@@ -254,6 +267,7 @@ fn error_handling_extremely_long_paths() {
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
         paths: vec![long_path_entry],
+        force: true, // Use --force to bypass sanity checks for error handling tests
         ..Default::default()
     };
     let result = fr::run(&opts);

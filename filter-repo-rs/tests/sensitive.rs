@@ -107,3 +107,59 @@ fn sensitive_mode_keeps_origin_remote() {
     let (_c2, remotes, _e2) = run_git(&repo, &["remote"]);
     assert!(remotes.contains("origin"));
 }
+
+#[test]
+fn sensitive_mode_validation_rejects_stream_override() {
+    use std::path::PathBuf;
+
+    let repo = init_repo();
+
+    // Test that sensitive mode with stream override fails
+    let opts = filter_repo_rs::Options {
+        sensitive: true,
+        fe_stream_override: Some(PathBuf::from("test_stream")),
+        enforce_sanity: true,
+        force: false, // Don't use force so validation runs
+        ..Default::default()
+    };
+    let error = filter_repo_rs::sanity::preflight(&opts)
+        .expect_err("sensitive mode with stream override should fail");
+
+    let error_msg = format!("{:?}", error);
+    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+}
+
+#[test]
+fn sensitive_mode_validation_rejects_custom_paths() {
+    let repo = init_repo();
+    let temp_dir = mktemp("custom_path_test");
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    // Test that sensitive mode with custom source fails
+    let opts = filter_repo_rs::Options {
+        sensitive: true,
+        source: temp_dir.clone(),
+        enforce_sanity: true,
+        force: false, // Don't use force so validation runs
+        ..Default::default()
+    };
+    let error = filter_repo_rs::sanity::preflight(&opts)
+        .expect_err("sensitive mode with custom source should fail");
+
+    let error_msg = format!("{:?}", error);
+    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+
+    // Test that sensitive mode with custom target fails
+    let opts = filter_repo_rs::Options {
+        sensitive: true,
+        target: temp_dir.clone(),
+        enforce_sanity: true,
+        force: false, // Don't use force so validation runs
+        ..Default::default()
+    };
+    let error = filter_repo_rs::sanity::preflight(&opts)
+        .expect_err("sensitive mode with custom target should fail");
+
+    let error_msg = format!("{:?}", error);
+    assert!(error_msg.contains("Sensitive data removal mode is incompatible"));
+}

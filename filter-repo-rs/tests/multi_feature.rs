@@ -19,6 +19,7 @@ fn multi_feature_blob_size_with_path_filtering() {
     opts.paths = vec![b"keep/".to_vec()];
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tree, _e) = run_git(
@@ -57,6 +58,7 @@ fn multi_feature_blob_size_with_path_rename() {
     opts.path_renames = vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())];
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tree, _e) = run_git(
@@ -93,6 +95,7 @@ fn multi_feature_blob_size_with_branch_rename() {
     opts.branch_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     opts.refs = vec!["--all".to_string()];
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -131,6 +134,7 @@ fn multi_feature_blob_size_with_tag_rename() {
     opts.tag_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     opts.refs = vec!["--all".to_string()];
     let result = fr::run(&opts);
     assert!(result.is_ok());

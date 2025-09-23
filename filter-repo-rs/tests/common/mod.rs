@@ -299,6 +299,7 @@ pub fn run_tool(dir: &Path, configure: impl FnOnce(&mut fr::Options)) -> std::io
     let mut opts = fr::Options::default();
     opts.source = dir.to_path_buf();
     opts.target = dir.to_path_buf();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     configure(&mut opts);
     fr::run(&opts)
 }

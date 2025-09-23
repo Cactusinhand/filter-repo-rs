@@ -28,6 +28,7 @@ fn memory_management_path_filtering_memory() {
         refs: vec!["--all".to_string()],
         max_blob_size: Some(1000),
         paths,
+        force: true, // Use --force to bypass sanity checks for memory tests
         ..Default::default()
     };
     let _result = fr::run(&opts);
@@ -98,6 +99,7 @@ fn memory_management_repeated_operations_same_repository() {
             target: repo.clone(),
             refs: vec!["--all".to_string()],
             max_blob_size: Some(threshold),
+            force: true, // Use --force to bypass sanity checks for memory tests
             ..Default::default()
         };
         let _result = fr::run(&opts);

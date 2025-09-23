@@ -10,6 +10,7 @@ fn analyze_mode_produces_human_report() {
     opts.source = repo.clone();
     opts.target = repo.clone();
     opts.mode = fr::Mode::Analyze;
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     assert!(
         report.metrics.refs_total >= 1,
@@ -29,6 +30,7 @@ fn analyze_mode_emits_json() {
     opts.source = repo.clone();
     opts.target = repo.clone();
     opts.mode = fr::Mode::Analyze;
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     let json = serde_json::to_string(&report).expect("serialize report");
     let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
@@ -73,6 +75,7 @@ fn analyze_mode_limits_top_entries_and_populates_paths() {
     opts.source = repo.clone();
     opts.target = repo.clone();
     opts.mode = fr::Mode::Analyze;
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     opts.analyze.top = 2;
     opts.analyze.thresholds.warn_blob_bytes = 1500;
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
@@ -152,6 +155,7 @@ fn analyze_mode_warns_on_commit_thresholds() {
     opts.source = repo.clone();
     opts.target = repo.clone();
     opts.mode = fr::Mode::Analyze;
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     opts.analyze.thresholds.warn_commit_msg_bytes = 32;
     opts.analyze.thresholds.warn_max_parents = 1;
 

@@ -5,7 +5,10 @@ fn run_cleanup_case(
     repo: &std::path::Path,
     args: &[&str],
 ) -> (std::process::Output, Vec<Vec<String>>) {
-    let (output, invocations) = run_cli_with_git_spy(repo, args);
+    // Add --force to avoid interference from sanity checks in CLI tests
+    let mut full_args = vec!["--force"];
+    full_args.extend_from_slice(args);
+    let (output, invocations) = run_cli_with_git_spy(repo, &full_args);
     (output, git_commands_for_repo(repo, &invocations))
 }
 
