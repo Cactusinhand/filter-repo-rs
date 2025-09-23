@@ -19,12 +19,18 @@ fn create_test_repo() -> std::io::Result<TempDir> {
     }
 
     // Configure git user for commits
-    Command::new("git")
+    let output = Command::new("git")
         .arg("config")
         .arg("user.name")
         .arg("Test User")
         .current_dir(temp_dir.path())
         .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to configure git user.name",
+        ));
+    }
 
     Command::new("git")
         .arg("config")
