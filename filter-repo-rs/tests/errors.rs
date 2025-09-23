@@ -69,6 +69,7 @@ fn error_handling_stashed_changes_are_rejected() {
 
     // Test preflight directly to ensure stash detection works
     let opts = fr::Options {
+        source: repo.clone(),
         target: repo.clone(),
         enforce_sanity: true, // Explicitly enable sanity checks
         force: false,         // Don't use force so sanity checks run
