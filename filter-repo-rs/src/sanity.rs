@@ -145,7 +145,7 @@ use crate::opts::Options;
 /// * Specific details about what was found
 /// * Suggested remediation steps
 /// * Information about `--force` bypass option
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum SanityCheckError {
     /// Git directory structure validation failed
     GitDirStructure {
@@ -186,7 +186,7 @@ pub enum SanityCheckError {
     /// Invalid remote configuration
     InvalidRemotes { remotes: Vec<String> },
     /// Underlying IO error
-    IoError(String), // Store error message instead of io::Error for Clone compatibility
+    IoError(io::Error),
     /// Already ran detection error
     AlreadyRan {
         ran_file: PathBuf,
@@ -488,8 +488,8 @@ impl fmt::Display for SanityCheckError {
                     "Use --force to bypass this check if you understand the security implications."
                 )
             }
-            SanityCheckError::IoError(msg) => {
-                write!(f, "IO error during sanity check: {}", msg)
+            SanityCheckError::IoError(err) => {
+                write!(f, "IO error during sanity check: {err}")
             }
         }
     }
@@ -498,6 +498,7 @@ impl fmt::Display for SanityCheckError {
 impl std::error::Error for SanityCheckError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            SanityCheckError::IoError(err) => Some(err),
             _ => None,
         }
     }
@@ -505,7 +506,7 @@ impl std::error::Error for SanityCheckError {
 
 impl From<io::Error> for SanityCheckError {
     fn from(err: io::Error) -> Self {
-        SanityCheckError::IoError(err.to_string())
+        SanityCheckError::IoError(err)
     }
 }
 
@@ -1978,9 +1979,9 @@ fn check_remote_configuration_with_context(
             String::new()
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to get remote configuration: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to get remote configuration: {e}"),
             )));
         }
     };
@@ -2010,9 +2011,9 @@ fn check_stash_presence_with_context(ctx: &SanityCheckContext) -> Result<(), San
             Ok(())
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to check stash status: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check stash status: {e}"),
             )));
         }
     }
@@ -2029,9 +2030,9 @@ fn check_working_tree_cleanliness_with_context(
         Ok(_) => false, // Command succeeded, no staged changes
         Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true, // Exit code 1 means differences found
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to check staged changes: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check staged changes: {e}"),
             )));
         }
     };
@@ -2041,9 +2042,9 @@ fn check_working_tree_cleanliness_with_context(
         Ok(_) => false, // Command succeeded, no unstaged changes
         Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true, // Exit code 1 means differences found
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to check unstaged changes: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check unstaged changes: {e}"),
             )));
         }
     };
@@ -2084,9 +2085,9 @@ fn check_untracked_files_with_context(ctx: &SanityCheckContext) -> Result<(), Sa
             // If ls-files fails, assume no untracked files
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to check untracked files: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check untracked files: {e}"),
             )));
         }
     }
@@ -2111,9 +2112,9 @@ fn check_worktree_count_with_context(ctx: &SanityCheckContext) -> Result<(), San
             // If worktree command fails, assume single worktree
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to check worktree count: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check worktree count: {e}"),
             )));
         }
     }
@@ -2447,9 +2448,9 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                 git_start.elapsed(),
                 &Err(e.clone()),
             );
-            return Err(SanityCheckError::IoError(format!(
-                "Failed to count objects: {}",
-                e
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to count objects: {e}"),
             )));
         }
     }
@@ -2995,8 +2996,9 @@ mod tests {
         let sanity_err = SanityCheckError::from(io_err);
 
         match sanity_err {
-            SanityCheckError::IoError(msg) => {
-                assert!(msg.contains("File not found"));
+            SanityCheckError::IoError(err) => {
+                assert_eq!(err.kind(), io::ErrorKind::NotFound);
+                assert!(err.to_string().contains("File not found"));
             }
             _ => panic!("Expected IoError variant"),
         }

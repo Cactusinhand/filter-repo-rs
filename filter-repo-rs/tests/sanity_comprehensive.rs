@@ -8,7 +8,7 @@ use filter_repo_rs::opts::Options;
 use filter_repo_rs::sanity::{preflight, SanityCheckError};
 use filter_repo_rs::FilterRepoError;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -34,8 +34,8 @@ impl SanityTestUtils {
             .output()?;
 
         if !output.status.success() {
-            return Err(FilterRepoError::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(FilterRepoError::from(io::Error::new(
+                io::ErrorKind::Other,
                 "Failed to initialize test git repository",
             )));
         }
@@ -187,7 +187,10 @@ mod error_display_tests {
 
     #[test]
     fn test_io_error_display() {
-        let error = SanityCheckError::IoError("Test IO error".to_string());
+        let error = SanityCheckError::IoError(io::Error::new(
+            io::ErrorKind::Other,
+            "Test IO error",
+        ));
         let display = format!("{}", error);
         assert!(display.contains("Test IO error"));
     }
