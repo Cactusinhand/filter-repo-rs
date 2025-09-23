@@ -5,6 +5,7 @@
 
 use filter_repo_rs::opts::Options;
 use filter_repo_rs::sanity::preflight;
+use filter_repo_rs::FilterRepoError;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -93,7 +94,7 @@ fn test_preflight_with_force_bypasses_sanity_checks() {
     );
 }
 
-fn create_test_repo() -> std::io::Result<TempDir> {
+fn create_test_repo() -> Result<TempDir, FilterRepoError> {
     let temp_dir = TempDir::new()?;
 
     // Initialize git repository
@@ -103,10 +104,10 @@ fn create_test_repo() -> std::io::Result<TempDir> {
         .output()?;
 
     if !output.status.success() {
-        return Err(std::io::Error::new(
+        return Err(FilterRepoError::from(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Failed to initialize test git repository",
-        ));
+        )));
     }
 
     // Set up git config

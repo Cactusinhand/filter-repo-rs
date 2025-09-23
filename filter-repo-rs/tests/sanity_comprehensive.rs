@@ -6,6 +6,7 @@
 
 use filter_repo_rs::opts::Options;
 use filter_repo_rs::sanity::{preflight, SanityCheckError};
+use filter_repo_rs::FilterRepoError;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,7 +24,7 @@ impl SanityTestUtils {
     }
 
     /// Create a test git repository
-    fn create_test_repo() -> std::io::Result<TempDir> {
+    fn create_test_repo() -> Result<TempDir, FilterRepoError> {
         let temp_dir = Self::temp_dir();
 
         // Initialize git repository
@@ -33,10 +34,10 @@ impl SanityTestUtils {
             .output()?;
 
         if !output.status.success() {
-            return Err(std::io::Error::new(
+            return Err(FilterRepoError::from(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Failed to initialize test git repository",
-            ));
+            )));
         }
 
         // Configure git user for commits
@@ -54,7 +55,7 @@ impl SanityTestUtils {
     }
 
     /// Create a commit in the repository
-    fn create_commit(repo_path: &Path) -> std::io::Result<()> {
+    fn create_commit(repo_path: &Path) -> Result<(), FilterRepoError> {
         // Create a test file
         fs::write(repo_path.join("test.txt"), "test content")?;
 
@@ -73,7 +74,7 @@ impl SanityTestUtils {
     }
 
     /// Create a marker file with specified age (using filetime crate)
-    fn create_marker_file(path: &Path, age_hours: u64) -> std::io::Result<()> {
+    fn create_marker_file(path: &Path, age_hours: u64) -> Result<(), FilterRepoError> {
         let mut file = fs::File::create(path)?;
         writeln!(file, "filter-repo-rs run marker")?;
 

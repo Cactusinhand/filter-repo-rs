@@ -2,7 +2,9 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
-fn create_test_repo() -> std::io::Result<TempDir> {
+use filter_repo_rs::FilterRepoError;
+
+fn create_test_repo() -> Result<TempDir, FilterRepoError> {
     let temp_dir = TempDir::new()?;
 
     // Initialize git repository
@@ -12,10 +14,10 @@ fn create_test_repo() -> std::io::Result<TempDir> {
         .output()?;
 
     if !output.status.success() {
-        return Err(std::io::Error::new(
+        return Err(FilterRepoError::from(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Failed to initialize test git repository",
-        ));
+        )));
     }
 
     // Configure git user for commits
@@ -26,10 +28,10 @@ fn create_test_repo() -> std::io::Result<TempDir> {
         .current_dir(temp_dir.path())
         .output()?;
     if !output.status.success() {
-        return Err(std::io::Error::new(
+        return Err(FilterRepoError::from(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Failed to configure git user.name",
-        ));
+        )));
     }
 
     Command::new("git")
@@ -59,7 +61,7 @@ fn create_test_repo() -> std::io::Result<TempDir> {
 }
 
 #[test]
-fn test_already_ran_detection_integration() -> std::io::Result<()> {
+fn test_already_ran_detection_integration() -> Result<(), FilterRepoError> {
     let temp_repo = create_test_repo()?;
     let repo_path = temp_repo.path();
 
@@ -98,7 +100,7 @@ fn test_already_ran_detection_integration() -> std::io::Result<()> {
 }
 
 #[test]
-fn test_already_ran_detection_with_preflight() -> std::io::Result<()> {
+fn test_already_ran_detection_with_preflight() -> Result<(), FilterRepoError> {
     let temp_repo = create_test_repo()?;
 
     let opts = filter_repo_rs::Options {

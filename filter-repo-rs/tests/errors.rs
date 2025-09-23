@@ -1,4 +1,5 @@
 use filter_repo_rs as fr;
+use filter_repo_rs::sanity::SanityCheckError;
 
 mod common;
 use common::*;
@@ -76,11 +77,14 @@ fn error_handling_stashed_changes_are_rejected() {
         ..Default::default()
     };
     let error = fr::sanity::preflight(&opts).expect_err("stash should cause preflight failure");
-    let msg = format!("{:?}", error);
+    match &error {
+        fr::FilterRepoError::Sanity(SanityCheckError::StashedChanges) => {}
+        other => panic!("unexpected error message: {other:?}"),
+    }
+    let msg = error.to_string();
     assert!(
-        msg.contains("Stashed changes present"),
-        "unexpected error message: {}",
-        msg
+        msg.contains("Stashed changes"),
+        "unexpected error message: {msg}"
     );
 }
 

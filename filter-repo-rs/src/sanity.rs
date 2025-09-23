@@ -119,6 +119,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use unicode_normalization::UnicodeNormalization;
 
+use crate::error::Result as FilterRepoResult;
 use crate::git_config::GitConfig;
 use crate::gitutil;
 use crate::opts::Options;
@@ -2289,7 +2290,7 @@ fn build_branch_mappings(refs: &HashMap<String, String>) -> io::Result<BranchMap
 ///     Err(e) => eprintln!("Sanity check failed: {}", e),
 /// }
 /// ```
-pub fn preflight(opts: &Options) -> std::io::Result<()> {
+pub fn preflight(opts: &Options) -> FilterRepoResult<()> {
     if opts.force {
         return Ok(());
     }
@@ -2298,14 +2299,8 @@ pub fn preflight(opts: &Options) -> std::io::Result<()> {
         return Ok(());
     }
 
-    do_preflight_checks(opts).map_err(convert_sanity_error)
-}
-
-fn convert_sanity_error(err: SanityCheckError) -> std::io::Error {
-    match err {
-        SanityCheckError::IoError(msg) => std::io::Error::new(std::io::ErrorKind::Other, msg),
-        other => std::io::Error::new(std::io::ErrorKind::InvalidData, other.to_string()),
-    }
+    do_preflight_checks(opts)?;
+    Ok(())
 }
 
 /// Check for already ran detection

@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::error::Result as FilterRepoResult;
 use crate::gitutil::git_dir;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use crate::message::{MessageReplacer, ShortHashMapper};
@@ -338,7 +339,7 @@ impl BlobSizeTracker {
     }
 }
 
-pub fn run(opts: &Options) -> io::Result<()> {
+pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let target_git_dir = git_dir(&opts.target).map_err(|e| {
         io::Error::new(
             io::ErrorKind::Other,
@@ -1019,7 +1020,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                                 if e.kind() == io::ErrorKind::BrokenPipe {
                                     import_broken = true;
                                 } else {
-                                    return Err(e);
+                                    return Err(e.into());
                                 }
                             }
                         }
@@ -1044,7 +1045,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                             if e.kind() == io::ErrorKind::BrokenPipe {
                                 import_broken = true;
                             } else {
-                                return Err(e);
+                                return Err(e.into());
                             }
                         }
                     }
@@ -1054,7 +1055,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                             if e.kind() == io::ErrorKind::BrokenPipe {
                                 import_broken = true;
                             } else {
-                                return Err(e);
+                                return Err(e.into());
                             }
                         }
                     }
@@ -1080,7 +1081,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                             import_broken = true;
                             break;
                         } else {
-                            return Err(e);
+                            return Err(e.into());
                         }
                     }
                 }
@@ -1091,7 +1092,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                             import_broken = true;
                             break;
                         } else {
-                            return Err(e);
+                            return Err(e.into());
                         }
                     }
                 }
@@ -1121,7 +1122,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                         import_broken = true;
                         break;
                     } else {
-                        return Err(e);
+                        return Err(e.into());
                     }
                 }
             }
@@ -1175,7 +1176,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                         if e.kind() == io::ErrorKind::BrokenPipe {
                             import_broken = true;
                         } else {
-                            return Err(e);
+                            return Err(e.into());
                         }
                     }
                 }
@@ -1194,7 +1195,7 @@ pub fn run(opts: &Options) -> io::Result<()> {
                     import_broken = true;
                     break;
                 } else {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         }
@@ -1241,7 +1242,9 @@ pub fn run(opts: &Options) -> io::Result<()> {
             })
         },
         &blob_size_tracker,
-    )
+    )?;
+
+    Ok(())
 }
 
 fn resolve_mark_oid(
