@@ -213,7 +213,7 @@ impl Default for Options {
             mark_tags: true,
             fe_stream_override: None,
             force: false,
-            enforce_sanity: false,
+            enforce_sanity: true,
             dry_run: false,
             partial: false,
             sensitive: false,
@@ -974,7 +974,9 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 },
                 HelpOption {
                     name: "--enforce-sanity".to_string(),
-                    description: vec!["Fail early unless repo passes strict preflight".to_string()],
+                    description: vec![
+                        "Explicitly enable safety checks (default behavior)".to_string()
+                    ],
                 },
                 HelpOption {
                     name: "--dry-run".to_string(),

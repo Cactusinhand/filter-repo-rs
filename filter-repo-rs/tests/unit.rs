@@ -15,6 +15,7 @@ fn unit_test_commit_message_processing() {
     opts.replace_message_file = Some(message_file);
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, log, _e) = run_git(&repo, &["log", "--oneline", "-1"]);
@@ -37,6 +38,7 @@ fn unit_test_tag_processing() {
     opts.tag_rename = Some((b"lightweight-".to_vec(), b"renamed-lightweight-".to_vec()));
     opts.source = repo.clone();
     opts.target = repo.clone();
+    opts.force = true; // Use --force to bypass sanity checks for unit tests
     opts.refs = vec!["--all".to_string()];
     let result = fr::run(&opts);
     assert!(result.is_ok());
