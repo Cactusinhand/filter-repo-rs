@@ -3,6 +3,83 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitCapabilities {
+    pub fast_export_anonymize_map: bool,
+    pub fast_export_mark_tags: bool,
+    pub fast_export_reencode: bool,
+    pub diff_tree_combined_all_paths: bool,
+    pub cat_file_batch_command: bool,
+}
+
+impl Default for GitCapabilities {
+    fn default() -> Self {
+        Self {
+            fast_export_anonymize_map: true,
+            fast_export_mark_tags: true,
+            fast_export_reencode: true,
+            diff_tree_combined_all_paths: true,
+            cat_file_batch_command: true,
+        }
+    }
+}
+
+impl GitCapabilities {
+    pub fn from_help_texts(
+        fast_export_help: &str,
+        diff_tree_help: &str,
+        cat_file_help: &str,
+    ) -> Self {
+        let fast_export_anonymize_map = fast_export_help.contains("--anonymize-map");
+        let fast_export_mark_tags = fast_export_help.contains("--mark-tags")
+            || fast_export_help.contains("--[no-]mark-tags");
+        let fast_export_reencode =
+            fast_export_help.contains("--reencode") || fast_export_help.contains("--[no-]reencode");
+        let diff_tree_combined_all_paths = diff_tree_help.contains("--combined-all-paths");
+        let cat_file_batch_command = cat_file_help.contains("--batch-command");
+
+        Self {
+            fast_export_anonymize_map,
+            fast_export_mark_tags,
+            fast_export_reencode,
+            diff_tree_combined_all_paths,
+            cat_file_batch_command,
+        }
+    }
+}
+
+fn capture_git_help(args: &[&str]) -> io::Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()?;
+    let status_code = output.status.code();
+    if !output.status.success() && status_code != Some(129) {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("'git {}' failed", args.join(" ")),
+        ));
+    }
+    let mut buf = output.stdout;
+    if !output.stderr.is_empty() {
+        buf.extend_from_slice(&output.stderr);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+pub fn probe_git_capabilities() -> io::Result<GitCapabilities> {
+    let fast_export_help = capture_git_help(&["fast-export", "-h"])?;
+    let diff_tree_help = capture_git_help(&["diff-tree", "-h"])?;
+    let cat_file_help = capture_git_help(&["cat-file", "-h"])?;
+
+    Ok(GitCapabilities::from_help_texts(
+        &fast_export_help,
+        &diff_tree_help,
+        &cat_file_help,
+    ))
+}
+
 pub fn git_dir(repo: &Path) -> io::Result<PathBuf> {
     let out = Command::new("git")
         .arg("-C")
@@ -210,6 +287,55 @@ fn collect_reflogs(dir: &Path, prefix: &str, reflogs: &mut Vec<String>) -> io::R
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn detects_capabilities_from_help_texts() {
+        let fast_export_help = "\
+usage: git fast-export [<options>] <revision-range>\n\
+  --anonymize-map=<file>\n\
+  --mark-tags\n\
+  --reencode=<mode>\n";
+        let diff_tree_help = "usage: git diff-tree [--combined-all-paths]";
+        let cat_file_help = "usage: git cat-file [--batch-command]";
+
+        let caps =
+            GitCapabilities::from_help_texts(fast_export_help, diff_tree_help, cat_file_help);
+
+        assert!(caps.fast_export_anonymize_map);
+        assert!(caps.fast_export_mark_tags);
+        assert!(caps.fast_export_reencode);
+        assert!(caps.diff_tree_combined_all_paths);
+        assert!(caps.cat_file_batch_command);
+    }
+
+    #[test]
+    fn missing_flags_disable_capabilities() {
+        let fast_export_help = "usage: git fast-export";
+        let diff_tree_help = "usage: git diff-tree";
+        let cat_file_help = "usage: git cat-file";
+
+        let caps =
+            GitCapabilities::from_help_texts(fast_export_help, diff_tree_help, cat_file_help);
+
+        assert!(!caps.fast_export_anonymize_map);
+        assert!(!caps.fast_export_mark_tags);
+        assert!(!caps.fast_export_reencode);
+        assert!(!caps.diff_tree_combined_all_paths);
+        assert!(!caps.cat_file_batch_command);
+    }
+
+    #[test]
+    fn recognizes_bracketed_flag_variants() {
+        let fast_export_help = "--[no-]mark-tags --[no-]reencode";
+        let caps = GitCapabilities::from_help_texts(fast_export_help, "", "");
+        assert!(caps.fast_export_mark_tags);
+        assert!(caps.fast_export_reencode);
+    }
 }
 
 /// Get replace references in the repository
