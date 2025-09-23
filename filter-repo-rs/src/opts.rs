@@ -237,27 +237,27 @@ impl Default for Options {
 
 impl Options {
     pub fn apply_git_capabilities(&mut self, caps: GitCapabilities) -> Result<(), String> {
-        self.git_caps = caps.clone();
+        self.git_caps = caps;
 
-        if !caps.diff_tree_combined_all_paths {
+        if !self.git_caps.diff_tree_combined_all_paths {
             return Err("need git >= 2.22.0: git diff-tree lacks --combined-all-paths".to_string());
         }
 
-        if !caps.fast_export_reencode {
+        if !self.git_caps.fast_export_reencode {
             if matches!(self.reencode_requested, Some(true)) {
                 return Err("need git >= 2.23.0: git fast-export lacks --reencode".to_string());
             }
             self.reencode = false;
         }
 
-        if !caps.fast_export_mark_tags {
+        if !self.git_caps.fast_export_mark_tags {
             if matches!(self.mark_tags_requested, Some(true)) {
                 return Err("need git >= 2.24.0: git fast-export lacks --mark-tags".to_string());
             }
             self.mark_tags = false;
         }
 
-        if self.sensitive && !caps.cat_file_batch_command {
+        if self.sensitive && !self.git_caps.cat_file_batch_command {
             return Err(
                 "need git >= 2.36.0: --sensitive requires 'git cat-file --batch-command'"
                     .to_string(),
