@@ -187,10 +187,8 @@ mod error_display_tests {
 
     #[test]
     fn test_io_error_display() {
-        let error = SanityCheckError::IoError(io::Error::new(
-            io::ErrorKind::Other,
-            "Test IO error",
-        ));
+        let error =
+            SanityCheckError::IoError(io::Error::new(io::ErrorKind::Other, "Test IO error"));
         let display = format!("{}", error);
         assert!(display.contains("Test IO error"));
     }

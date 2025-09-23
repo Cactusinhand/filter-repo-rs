@@ -1357,6 +1357,22 @@ impl GitCommandExecutor {
         })
     }
 
+    /// Run a Git command with default retry logic
+    ///
+    /// This is a convenience method that uses the default retry count configured
+    /// for this GitCommandExecutor instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `args` - Git command arguments
+    ///
+    /// # Returns
+    ///
+    /// Returns the command output on success or a detailed error after all retries fail.
+    pub fn run_command_with_default_retry(&self, args: &[&str]) -> Result<String, GitCommandError> {
+        self.run_command_with_retry(args, self.default_retry_count)
+    }
+
     /// Check if Git is available on the system
     ///
     /// # Returns
@@ -1726,21 +1742,6 @@ impl SensitiveModeValidator {
 
         Ok(())
     }
-}
-
-/// Legacy run function for backward compatibility
-///
-/// This function is deprecated in favor of GitCommandExecutor for better error handling.
-/// It's kept for compatibility with existing code that hasn't been migrated yet.
-#[deprecated(note = "Use GitCommandExecutor for better error handling and timeout protection")]
-fn run(cmd: &mut Command) -> Option<String> {
-    cmd.output().ok().and_then(|o| {
-        if o.status.success() {
-            Some(String::from_utf8_lossy(&o.stdout).to_string())
-        } else {
-            None
-        }
-    })
 }
 
 /// Check Git directory structure validation using context
