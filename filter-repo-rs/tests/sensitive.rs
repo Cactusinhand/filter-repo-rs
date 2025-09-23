@@ -112,17 +112,14 @@ fn sensitive_mode_keeps_origin_remote() {
 fn sensitive_mode_validation_rejects_stream_override() {
     use std::path::PathBuf;
 
-    let repo = init_repo();
-
     // Test that sensitive mode with stream override fails
+    // Use direct validation to avoid "already ran" interactive prompts
     let opts = filter_repo_rs::Options {
         sensitive: true,
         fe_stream_override: Some(PathBuf::from("test_stream")),
-        enforce_sanity: true,
-        force: false, // Don't use force so validation runs
         ..Default::default()
     };
-    let error = filter_repo_rs::sanity::preflight(&opts)
+    let error = filter_repo_rs::sanity::SensitiveModeValidator::validate_options(&opts)
         .expect_err("sensitive mode with stream override should fail");
 
     let error_msg = error.to_string();
@@ -134,19 +131,16 @@ fn sensitive_mode_validation_rejects_stream_override() {
 
 #[test]
 fn sensitive_mode_validation_rejects_custom_paths() {
-    let repo = init_repo();
-    let temp_dir = mktemp("custom_path_test");
-    std::fs::create_dir_all(&temp_dir).unwrap();
+    use std::path::PathBuf;
 
     // Test that sensitive mode with custom source fails
+    // Use direct validation to avoid "already ran" interactive prompts
     let opts = filter_repo_rs::Options {
         sensitive: true,
-        source: temp_dir.clone(),
-        enforce_sanity: true,
-        force: false, // Don't use force so validation runs
+        source: PathBuf::from("/custom/source"),
         ..Default::default()
     };
-    let error = filter_repo_rs::sanity::preflight(&opts)
+    let error = filter_repo_rs::sanity::SensitiveModeValidator::validate_options(&opts)
         .expect_err("sensitive mode with custom source should fail");
 
     let error_msg = error.to_string();
@@ -158,12 +152,10 @@ fn sensitive_mode_validation_rejects_custom_paths() {
     // Test that sensitive mode with custom target fails
     let opts = filter_repo_rs::Options {
         sensitive: true,
-        target: temp_dir.clone(),
-        enforce_sanity: true,
-        force: false, // Don't use force so validation runs
+        target: PathBuf::from("/custom/target"),
         ..Default::default()
     };
-    let error = filter_repo_rs::sanity::preflight(&opts)
+    let error = filter_repo_rs::sanity::SensitiveModeValidator::validate_options(&opts)
         .expect_err("sensitive mode with custom target should fail");
 
     let error_msg = error.to_string();
