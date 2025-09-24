@@ -1,6 +1,6 @@
 ﻿# filter-repo-rs: Current Status, Limitations, and MVP Plan
 
-## Summary (2025-09-14)
+## Summary (2025-09-20)
 
 A minimal Rust prototype of git-filter-repo is working end-to-end on real repositories. It builds a streaming fast-export -> filter -> fast-import pipeline, keeps debug streams, and implements several core features with Windows compatibility fixes. This document tracks what's done, known limitations, and the remaining MVP scope.
 
@@ -36,7 +36,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - `--max-blob-size BYTES`: drops oversized blobs and deletes paths that reference them.
   - `--strip-blobs-with-ids FILE`: drops blobs by 40-hex id (one per line).
   - Optional report (`--write-report`) writes a summary to `.git/filter-repo/report.txt`.
-  - Optional post-import cleanup via `--cleanup [none|standard|aggressive]`.
+  - Optional post-import cleanup via boolean `--cleanup` (standard) and debug-only `--cleanup-aggressive`; legacy `--cleanup=<mode>` remains for now with migration warnings.
 
 - Path Filtering & Renaming
   - `--path PREFIX`: include-only filtering of filechange entries (M/D/deleteall).
@@ -66,6 +66,9 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - Commit/Ref Maps
   - `.git/filter-repo/commit-map`: old commit id (`original-oid`) -> new commit id (via exported marks; falls back by scanning filtered stream).
   - `.git/filter-repo/ref-map`: old ref -> new ref for tag/branch renames.
+
+- Safety & Sanity Enforcement
+  - `--enforce-sanity` blocks risky situations including case-insensitive and Unicode-normalization reference collisions, stash presence, oversized reflogs, replace-ref-only loose objects, dirty or untracked worktrees, multiple worktrees, and stale remote setups unless `--force` is set.
 
 ## Known Limitations (to be addressed)
 
