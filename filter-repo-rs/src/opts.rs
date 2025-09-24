@@ -873,15 +873,19 @@ where
     normalized.parse::<T>()
 }
 
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
+const GIB: u64 = 1024 * MIB;
+
 fn parse_max_blob_size(s: &str) -> Result<usize, ()> {
     if s.is_empty() {
         return Err(());
     }
 
     let (number, multiplier) = match s.chars().last().map(|ch| ch.to_ascii_uppercase()) {
-        Some('K') => (&s[..s.len() - 1], 1024u64),
-        Some('M') => (&s[..s.len() - 1], 1024u64 * 1024),
-        Some('G') => (&s[..s.len() - 1], 1024u64 * 1024 * 1024),
+        Some('K') => (&s[..s.len() - 1], KIB),
+        Some('M') => (&s[..s.len() - 1], MIB),
+        Some('G') => (&s[..s.len() - 1], GIB),
         Some(ch) if ch.is_ascii_alphabetic() => return Err(()),
         _ => (s, 1u64),
     };
