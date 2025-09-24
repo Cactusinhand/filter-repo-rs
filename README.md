@@ -71,6 +71,7 @@ Use Cases
   ```sh
   filter-repo-rs --max-blob-size 5_000_000 --write-report
   ```
+- `--max-blob-size` also accepts human-readable suffixes like `5M` or `2G`.
 - Or remove by explicit blob IDs:
   ```sh
   filter-repo-rs --strip-blobs-with-ids big-oids.txt --write-report

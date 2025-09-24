@@ -71,6 +71,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   ```sh
   filter-repo-rs --max-blob-size 5_000_000 --write-report
   ```
+- `--max-blob-size` 同样支持 `5M`、`2G` 这类带后缀的可读格式。
 - 或基于分析结果列出 OID 清单后定点移除：
   ```sh
   filter-repo-rs --strip-blobs-with-ids big-oids.txt --write-report

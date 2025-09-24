@@ -149,6 +149,60 @@ fn max_blob_size_accepts_numeric_underscores() {
 }
 
 #[test]
+fn max_blob_size_accepts_size_suffixes() {
+    let valid_cases = &["5M", "1k", "1_000G", "2g"];
+
+    for &case in valid_cases {
+        let output = cli_command()
+            .arg("--max-blob-size")
+            .arg(case)
+            .arg("--help")
+            .output()
+            .expect("run filter-repo-rs --max-blob-size with suffixes");
+
+        assert!(
+            output.status.success(),
+            "max-blob-size with suffix '{}' should succeed",
+            case
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("expects an integer"),
+            "unexpected parse error for '{}' in stderr: {}",
+            case, stderr
+        );
+    }
+}
+
+#[test]
+fn max_blob_size_rejects_invalid_suffix() {
+    let invalid_cases = &["10T", "1.5M", "K", ""];
+
+    for &case in invalid_cases {
+        let output = cli_command()
+            .arg("--max-blob-size")
+            .arg(case)
+            .arg("--help")
+            .output()
+            .expect("run filter-repo-rs --max-blob-size with invalid input");
+
+        assert!(
+            !output.status.success(),
+            "max-blob-size with invalid input '{}' should fail",
+            case
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--max-blob-size expects an integer number of bytes"),
+            "expected parse error for '{}' in stderr; got: {}",
+            case, stderr
+        );
+    }
+}
+
+#[test]
 fn env_toggle_enables_debug_help() {
     let output = cli_command()
         .env("FRRS_DEBUG", "1")

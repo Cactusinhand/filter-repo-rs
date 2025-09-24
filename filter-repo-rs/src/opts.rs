@@ -571,8 +571,10 @@ pub fn parse_args() -> Options {
             }
             "--max-blob-size" => {
                 let v = it.next().expect("--max-blob-size requires BYTES");
-                let n = parse_integer_allowing_underscores::<usize>(&v).unwrap_or_else(|_| {
-                    eprintln!("--max-blob-size expects an integer number of bytes");
+                let n = parse_max_blob_size(&v).unwrap_or_else(|_| {
+                    eprintln!(
+                        "--max-blob-size expects an integer number of bytes (optionally suffixed with K, M, or G)"
+                    );
                     std::process::exit(2);
                 });
                 opts.max_blob_size = Some(n);
@@ -869,6 +871,33 @@ where
     };
 
     normalized.parse::<T>()
+}
+
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
+const GIB: u64 = 1024 * MIB;
+
+fn parse_max_blob_size(s: &str) -> Result<usize, ()> {
+    if s.is_empty() {
+        return Err(());
+    }
+
+    let (number, multiplier) = match s.chars().last().map(|ch| ch.to_ascii_uppercase()) {
+        Some('K') => (&s[..s.len() - 1], KIB),
+        Some('M') => (&s[..s.len() - 1], MIB),
+        Some('G') => (&s[..s.len() - 1], GIB),
+        Some(ch) if ch.is_ascii_alphabetic() => return Err(()),
+        _ => (s, 1u64),
+    };
+
+    if number.is_empty() {
+        return Err(());
+    }
+
+    let value = parse_integer_allowing_underscores::<u64>(number).map_err(|_| ())?;
+    let scaled = value.checked_mul(multiplier).ok_or(())?;
+
+    usize::try_from(scaled).map_err(|_| ())
 }
 
 fn parse_u64(s: &str, flag: &str) -> u64 {
