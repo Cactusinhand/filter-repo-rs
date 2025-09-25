@@ -417,6 +417,7 @@ fn map_oids_to_paths_from_history(
         }
         rec.clear();
     }
+    drop(reader);
     let _ = child.wait();
     Ok(found)
 }
@@ -434,7 +435,13 @@ fn gather_history_fast_export(
     fe_opts.quotepath = true;
     let mut cmd = pipes::build_fast_export_cmd(&fe_opts)?;
     let mut child = cmd.stdout(Stdio::piped()).spawn()?;
-    let mut reader = BufReader::new(child.stdout.take().expect("no stdout from fast-export"));
+    let stdout = child.stdout.take().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "failed to capture git fast-export stdout",
+        )
+    })?;
+    let mut reader = BufReader::new(stdout);
 
     let mut line = Vec::new();
     let mut in_commit = false;
