@@ -1054,31 +1054,26 @@ fn is_hex_40(s: &str) -> bool {
 
 fn find_blob_context<'a>(metrics: &'a RepositoryMetrics, oid: &str) -> Option<String> {
     // Prefer example path if present
-    if let Some(p) = metrics
+    metrics
         .blobs_over_threshold
         .iter()
         .find(|b| b.oid == oid)
         .and_then(|b| b.path.as_ref())
-    {
-        return Some(p.clone());
-    }
-    if let Some(p) = metrics
-        .largest_blobs
-        .iter()
-        .find(|b| b.oid == oid)
-        .and_then(|b| b.path.as_ref())
-    {
-        return Some(p.clone());
-    }
-    if let Some(p) = metrics
-        .duplicate_blobs
-        .iter()
-        .find(|d| d.oid == oid)
-        .and_then(|d| d.example_path.as_ref())
-    {
-        return Some(p.clone());
-    }
-    None
+        .or_else(|| {
+            metrics
+                .largest_blobs
+                .iter()
+                .find(|b| b.oid == oid)
+                .and_then(|b| b.path.as_ref())
+        })
+        .or_else(|| {
+            metrics
+                .duplicate_blobs
+                .iter()
+                .find(|d| d.oid == oid)
+                .and_then(|d| d.example_path.as_ref())
+        })
+        .cloned()
 }
 
 fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
