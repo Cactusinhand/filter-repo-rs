@@ -352,14 +352,11 @@ fn gather_worktree_snapshot(
     duplicates_vec.sort_by(|a, b| b.paths.cmp(&a.paths));
     duplicates_vec.truncate(cfg.top);
     metrics.duplicate_blobs = duplicates_vec;
-    for blob in &mut metrics.largest_blobs {
-        if let Some(path) = sample_paths.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        } else if let Some(path) = history_paths.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        }
-    }
-    for blob in &mut metrics.blobs_over_threshold {
+    for blob in metrics
+        .largest_blobs
+        .iter_mut()
+        .chain(&mut metrics.blobs_over_threshold)
+    {
         if let Some(path) = sample_paths.get(&blob.oid) {
             blob.path = Some(path.clone());
         } else if let Some(path) = history_paths.get(&blob.oid) {
