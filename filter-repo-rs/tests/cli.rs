@@ -170,7 +170,8 @@ fn max_blob_size_accepts_size_suffixes() {
         assert!(
             !stderr.contains("expects an integer"),
             "unexpected parse error for '{}' in stderr: {}",
-            case, stderr
+            case,
+            stderr
         );
     }
 }
@@ -197,7 +198,8 @@ fn max_blob_size_rejects_invalid_suffix() {
         assert!(
             stderr.contains("--max-blob-size expects an integer number of bytes"),
             "expected parse error for '{}' in stderr; got: {}",
-            case, stderr
+            case,
+            stderr
         );
     }
 }
