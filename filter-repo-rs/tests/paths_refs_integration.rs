@@ -122,7 +122,7 @@ fn filter_path_and_branch_rename_updates_head() {
     let expected_head = {
         let tail = head_ref_src
             .strip_prefix("refs/heads/")
-            .unwrap_or(&head_ref_src);
+            .expect("HEAD ref should start with 'refs/heads/'");
         format!("refs/heads/filtered/{}", tail)
     };
     let head_after = current_head_symref(tgt.path());
