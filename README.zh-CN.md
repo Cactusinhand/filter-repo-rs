@@ -104,7 +104,42 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   filter-repo-rs --path-rename old/:new/
   ```
 
-6) 安全执行建议与常用开关
+6) 从历史中删除特定文件
+
+- 从所有历史中删除特定文件（如意外提交的敏感文件）：
+  ```sh
+  # 1. 先备份（强烈推荐）
+  filter-repo-rs --backup --refs --all
+
+  # 2. 干运行验证操作
+  filter-repo-rs \
+    --path docs/STATUS.md \
+    --invert-paths \
+    --refs --all \
+    --dry-run \
+    --write-report
+
+  # 3. 执行删除操作
+  filter-repo-rs \
+    --path docs/STATUS.md \
+    --invert-paths \
+    --refs --all \
+    --write-report
+
+  # 4. 强制推送新历史
+  git push --force --all
+  git push --force --tags
+  ```
+- 删除匹配模式的文件：
+  ```sh
+  filter-repo-rs --path-glob "*.log" --invert-paths --refs --all
+  ```
+- 使用正则表达式删除文件：
+  ```sh
+  filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths --refs --all
+  ```
+
+7) 安全执行建议与常用开关
 
 - 预演不落盘：`--dry-run`
 - 产出审计报告：`--write-report`
@@ -113,7 +148,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
 - 仅重写本地、跳过远端清理：`--partial`
 - 必要时跳过保护：`--force`（谨慎使用）
 
-7) CI 中的健康度分析预警
+8) CI 中的健康度分析预警
 
 - 在 CI 里执行：
   ```sh
@@ -161,10 +196,10 @@ filter-repo-rs \
 
 - 提交/标签/引用
   - `--replace-message FILE` 对提交/标签消息执行字面值替换。
-  - 自动将消息中的旧提交短/长哈希重写为新哈希（借助生成的 `commit-map`）。
+  - 自动将消息中的旧提交短/长哈希重写为新哈希（借助生成的 `commit-map`；被剪枝的提交会映射为全零 `0000000000000000000000000000000000000000`）。
   - `--tag-rename`、`--branch-rename` 基于前缀重命名；注解标签去重后仅发射一次。
   - 非合并的空提交通过 `alias` 到其首个父标记而被剪枝；合并提交保留。
-  - 导入后执行安全的引用更新与 HEAD 选择。
+  - 原子引用更新：分支/标签通过 `git update-ref --stdin` 批量更新；`HEAD` 通过 `git symbolic-ref` 更新。
 
 - 安全、备份与分析
   - 可选预检；`--backup` 重写前创建 bundle；`--write-report` 输出总结。
@@ -191,8 +226,8 @@ cargo build -p filter-repo-rs --release
 cargo test -p filter-repo-rs
 ```
 
-测试会在 `target/it/` 下创建临时仓库；要求 PATH 中有 Git；
-并在每个临时仓库里写入调试产物（commit-map、ref-map、report）。
+- 单元测试位于 `src/` 模块内；集成测试位于 `filter-repo-rs/tests/`，以公开 API 跑通完整的导出→过滤→导入。
+- 测试会创建临时 Git 仓库（无需联网），并在其 `.git/filter-repo/` 下写入调试产物（commit-map、ref-map、report）。
 
 命令概览：核心 vs 调试分层
 -----------------------------

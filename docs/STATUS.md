@@ -141,13 +141,13 @@ Remaining for MVP polish:
    - Robust dequote/enquote for pass-through lines when needed.
 
 2) Refs finalization
-   - Consider batch updates for branches/HEAD via `git update-ref --stdin` to mirror git-filter-repo’s behavior.
+   - Done: batch atomic updates for branches/tags via `git update-ref --stdin`; HEAD updated via `git symbolic-ref`.
 
 3) Commit-map completeness
-   - Optionally record pruned commits as `old -> None` to make the map exhaustive.
+   - Done: pruned commits recorded as `old -> 0000000000000000000000000000000000000000`; commit-map always written.
 
 4) Windows path policy flag
    - `--windows-path-policy=[sanitize|skip|error]` (default sanitize) with a per-path report for changed names.
 
 5) Tests & docs
-   - Broaden tests for path/refs combinations; document limitations and interop notes (encoding, quoting).
+   - Initial integration tests added for path filtering + branch rename + HEAD update, and for commit-map pruned entries. Next: annotated vs lightweight tag scenarios, path-rename matrices, and encoding/quoting notes.

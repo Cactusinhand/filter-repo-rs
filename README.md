@@ -104,7 +104,42 @@ Use Cases
   filter-repo-rs --path-rename old/:new/
   ```
 
-6) Safety tips and common switches
+6) Remove specific files from history
+
+- Remove a specific file from all history (e.g., accidentally committed sensitive file):
+  ```sh
+  # 1. Backup first (strongly recommended)
+  filter-repo-rs --backup --refs --all
+
+  # 2. Dry-run to verify the operation
+  filter-repo-rs \
+    --path docs/STATUS.md \
+    --invert-paths \
+    --refs --all \
+    --dry-run \
+    --write-report
+
+  # 3. Execute the removal
+  filter-repo-rs \
+    --path docs/STATUS.md \
+    --invert-paths \
+    --refs --all \
+    --write-report
+
+  # 4. Force-push the new history
+  git push --force --all
+  git push --force --tags
+  ```
+- Remove files matching a pattern:
+  ```sh
+  filter-repo-rs --path-glob "*.log" --invert-paths --refs --all
+  ```
+- Remove files using regex pattern:
+  ```sh
+  filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths --refs --all
+  ```
+
+7) Safety tips and common switches
 
 - Dry‑run without updating refs: `--dry-run`
 - Write an audit summary: `--write-report`
@@ -113,7 +148,7 @@ Use Cases
 - Partial rewrite (keep existing remotes/refs): `--partial`
 - Bypass protections if required: `--force` (use with care)
 
-7) CI health checks
+8) CI health checks
 
 - In CI, run:
   ```sh
@@ -161,10 +196,10 @@ Features
 
 - Commit, tag, and refs
   - `--replace-message FILE` applies literal replacements in commit/tag messages.
-  - Short/long commit hashes in messages are rewritten to new IDs using the generated `commit-map`.
+  - Short/long commit hashes in messages are rewritten to new IDs using the generated `commit-map` (pruned commits map to the zero id `0000000000000000000000000000000000000000`).
   - `--tag-rename` and `--branch-rename` rename by prefix; annotated tags are deduped and emitted once.
   - Empty non‑merge commits are pruned via `alias` to the first parent mark; merges are preserved.
-  - Safe ref updates and HEAD selection after import.
+  - Atomic ref updates: branches/tags updated in a single batch via `git update-ref --stdin`; `HEAD` updated via `git symbolic-ref`.
 
 - Safety, backup, and analysis
   - Optional preflight checks; `--backup` creates a bundle before rewriting; `--write-report` summarizes actions.
@@ -191,8 +226,8 @@ Testing
 cargo test -p filter-repo-rs
 ```
 
-The suite sets up temporary repos under `target/it/`, requires Git on PATH,
-and writes debug artifacts (commit-map, ref-map, report) in each ephemeral repo.
+- Unit tests live in `src/` modules; integration tests live under `filter-repo-rs/tests/` and exercise the full export→filter→import pipeline.
+- Tests require Git on PATH and create temporary repositories; debug artifacts (commit-map, ref-map, report) are written under `.git/filter-repo/` in those ephemeral repos.
 
 CLI overview: core vs debug layers
 ----------------------------------
