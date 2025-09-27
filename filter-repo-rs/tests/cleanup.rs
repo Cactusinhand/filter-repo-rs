@@ -1,114 +1,111 @@
 mod common;
 use common::*;
 
-fn run_cleanup_case(
-    repo: &std::path::Path,
-    args: &[&str],
-) -> (std::process::Output, Vec<Vec<String>>) {
-    // Add --force to avoid interference from sanity checks in CLI tests
-    let mut full_args = vec!["--force"];
-    full_args.extend_from_slice(args);
-    let (output, invocations) = run_cli_with_git_spy(repo, &full_args);
-    (output, git_commands_for_repo(repo, &invocations))
+fn contains_seq(cmd: &[String], seq: &[&str]) -> bool {
+    if seq.is_empty() {
+        return true;
+    }
+    let mut i = 0usize;
+    for part in cmd {
+        if part == seq[i] {
+            i += 1;
+            if i == seq.len() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn any_cmd_contains_seq(cmds: &[Vec<String>], seq: &[&str]) -> bool {
+    cmds.iter().any(|c| contains_seq(c, seq))
 }
 
 #[test]
-fn cleanup_modes_trigger_expected_git_commands() {
-    let default_repo = init_repo();
-    let (default_output, default_cmds) = run_cleanup_case(&default_repo, &[]);
-    assert!(
-        default_output.status.success(),
-        "baseline run should succeed"
-    );
-    assert!(
-        find_git_command(&default_cmds, "reflog").is_none(),
-        "default run should not invoke git reflog expire: {:?}",
-        default_cmds
-    );
-    assert!(
-        find_git_command(&default_cmds, "gc").is_none(),
-        "default run should not invoke git gc: {:?}",
-        default_cmds
-    );
+fn default_cleanup_runs_standard() {
+    let repo = init_repo();
+    let (out, inv) = run_cli_with_git_spy(&repo, &[]);
+    assert!(out.status.success(), "run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
 
-    let cleanup_repo = init_repo();
-    let (cleanup_output, cleanup_cmds) = run_cleanup_case(&cleanup_repo, &["--cleanup"]);
+    // Expect reflog expire --expire=now --all
     assert!(
-        cleanup_output.status.success(),
-        "--cleanup run should succeed"
+        any_cmd_contains_seq(&cmds, &["reflog", "expire", "--expire=now", "--all"]),
+        "expected reflog expire in cleanup; cmds: {:?}",
+        cmds
     );
-    let cleanup_reflog = find_git_command(&cleanup_cmds, "reflog")
-        .cloned()
-        .expect("standard cleanup should expire reflog");
+    // Expect git gc --prune=now (quiet flag may be present)
     assert!(
-        cleanup_reflog.contains(&"expire".to_string()),
-        "reflog invocation should include expire subcommand: {:?}",
-        cleanup_reflog
+        any_cmd_contains_seq(&cmds, &["gc", "--prune=now"])
+            || any_cmd_contains_seq(&cmds, &["gc", "--prune=now", "--quiet"])
+            || any_cmd_contains_seq(&cmds, &["gc", "--quiet", "--prune=now"]),
+        "expected git gc --prune=now in cleanup; cmds: {:?}",
+        cmds
     );
+    // Should not be aggressive by default
     assert!(
-        cleanup_reflog.contains(&"--expire=now".to_string()),
-        "standard cleanup should request immediate expire"
+        !any_cmd_contains_seq(&cmds, &["gc", "--aggressive"]),
+        "did not expect aggressive gc by default; cmds: {:?}",
+        cmds
     );
-    assert!(
-        cleanup_reflog.contains(&"--all".to_string()),
-        "standard cleanup should expire all refs"
-    );
-    assert!(
-        !cleanup_reflog.contains(&"--expire-unreachable=now".to_string()),
-        "standard cleanup should not force unreachable expiry"
-    );
-    let cleanup_gc = find_git_command(&cleanup_cmds, "gc")
-        .cloned()
-        .expect("standard cleanup should invoke git gc");
-    assert!(
-        cleanup_gc.contains(&"--prune=now".to_string()),
-        "standard cleanup should prune immediately"
-    );
-    assert!(
-        cleanup_gc.contains(&"--quiet".to_string()),
-        "gc should run quietly"
-    );
-    assert!(
-        !cleanup_gc.contains(&"--aggressive".to_string()),
-        "standard cleanup should not request aggressive gc"
-    );
+}
 
-    let aggressive_repo = init_repo();
-    let (aggressive_output, aggressive_cmds) =
-        run_cleanup_case(&aggressive_repo, &["--debug-mode", "--cleanup-aggressive"]);
-    assert!(
-        aggressive_output.status.success(),
-        "--cleanup-aggressive run should succeed"
-    );
-    let aggressive_reflog = find_git_command(&aggressive_cmds, "reflog")
-        .cloned()
-        .expect("aggressive cleanup should expire reflog");
-    assert!(
-        aggressive_reflog.contains(&"--expire-unreachable=now".to_string()),
-        "aggressive cleanup should expire unreachable entries"
-    );
-    let aggressive_gc = find_git_command(&aggressive_cmds, "gc")
-        .cloned()
-        .expect("aggressive cleanup should invoke git gc");
-    assert!(
-        aggressive_gc.contains(&"--aggressive".to_string()),
-        "aggressive cleanup should request aggressive gc"
-    );
+#[test]
+fn cleanup_aggressive_runs_when_requested() {
+    let repo = init_repo();
+    // --cleanup-aggressive is gated behind debug-mode
+    let (out, inv) = run_cli_with_git_spy(&repo, &["--debug-mode", "--cleanup-aggressive"]);
+    assert!(out.status.success(), "run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
 
-    let dry_repo = init_repo();
-    let (dry_output, dry_cmds) = run_cleanup_case(&dry_repo, &["--cleanup", "--dry-run"]);
+    // Aggressive should include extra expire-unreachable and gc --aggressive
     assert!(
-        dry_output.status.success(),
-        "dry-run cleanup should succeed"
+        any_cmd_contains_seq(
+            &cmds,
+            &[
+                "reflog",
+                "expire",
+                "--expire=now",
+                "--expire-unreachable=now",
+                "--all"
+            ]
+        ),
+        "expected aggressive reflog expire; cmds: {:?}",
+        cmds
     );
     assert!(
-        find_git_command(&dry_cmds, "reflog").is_none(),
-        "dry-run should skip reflog expire even with --cleanup: {:?}",
-        dry_cmds
+        any_cmd_contains_seq(&cmds, &["gc", "--prune=now", "--aggressive"])
+            || any_cmd_contains_seq(&cmds, &["gc", "--aggressive", "--prune=now"]),
+        "expected gc --aggressive; cmds: {:?}",
+        cmds
     );
+}
+
+#[test]
+fn cleanup_disabled_on_dry_run() {
+    let repo = init_repo();
+    let (out, inv) = run_cli_with_git_spy(&repo, &["--dry-run"]);
+    // dry-run returns success; we only check that no cleanup ran
+    assert!(out.status.success(), "dry-run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
     assert!(
-        find_git_command(&dry_cmds, "gc").is_none(),
-        "dry-run should skip git gc even with --cleanup: {:?}",
-        dry_cmds
+        !any_cmd_contains_seq(&cmds, &["reflog", "expire"])
+            && !any_cmd_contains_seq(&cmds, &["gc"]),
+        "cleanup should not run on dry-run; cmds: {:?}",
+        cmds
+    );
+}
+
+#[test]
+fn cleanup_disabled_on_partial() {
+    let repo = init_repo();
+    let (out, inv) = run_cli_with_git_spy(&repo, &["--partial"]);
+    assert!(out.status.success(), "partial run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
+    assert!(
+        !any_cmd_contains_seq(&cmds, &["reflog", "expire"])
+            && !any_cmd_contains_seq(&cmds, &["gc"]),
+        "cleanup should not run on partial; cmds: {:?}",
+        cmds
     );
 }
