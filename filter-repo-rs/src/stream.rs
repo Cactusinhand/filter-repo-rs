@@ -227,7 +227,7 @@ impl BlobSizeTracker {
             .arg("--batch-check=%(objectname) %(objecttype) %(objectsize)")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::null());
         let mut child = cmd.spawn().map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
