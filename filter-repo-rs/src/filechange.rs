@@ -1,8 +1,5 @@
 use crate::opts::Options;
-use crate::pathutil::{
-    dequote_c_style_bytes, enquote_c_style_bytes, glob_match_bytes, needs_c_style_quote,
-    sanitize_fast_import_path_bytes, sanitize_invalid_windows_path_bytes,
-};
+use crate::pathutil::{dequote_c_style_bytes, encode_path_for_fi, glob_match_bytes};
 
 #[derive(Debug)]
 enum FileChange {
@@ -178,16 +175,8 @@ fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
             }
         }
     }
-    let windows_sanitized = sanitize_invalid_windows_path_bytes(&path);
-    sanitize_fast_import_path_bytes(&windows_sanitized)
-}
-
-fn encode_path(path: &[u8]) -> Vec<u8> {
-    if needs_c_style_quote(path) {
-        enquote_c_style_bytes(path)
-    } else {
-        path.to_vec()
-    }
+    // Path renames are applied. Further sanitization and encoding is handled by `encode_path_for_fi`.
+    path
 }
 
 // Return Some(new_line) if the filechange should be kept (possibly rebuilt), None to drop.
@@ -219,7 +208,7 @@ pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
             rebuilt.push(b' ');
             rebuilt.extend_from_slice(&id);
             rebuilt.push(b' ');
-            let enc = encode_path(&new_path);
+            let enc = encode_path_for_fi(&new_path);
             rebuilt.extend_from_slice(&enc);
             rebuilt.push(b'\n');
             Some(rebuilt)
@@ -228,7 +217,7 @@ pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
             let new_path = rewrite_path(path, opts);
             let mut rebuilt = Vec::with_capacity(2 + new_path.len() + 2);
             rebuilt.extend_from_slice(b"D ");
-            let enc = encode_path(&new_path);
+            let enc = encode_path_for_fi(&new_path);
             rebuilt.extend_from_slice(&enc);
             rebuilt.push(b'\n');
             Some(rebuilt)
@@ -238,10 +227,10 @@ pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
             let new_dst = rewrite_path(dst, opts);
             let mut rebuilt = Vec::with_capacity(line.len() + new_src.len() + new_dst.len());
             rebuilt.extend_from_slice(b"C ");
-            let enc_src = encode_path(&new_src);
+            let enc_src = encode_path_for_fi(&new_src);
             rebuilt.extend_from_slice(&enc_src);
             rebuilt.push(b' ');
-            let enc_dst = encode_path(&new_dst);
+            let enc_dst = encode_path_for_fi(&new_dst);
             rebuilt.extend_from_slice(&enc_dst);
             rebuilt.push(b'\n');
             Some(rebuilt)
@@ -251,10 +240,10 @@ pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
             let new_dst = rewrite_path(dst, opts);
             let mut rebuilt = Vec::with_capacity(line.len() + new_src.len() + new_dst.len());
             rebuilt.extend_from_slice(b"R ");
-            let enc_src = encode_path(&new_src);
+            let enc_src = encode_path_for_fi(&new_src);
             rebuilt.extend_from_slice(&enc_src);
             rebuilt.push(b' ');
-            let enc_dst = encode_path(&new_dst);
+            let enc_dst = encode_path_for_fi(&new_dst);
             rebuilt.extend_from_slice(&enc_dst);
             rebuilt.push(b'\n');
             Some(rebuilt)

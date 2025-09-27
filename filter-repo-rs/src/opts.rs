@@ -720,6 +720,14 @@ pub fn parse_args() -> Options {
         std::process::exit(2);
     }
 
+    // Default cleanup behavior: align with git-filter-repo semantics
+    // Run post-import cleanup (reflog expire + git gc) by default unless
+    // doing a partial rewrite or in dry-run. If the user explicitly
+    // requested a cleanup mode, that takes precedence.
+    if matches!(opts.cleanup, CleanupMode::None) && !opts.partial && !opts.dry_run {
+        opts.cleanup = CleanupMode::Standard;
+    }
+
     opts
 }
 
