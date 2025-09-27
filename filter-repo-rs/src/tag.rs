@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::process::{ChildStdin, ChildStdout};
+use std::process::ChildStdout;
 
 use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
@@ -37,7 +37,7 @@ pub fn process_tag_block(
     fe_out: &mut BufReader<ChildStdout>,
     mut orig_file: Option<&mut dyn Write>,
     filt_file: &mut dyn Write,
-    mut fi_in: Option<&mut ChildStdin>,
+    mut fi_in: Option<&mut dyn Write>,
     replacer: &Option<MessageReplacer>,
     short_mapper: Option<&ShortHashMapper>,
     opts: &Options,

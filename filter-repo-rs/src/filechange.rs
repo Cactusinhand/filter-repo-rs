@@ -1,7 +1,5 @@
 use crate::opts::Options;
-use crate::pathutil::{
-    dequote_c_style_bytes, encode_path_for_fi, glob_match_bytes, sanitize_invalid_windows_path_bytes,
-};
+use crate::pathutil::{dequote_c_style_bytes, encode_path_for_fi, glob_match_bytes};
 
 #[derive(Debug)]
 enum FileChange {
@@ -177,8 +175,8 @@ fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
             }
         }
     }
-        // Path renames are applied. Further sanitization and encoding is handled by `encode_path_for_fi`.
-        path
+    // Path renames are applied. Further sanitization and encoding is handled by `encode_path_for_fi`.
+    path
 }
 
 // Return Some(new_line) if the filechange should be kept (possibly rebuilt), None to drop.

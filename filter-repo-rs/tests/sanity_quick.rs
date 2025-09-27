@@ -20,7 +20,9 @@ fn early_untracked_fails_fast_and_skips_heavy_scans() {
 
     // Ensure we did not run heavy ref/reflog scans before failing
     let cmds = git_commands_for_repo(&repo, &inv);
-    let ran_show_ref = cmds.iter().any(|c| has_arg(c, "show-ref") || has_arg(c, "for-each-ref"));
+    let ran_show_ref = cmds
+        .iter()
+        .any(|c| has_arg(c, "show-ref") || has_arg(c, "for-each-ref"));
     let ran_reflog = cmds.iter().any(|c| c.iter().any(|a| a == "reflog"));
     assert!(
         !ran_show_ref && !ran_reflog,
@@ -44,4 +46,3 @@ fn early_dirty_fails_fast() {
     let ran_show_ref = cmds.iter().any(|c| c.iter().any(|a| a == "show-ref"));
     assert!(!ran_show_ref, "should fail before ref scans: {:?}", cmds);
 }
-

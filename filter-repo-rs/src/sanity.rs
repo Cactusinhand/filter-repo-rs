@@ -311,7 +311,9 @@ impl fmt::Display for SanityCheckError {
                 }
                 write!(f, "Use --force to bypass this check.")
             }
-            SanityCheckError::ReflogTooManyEntries { problematic_reflogs } => {
+            SanityCheckError::ReflogTooManyEntries {
+                problematic_reflogs,
+            } => {
                 let total = problematic_reflogs.len();
                 write!(
                     f,

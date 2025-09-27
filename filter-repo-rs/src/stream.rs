@@ -381,6 +381,7 @@ impl BlobSizeTracker {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn known_oversize(&self, sha: &[u8]) -> bool {
         self.oversize.contains(sha)
     }
@@ -425,7 +426,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     // Always produce filtered stream for downstream tooling/tests
     let mut filt_file = BufWriter::new(File::create(debug_dir.join("fast-export.filtered"))?);
     // Original stream is heavy I/O; only write when useful for debugging/reporting
-    let write_original = opts.debug_mode || opts.write_report || opts.max_blob_size.is_some();
+    let write_original = opts.debug_mode || opts.write_report;
     let mut orig_file_opt: Option<BufWriter<File>> = if write_original {
         Some(BufWriter::new(File::create(
             debug_dir.join("fast-export.original"),
@@ -447,8 +448,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
 
     let mut fe_out = BufReader::new(fe.stdout.take().expect("no stdout from fast-export"));
-    let mut fi_in_opt: Option<std::process::ChildStdin> = if let Some(ref mut child) = fi {
-        child.stdin.take()
+    let mut fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
+    {
+        child.stdin.take().map(BufWriter::new)
     } else {
         None
     };
@@ -671,7 +673,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
                 &mut filt_file as &mut dyn Write,
                 if let Some(ref mut fi_in) = fi_in_opt {
-                    Some(fi_in)
+                    Some(fi_in as &mut dyn Write)
                 } else {
                     None
                 },
@@ -726,7 +728,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
                     &mut filt_file as &mut dyn Write,
                     if let Some(ref mut fi_in) = fi_in_opt {
-                        Some(fi_in)
+                        Some(fi_in as &mut dyn Write)
                     } else {
                         None
                     },
@@ -798,10 +800,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     if drop_inline {
                         // Replace previously appended M inline line with a sanitized deletion
                         commit_buf.truncate(pos);
-                        let decoded =
-                            crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
-                        let enc =
-                            crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
+                        let decoded = crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
+                        let enc = crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
                         commit_buf.extend_from_slice(b"D ");
                         commit_buf.extend_from_slice(&enc);
                         commit_buf.push(b'\n');
@@ -1233,11 +1233,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 &mut buffered_tag_resets,
                 &annotated_tag_refs,
                 &mut filt_file as &mut dyn Write,
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    Some(fi_in)
-                } else {
-                    None
-                },
+                fi_in_opt.as_mut().map(|w| w as &mut dyn Write),
                 &mut import_broken,
             )?;
             // Forward 'done' after flushing
@@ -1335,6 +1331,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         of.flush()?;
     }
     let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
+    // Pass buffered writer into finalize to flush tag resets and drop
+    let fi_writer_for_finalize: Option<Box<dyn Write>> =
+        fi_in_opt.take().map(|bw| Box::new(bw) as Box<dyn Write>);
+
     crate::finalize::finalize(
         opts,
         &debug_dir,
@@ -1345,7 +1345,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         updated_branch_refs,
         branch_reset_targets,
         &mut filt_file as &mut dyn Write,
-        fi_in_opt,
+        fi_writer_for_finalize,
         &mut fe,
         fi.as_mut().map(|c| c),
         import_broken,
@@ -1378,7 +1378,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
 }
 
 fn resolve_mark_oid(
-    fi_in: &mut std::process::ChildStdin,
+    fi_in: &mut dyn Write,
     fi_out: &mut BufReader<std::process::ChildStdout>,
     mark: u32,
 ) -> io::Result<Option<Vec<u8>>> {

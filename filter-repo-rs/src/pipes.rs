@@ -65,7 +65,8 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
     let auto_no_data = {
         let same_repo = opts.source == opts.target;
         let no_content_replace = opts.replace_text_file.is_none();
-        let id_or_size_filters = opts.max_blob_size.is_some() || opts.strip_blobs_with_ids.is_some();
+        let id_or_size_filters =
+            opts.max_blob_size.is_some() || opts.strip_blobs_with_ids.is_some();
         same_repo && no_content_replace && id_or_size_filters
     };
     if opts.no_data || auto_no_data {

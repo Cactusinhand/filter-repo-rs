@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 use crate::gitutil;
 use crate::migrate;
@@ -24,7 +24,7 @@ pub fn flush_lightweight_tag_resets(
     buffered_tag_resets: &mut Vec<(Vec<u8>, Vec<u8>)>,
     annotated_tag_refs: &BTreeSet<Vec<u8>>,
     filt_file: &mut dyn Write,
-    mut fi_in: Option<&mut ChildStdin>,
+    mut fi_in: Option<&mut dyn Write>,
     import_broken: &mut bool,
 ) -> io::Result<()> {
     if buffered_tag_resets.is_empty() {
@@ -77,25 +77,35 @@ pub fn finalize(
     updated_branch_refs: BTreeSet<Vec<u8>>,
     mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
     filt_file: &mut dyn Write,
-    mut fi_in: Option<ChildStdin>,
+    mut fi_in: Option<Box<dyn Write>>,
     fe: &mut Child,
     fi: Option<&mut Child>,
     mut import_broken: bool,
     allow_flush_tag_resets: bool,
     report: Option<ReportData>,
-    blob_sizes: &BlobSizeTracker,
+    _blob_sizes: &BlobSizeTracker,
 ) -> io::Result<()> {
     // Emit buffered lightweight tag resets if any remain (ideally flushed before 'done')
     if allow_flush_tag_resets {
         let mut buffered = buffered_tag_resets;
         if !buffered.is_empty() {
-            flush_lightweight_tag_resets(
-                &mut buffered,
-                &annotated_tag_refs,
-                filt_file,
-                fi_in.as_mut(),
-                &mut import_broken,
-            )?;
+            if let Some(ref mut fi) = fi_in {
+                flush_lightweight_tag_resets(
+                    &mut buffered,
+                    &annotated_tag_refs,
+                    filt_file,
+                    Some(fi.as_mut()),
+                    &mut import_broken,
+                )?;
+            } else {
+                flush_lightweight_tag_resets(
+                    &mut buffered,
+                    &annotated_tag_refs,
+                    filt_file,
+                    None,
+                    &mut import_broken,
+                )?;
+            }
         }
     }
     if let Some(stdin) = fi_in.take() {
@@ -347,189 +357,11 @@ pub fn finalize(
         }
     }
 
-    // Optional reporting
+    // Optional reporting (use only stream-collected data; no rescans)
     if opts.write_report {
-        // Ensure debug filtered stream is flushed before scanning
-        let _ = filt_file.flush();
         let mut f = File::create(debug_dir.join("report.txt"))?;
         if let Some(r) = report {
-            // Augment sampling: when max-blob-size is set, scan streams for dropped paths and oversize refs
-            let mut size_samples = r.samples_size;
-            if opts.max_blob_size.is_some() {
-                // First try scanning the filtered stream for dropped paths (D <path>)
-                let filtered = debug_dir.join("fast-export.filtered");
-                if let Ok(fh) = File::open(&filtered) {
-                    let mut rdr = BufReader::new(fh);
-                    let mut line = Vec::with_capacity(256);
-                    while rdr.read_until(b'\n', &mut line).unwrap_or(0) > 0 {
-                        if line.starts_with(b"D ") {
-                            let mut p = line[2..].to_vec();
-                            if let Some(last) = p.last() {
-                                if *last == b'\n' {
-                                    p.pop();
-                                }
-                            }
-                            if let Some(last) = p.last() {
-                                if *last == b'\r' {
-                                    p.pop();
-                                }
-                            }
-                            if !p.is_empty() && !size_samples.iter().any(|e| e == &p) {
-                                size_samples.push(p);
-                            }
-                            if size_samples.len() >= 20 {
-                                break;
-                            }
-                        }
-                        line.clear();
-                    }
-                }
-                // If still under limit, scan original stream: map oversize blob marks to commit M-lines, and oversize SHAs
-                if size_samples.len() < 20 {
-                    let original = debug_dir.join("fast-export.original");
-                    if let Ok(fh) = File::open(&original) {
-                        let mut rdr = BufReader::new(fh);
-                        let mut line = Vec::with_capacity(256);
-                        let mut in_blob = false;
-                        let mut last_mark: Option<u32> = None;
-                        let mut oversize_marks: std::collections::HashSet<u32> =
-                            std::collections::HashSet::new();
-                        // Pass 1: collect oversize marks
-                        loop {
-                            line.clear();
-                            if rdr.read_until(b'\n', &mut line).unwrap_or(0) == 0 {
-                                break;
-                            }
-                            if line == b"blob\n" {
-                                in_blob = true;
-                                last_mark = None;
-                                continue;
-                            }
-                            if in_blob && line.starts_with(b"mark :") {
-                                let mut num: u32 = 0;
-                                let mut seen = false;
-                                for &b in line[b"mark :".len()..].iter() {
-                                    if b >= b'0' && b <= b'9' {
-                                        seen = true;
-                                        num = num
-                                            .saturating_mul(10)
-                                            .saturating_add((b - b'0') as u32);
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                if seen {
-                                    last_mark = Some(num);
-                                }
-                                continue;
-                            }
-                            if in_blob && line.starts_with(b"data ") {
-                                let size_bytes = &line[b"data ".len()..];
-                                let n = std::str::from_utf8(size_bytes)
-                                    .ok()
-                                    .map(|s| s.trim())
-                                    .and_then(|s| s.parse::<usize>().ok())
-                                    .unwrap_or(0);
-                                // consume payload
-                                let mut buf = vec![0u8; n];
-                                let _ = rdr.read_exact(&mut buf);
-                                if let (Some(max), Some(m)) = (opts.max_blob_size, last_mark) {
-                                    if n > max {
-                                        oversize_marks.insert(m);
-                                    }
-                                }
-                                in_blob = false;
-                                last_mark = None;
-                                continue;
-                            }
-                            if in_blob && line == b"\n" {
-                                in_blob = false;
-                                last_mark = None;
-                                continue;
-                            }
-                        }
-                        // Pass 2: find commit M-lines referencing oversize marks and collect paths
-                        let mut rdr2 = BufReader::new(File::open(&original)?);
-                        let mut line2 = Vec::with_capacity(256);
-                        loop {
-                            line2.clear();
-                            if rdr2.read_until(b'\n', &mut line2).unwrap_or(0) == 0 {
-                                break;
-                            }
-                            if line2.starts_with(b"M ") {
-                                // parse id and path
-                                let bytes = &line2;
-                                let mut i = 2;
-                                while i < bytes.len() && bytes[i] != b' ' {
-                                    i += 1;
-                                }
-                                if i < bytes.len() {
-                                    i += 1;
-                                }
-                                let id_start = i;
-                                while i < bytes.len() && bytes[i] != b' ' {
-                                    i += 1;
-                                }
-                                let id_end = i;
-                                let path_start = if i < bytes.len() { i + 1 } else { bytes.len() };
-                                let id = &bytes[id_start..id_end];
-                                if id.first().copied() == Some(b':') {
-                                    let mut num: u32 = 0;
-                                    let mut seen = false;
-                                    let mut j = 1;
-                                    while j < id.len() {
-                                        let b = id[j];
-                                        if b >= b'0' && b <= b'9' {
-                                            seen = true;
-                                            num = num
-                                                .saturating_mul(10)
-                                                .saturating_add((b - b'0') as u32);
-                                        } else {
-                                            break;
-                                        }
-                                        j += 1;
-                                    }
-                                    if seen && oversize_marks.contains(&num) {
-                                        let mut p = bytes[path_start..].to_vec();
-                                        if let Some(last) = p.last() {
-                                            if *last == b'\n' {
-                                                p.pop();
-                                            }
-                                        }
-                                        if !p.is_empty() && !size_samples.iter().any(|e| e == &p) {
-                                            size_samples.push(p);
-                                        }
-                                        if size_samples.len() >= 20 {
-                                            break;
-                                        }
-                                    }
-                                } else if id.len() == 40
-                                    && id.iter().all(|b| {
-                                        (*b >= b'0' && *b <= b'9') || (*b >= b'a' && *b <= b'f')
-                                    })
-                                {
-                                    // SHA1: use pre-computed oversize tracker
-                                    let sha = id;
-                                    if blob_sizes.known_oversize(sha) {
-                                        let mut p = bytes[path_start..].to_vec();
-                                        if let Some(last) = p.last() {
-                                            if *last == b'\n' {
-                                                p.pop();
-                                            }
-                                        }
-                                        if !p.is_empty() && !size_samples.iter().any(|e| e == &p) {
-                                            size_samples.push(p);
-                                        }
-                                        if size_samples.len() >= 20 {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            let size_samples = r.samples_size;
             let size_count = std::cmp::max(r.stripped_by_size, size_samples.len());
             writeln!(f, "Blobs stripped by size: {}", size_count)?;
             writeln!(f, "Blobs stripped by SHA: {}", r.stripped_by_sha)?;

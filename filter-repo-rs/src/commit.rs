@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io::BufReader;
 use std::io::{self, Read, Write};
-use std::process::{ChildStdin, ChildStdout};
+use std::process::ChildStdout;
 
 use crate::filechange;
 use crate::message::{MessageReplacer, ShortHashMapper};
@@ -123,7 +123,7 @@ pub fn process_commit_line(
     fe_out: &mut BufReader<ChildStdout>,
     orig_file: Option<&mut dyn Write>,
     filt_file: &mut dyn Write,
-    mut fi_in: Option<&mut ChildStdin>,
+    mut fi_in: Option<&mut dyn Write>,
     replacer: &Option<MessageReplacer>,
     short_mapper: Option<&ShortHashMapper>,
     commit_buf: &mut Vec<u8>,
