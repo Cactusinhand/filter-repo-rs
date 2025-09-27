@@ -2068,12 +2068,14 @@ fn check_untracked_files_with_context(ctx: &SanityCheckContext) -> Result<(), Sa
 
     let executor = GitCommandExecutor::new(&ctx.repo_path);
 
-    match executor.run_command(&["ls-files", "-o"]) {
+    // Honor ignore rules and avoid enumerating every file under large untracked directories
+    // by showing directory entries instead of all children.
+    match executor.run_command(&["ls-files", "-o", "--exclude-standard", "--directory"]) {
         Ok(output) => {
             let untracked_files: Vec<String> = output
                 .lines()
                 .map(|line| line.trim().to_string())
-                .filter(|l| !l.is_empty() && !l.starts_with("__pycache__/git_filter_repo."))
+                .filter(|l| !l.is_empty())
                 .collect();
 
             if !untracked_files.is_empty() {

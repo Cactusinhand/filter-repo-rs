@@ -121,6 +121,24 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Sanitize bytes that git fast-import rejects in pathnames.
+///
+/// Map ASCII control bytes (0x00..=0x1F, 0x7F) to underscores. This avoids
+/// fast-import fatal errors like "invalid path" caused by control characters,
+/// while preserving other bytes which are re-quoted later if needed.
+#[allow(dead_code)]
+pub fn sanitize_fast_import_path_bytes(p: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(p.len());
+    for &b in p {
+        let mapped = match b {
+            0x00..=0x1F | 0x7F => b'_',
+            _ => b,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
 #[allow(dead_code)]
 pub fn needs_c_style_quote(bytes: &[u8]) -> bool {
     // Quote conservatively for fast-import: any space/control/non-ASCII, backslash or quotes

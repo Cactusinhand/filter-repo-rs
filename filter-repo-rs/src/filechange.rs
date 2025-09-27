@@ -1,7 +1,7 @@
 use crate::opts::Options;
 use crate::pathutil::{
     dequote_c_style_bytes, enquote_c_style_bytes, glob_match_bytes, needs_c_style_quote,
-    sanitize_invalid_windows_path_bytes,
+    sanitize_fast_import_path_bytes, sanitize_invalid_windows_path_bytes,
 };
 
 #[derive(Debug)]
@@ -178,7 +178,8 @@ fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
             }
         }
     }
-    sanitize_invalid_windows_path_bytes(&path)
+    let windows_sanitized = sanitize_invalid_windows_path_bytes(&path);
+    sanitize_fast_import_path_bytes(&windows_sanitized)
 }
 
 fn encode_path(path: &[u8]) -> Vec<u8> {

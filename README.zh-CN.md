@@ -143,6 +143,7 @@ filter-repo-rs \
 
 - 流式 pipeline
   - `fast-export` → 过滤器 → `fast-import`，调试副本写至 `.git/filter-repo/`。
+  - 始终写出 `fast-export.filtered`；`fast-export.original` 仅在调试/报告或需要体积采样时写出（降低超大仓库 I/O）。
   - 已启用的 fast-export 选项：`--show-original-ids`、`--signed-tags=strip`、
     `--tag-of-filtered-object=rewrite`、`--fake-missing-tagger`、
     `--reference-excluded-parents`、`--use-done-feature`。
@@ -322,8 +323,8 @@ git symbolic-ref HEAD refs/heads/<branch-from-bundle>
 - `.git/filter-repo/ref-map`：旧引用 → 新引用
 - `.git/filter-repo/report.txt`：剔除/修改计数及示例路径（启用 `--write-report` 时）
 - `.git/filter-repo/target-marks`: marks 映射表
-- `.git/filter-repo/fast-export.original`: git fast-export 原输出
-- `.git/filter-repo/fast-export.filtered`: git fast-export 被过滤后的输出
+- `.git/filter-repo/fast-export.filtered`: git fast-export 被过滤后的输出（始终）
+- `.git/filter-repo/fast-export.original`: git fast-export 原输出（调试/报告/体积采样时）
 - `.git/filter-repo/1758125153-834782600.bundle`: 备份文件
 
 Windows 注意

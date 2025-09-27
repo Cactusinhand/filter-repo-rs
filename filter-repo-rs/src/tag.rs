@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{ChildStdin, ChildStdout};
 
@@ -36,8 +35,8 @@ pub fn precheck_duplicate_tag(
 pub fn process_tag_block(
     first_line: &[u8],
     fe_out: &mut BufReader<ChildStdout>,
-    orig_file: &mut File,
-    filt_file: &mut File,
+    mut orig_file: Option<&mut dyn Write>,
+    filt_file: &mut dyn Write,
     mut fi_in: Option<&mut ChildStdin>,
     replacer: &Option<MessageReplacer>,
     short_mapper: Option<&ShortHashMapper>,
@@ -63,7 +62,9 @@ pub fn process_tag_block(
         if read2 == 0 {
             break;
         }
-        orig_file.write_all(&l)?;
+        if let Some(f) = orig_file.as_mut() {
+            (*f).write_all(&l)?;
+        }
         if l.starts_with(b"data ") {
             // Read payload
             let size_bytes = &l[b"data ".len()..];
@@ -74,7 +75,9 @@ pub fn process_tag_block(
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
             let mut payload = vec![0u8; n];
             fe_out.read_exact(&mut payload)?;
-            orig_file.write_all(&payload)?;
+            if let Some(f) = orig_file.as_mut() {
+                (*f).write_all(&payload)?;
+            }
 
             // Rename tag name
             let mut renamed = tagname.to_vec();
@@ -130,20 +133,31 @@ pub fn process_tag_block(
                 }
             }
 
-            let mut new_payload = if let Some(r) = replacer {
-                r.apply(payload)
+            if replacer.is_none() && short_mapper.is_none() {
+                // No modifications needed; forward header and payload without cloning
+                let header = format!("data {}\n", payload.len());
+                filt_file.write_all(header.as_bytes())?;
+                filt_file.write_all(&payload)?;
+                if let Some(ref mut fi) = fi_in {
+                    fi.write_all(header.as_bytes())?;
+                    fi.write_all(&payload)?;
+                }
             } else {
-                payload
-            };
-            if let Some(mapper) = short_mapper {
-                new_payload = mapper.rewrite(new_payload);
-            }
-            let header = format!("data {}\n", new_payload.len());
-            filt_file.write_all(header.as_bytes())?;
-            filt_file.write_all(&new_payload)?;
-            if let Some(ref mut fi) = fi_in {
-                fi.write_all(header.as_bytes())?;
-                fi.write_all(&new_payload)?;
+                let mut new_payload = if let Some(r) = replacer {
+                    r.apply(payload)
+                } else {
+                    payload
+                };
+                if let Some(mapper) = short_mapper {
+                    new_payload = mapper.rewrite(new_payload);
+                }
+                let header = format!("data {}\n", new_payload.len());
+                filt_file.write_all(header.as_bytes())?;
+                filt_file.write_all(&new_payload)?;
+                if let Some(ref mut fi) = fi_in {
+                    fi.write_all(header.as_bytes())?;
+                    fi.write_all(&new_payload)?;
+                }
             }
             return Ok(());
         } else {

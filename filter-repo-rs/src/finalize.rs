@@ -23,7 +23,7 @@ pub struct ReportData {
 pub fn flush_lightweight_tag_resets(
     buffered_tag_resets: &mut Vec<(Vec<u8>, Vec<u8>)>,
     annotated_tag_refs: &BTreeSet<Vec<u8>>,
-    filt_file: &mut File,
+    filt_file: &mut dyn Write,
     mut fi_in: Option<&mut ChildStdin>,
     import_broken: &mut bool,
 ) -> io::Result<()> {
@@ -76,7 +76,7 @@ pub fn finalize(
     annotated_tag_refs: BTreeSet<Vec<u8>>,
     updated_branch_refs: BTreeSet<Vec<u8>>,
     mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
-    filt_file: &mut File,
+    filt_file: &mut dyn Write,
     mut fi_in: Option<ChildStdin>,
     fe: &mut Child,
     fi: Option<&mut Child>,
@@ -118,6 +118,9 @@ pub fn finalize(
             std::process::exit(fi_status.code().unwrap_or(1));
         }
     }
+
+    // Ensure the filtered stream is flushed before any reads from it (e.g., commit-map fallback)
+    let _ = filt_file.flush();
 
     let refs: Vec<(Vec<u8>, Vec<u8>)> = ref_renames.into_iter().collect();
     if !refs.is_empty() {

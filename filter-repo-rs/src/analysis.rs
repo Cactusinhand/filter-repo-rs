@@ -335,7 +335,11 @@ fn gather_worktree_snapshot(
     // If some of the top blobs are not present in HEAD, look up a historical path
     // from any revision in the repository history to improve readability.
     let mut needed: HashSet<String> = HashSet::new();
-    for b in metrics.largest_blobs.iter().chain(&metrics.blobs_over_threshold) {
+    for b in metrics
+        .largest_blobs
+        .iter()
+        .chain(&metrics.blobs_over_threshold)
+    {
         if !sample_paths.contains_key(&b.oid) {
             needed.insert(b.oid.clone());
         }

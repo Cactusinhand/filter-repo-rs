@@ -57,7 +57,18 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
     if opts.date_order {
         cmd.arg("--date-order");
     }
-    if opts.no_data {
+    // Emit --no-data only when explicitly requested or clearly safe and useful
+    // Safe auto-enable criteria:
+    // - Writing back into the same repository (object store available)
+    // - No blob content replacements requested
+    // - Performing blob filtering by id/size (no need to see blob payloads)
+    let auto_no_data = {
+        let same_repo = opts.source == opts.target;
+        let no_content_replace = opts.replace_text_file.is_none();
+        let id_or_size_filters = opts.max_blob_size.is_some() || opts.strip_blobs_with_ids.is_some();
+        same_repo && no_content_replace && id_or_size_filters
+    };
+    if opts.no_data || auto_no_data {
         cmd.arg("--no-data");
     }
     if opts.reencode {
