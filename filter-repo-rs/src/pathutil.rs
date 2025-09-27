@@ -151,6 +151,25 @@ pub fn sanitize_and_encode_path_for_import(path: &[u8]) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
+pub fn decode_fast_export_path_bytes(path: &[u8]) -> Vec<u8> {
+    let mut trimmed = path;
+    if let Some(last) = trimmed.last() {
+        if *last == b'\n' {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+    }
+    if let (Some(first), Some(last)) = (trimmed.first(), trimmed.last()) {
+        if *first == b'"' && *last == b'"' && trimmed.len() >= 2 {
+            return dequote_c_style_bytes(&trimmed[1..trimmed.len() - 1]);
+        }
+    }
+    if trimmed.first() == Some(&b'"') {
+        return dequote_c_style_bytes(&trimmed[1..]);
+    }
+    trimmed.to_vec()
+}
+
+#[allow(dead_code)]
 pub fn needs_c_style_quote(bytes: &[u8]) -> bool {
     // Quote conservatively for fast-import: any space/control/non-ASCII, backslash or quotes
     for &b in bytes {

@@ -733,8 +733,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     if drop_inline {
                         // Replace previously appended M inline line with a sanitized deletion
                         commit_buf.truncate(pos);
+                        let decoded =
+                            crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
                         let enc =
-                            crate::pathutil::sanitize_and_encode_path_for_import(&path_bytes);
+                            crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
                         commit_buf.extend_from_slice(b"D ");
                         commit_buf.extend_from_slice(&enc);
                         commit_buf.push(b'\n');
@@ -897,7 +899,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 if drop_path {
                     // Emit deletion for the path (sanitize + quote)
                     let raw = &bytes[path_start..];
-                    let enc = crate::pathutil::sanitize_and_encode_path_for_import(raw);
+                    let decoded = crate::pathutil::decode_fast_export_path_bytes(raw);
+                    let enc = crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
                     commit_buf.extend_from_slice(b"D ");
                     commit_buf.extend_from_slice(&enc);
                     commit_buf.push(b'\n');
