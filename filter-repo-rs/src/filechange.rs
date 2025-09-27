@@ -177,8 +177,8 @@ fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
             }
         }
     }
-    // Only apply Windows sanitization here; final quoting is applied when emitting
-    sanitize_invalid_windows_path_bytes(&path)
+        // Path renames are applied. Further sanitization and encoding is handled by `encode_path_for_fi`.
+        path
 }
 
 // Return Some(new_line) if the filechange should be kept (possibly rebuilt), None to drop.
