@@ -23,7 +23,7 @@ fn write_file(path: &std::path::Path, data: &[u8]) {
 }
 
 fn current_head_symref(repo: &Path) -> String {
-    let out = git(&["-C", repo.to_str().unwrap(), "symbolic-ref", "-q", "HEAD"]);
+    let out = git(&["-C", repo.to_str().expect("Repository path must be valid UTF-8"), "symbolic-ref", "-q", "HEAD"]);
     assert!(out.status.success(), "symbolic-ref failed");
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
