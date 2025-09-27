@@ -191,6 +191,7 @@ pub(crate) struct BlobSizeTracker {
     max_blob_size: Option<usize>,
     oversize: HashSet<Vec<u8>>,
     prefetch_ok: bool,
+    batch: Option<BatchCat>,
 }
 
 impl BlobSizeTracker {
@@ -200,6 +201,7 @@ impl BlobSizeTracker {
             max_blob_size: opts.max_blob_size,
             oversize: HashSet::new(),
             prefetch_ok: false,
+            batch: None,
         };
         if opts.max_blob_size.is_some() {
             if let Err(e) = tracker.prefetch_oversize() {
@@ -212,6 +214,67 @@ impl BlobSizeTracker {
             }
         }
         tracker
+    }
+
+    fn ensure_batch(&mut self) -> io::Result<()> {
+        if self.batch.is_some() {
+            return Ok(());
+        }
+        let mut cmd = Command::new("git");
+        cmd.arg("-C")
+            .arg(&self.source)
+            .arg("cat-file")
+            .arg("--batch-check=%(objectname) %(objecttype) %(objectsize)")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to spawn git cat-file --batch-check: {e}"),
+            )
+        })?;
+        let stdin = child.stdin.take().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "missing stdin for cat-file batch")
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "missing stdout for cat-file batch")
+        })?;
+        self.batch = Some(BatchCat {
+            child,
+            stdin: BufWriter::new(stdin),
+            stdout: BufReader::new(stdout),
+        });
+        Ok(())
+    }
+
+    fn query_size_via_batch(&mut self, sha: &[u8]) -> io::Result<usize> {
+        self.ensure_batch()?;
+        let batch = self.batch.as_mut().expect("batch initialized");
+        // Write request (sha + newline)
+        batch.stdin.write_all(sha)?;
+        batch.stdin.write_all(b"\n")?;
+        batch.stdin.flush()?;
+        // Read one line: "<sha> <type> <size>"
+        let mut line = Vec::with_capacity(64);
+        line.clear();
+        batch.stdout.read_until(b'\n', &mut line)?;
+        // Trim CRLF
+        while line.last().copied() == Some(b'\n') || line.last().copied() == Some(b'\r') {
+            line.pop();
+        }
+        let mut it = line.split(|b| *b == b' ');
+        let _sha_out = it.next();
+        let kind = it.next().unwrap_or(b"");
+        if kind != b"blob" {
+            return Ok(0);
+        }
+        let size_bytes = it.next().unwrap_or(b"0");
+        let size = std::str::from_utf8(size_bytes)
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        Ok(size)
     }
 
     fn prefetch_oversize(&mut self) -> io::Result<()> {
@@ -306,20 +369,9 @@ impl BlobSizeTracker {
         if self.prefetch_ok {
             return false;
         }
-        let sha_str = String::from_utf8_lossy(sha).to_string();
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(&self.source)
-            .arg("cat-file")
-            .arg("-s")
-            .arg(&sha_str)
-            .output();
-        let size = match output {
-            Ok(out) if out.status.success() => std::str::from_utf8(&out.stdout)
-                .ok()
-                .and_then(|s| s.trim().parse::<usize>().ok())
-                .unwrap_or(0),
-            _ => 0,
+        let size = match self.query_size_via_batch(sha) {
+            Ok(sz) => sz,
+            Err(_) => 0,
         };
         if size > max {
             self.oversize.insert(sha.to_vec());
@@ -336,6 +388,19 @@ impl BlobSizeTracker {
     #[cfg(test)]
     pub(crate) fn prefetch_success(&self) -> bool {
         self.prefetch_ok
+    }
+}
+
+struct BatchCat {
+    child: std::process::Child,
+    stdin: BufWriter<std::process::ChildStdin>,
+    stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl Drop for BatchCat {
+    fn drop(&mut self) {
+        // Best-effort shutdown
+        let _ = self.child.kill();
     }
 }
 
@@ -1404,6 +1469,73 @@ mod tests {
         let tracker = BlobSizeTracker::new(&opts);
         assert!(tracker.prefetch_success());
         assert!(!tracker.known_oversize(b"0000000000000000000000000000000000000000"));
+    }
+
+    #[test]
+    fn test_blob_size_tracker_batch_mode_query() {
+        let temp_dir = TempDir::new().unwrap();
+        let repo_path = temp_dir.path();
+
+        std::process::Command::new("git")
+            .args(["init", repo_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+
+        for (key, value) in [
+            ("user.name", "Blob Size Tester"),
+            ("user.email", "blob-size@example.com"),
+        ] {
+            let status = std::process::Command::new("git")
+                .args(["-C", repo_path.to_str().unwrap(), "config", key, value])
+                .status()
+                .expect("failed to configure git test repo");
+            assert!(status.success(), "failed to set git config {key}");
+        }
+
+        let large_path = repo_path.join("large2.bin");
+        std::fs::write(&large_path, vec![b'a'; 8192]).unwrap();
+        let status = std::process::Command::new("git")
+            .args(["-C", repo_path.to_str().unwrap(), "add", "."])
+            .status()
+            .expect("failed to add files to git test repo");
+        assert!(status.success(), "git add failed for test repo");
+        let status = std::process::Command::new("git")
+            .args([
+                "-C",
+                repo_path.to_str().unwrap(),
+                "commit",
+                "-m",
+                "add files",
+            ])
+            .status()
+            .expect("failed to commit files in git test repo");
+        assert!(status.success(), "git commit failed for test repo");
+
+        let ls_tree = std::process::Command::new("git")
+            .args(["-C", repo_path.to_str().unwrap(), "ls-tree", "-r", "HEAD"])
+            .output()
+            .unwrap();
+        let listing = String::from_utf8(ls_tree.stdout).unwrap();
+        let mut large_sha = None;
+        for line in listing.lines() {
+            if let Some((meta, _path)) = line.split_once('\t') {
+                let mut parts = meta.split_whitespace();
+                let _mode = parts.next();
+                let kind = parts.next();
+                let sha = parts.next();
+                if kind == Some("blob") {
+                    large_sha = sha.map(|s| s.as_bytes().to_vec());
+                }
+            }
+        }
+        let large_sha = large_sha.expect("blob sha");
+
+        let mut opts = create_test_opts(repo_path.to_str().unwrap());
+        opts.max_blob_size = Some(1024);
+        let mut tracker = BlobSizeTracker::new(&opts);
+        // Force the fallback path (pretend prefetch did not run)
+        tracker.prefetch_ok = false;
+        assert!(tracker.is_oversize(&large_sha));
     }
 
     #[test]

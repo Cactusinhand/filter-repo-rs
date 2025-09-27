@@ -311,21 +311,36 @@ impl fmt::Display for SanityCheckError {
                 }
                 write!(f, "Use --force to bypass this check.")
             }
-            SanityCheckError::ReflogTooManyEntries {
-                problematic_reflogs,
-            } => {
+            SanityCheckError::ReflogTooManyEntries { problematic_reflogs } => {
+                let total = problematic_reflogs.len();
                 write!(
                     f,
-                    "Repository is not fresh (multiple reflog entries detected):\n"
+                    "Repository is not fresh (multiple reflog entries detected in {} refs).\n",
+                    total
                 )?;
-                for (reflog_name, entry_count) in problematic_reflogs {
-                    write!(f, "  {}: {} entries\n", reflog_name, entry_count)?;
+                // Only show examples in debug mode to avoid overwhelming output
+                let show_examples = std::env::var("FRRS_DEBUG")
+                    .ok()
+                    .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
+                    .unwrap_or(false);
+                if show_examples && total > 0 {
+                    let limit = 20usize.min(total);
+                    write!(f, "Examples ({} of {}):\n", limit, total)?;
+                    for (name, cnt) in problematic_reflogs.iter().take(limit) {
+                        write!(f, "  {}: {} entries\n", name, cnt)?;
+                    }
                 }
                 write!(
                     f,
-                    "Expected fresh clone with at most one entry per reflog.\n"
+                    "Expected a fresh clone (at most one entry per reflog).\n",
                 )?;
-                write!(f, "Consider using a fresh clone or git gc to clean up.\n")?;
+                write!(
+                    f,
+                    "Consider using a fresh clone, or run 'git reflog expire --expire=now --all' and 'git gc --prune=now'.\n",
+                )?;
+                if !show_examples {
+                    write!(f, "Set FRRS_DEBUG=1 to see example refs.\n")?;
+                }
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::UnpushedChanges { unpushed_branches } => {
@@ -2376,7 +2391,23 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
     result?;
     checks_performed += 1;
 
-    // Create context once to avoid repeated Git command executions
+    // Quick repo checks: ensure source/target are git repositories
+    debug_manager.log_message("Validating target git repository");
+    let result = quick_repo_checks(&opts.target);
+    debug_manager.log_sanity_check("quick_repo_checks", &result);
+    result?;
+    checks_performed += 1;
+
+    // Before constructing heavy context, run quick worktree checks to fail fast (target and, if different, source)
+    debug_manager.log_message("Running quick worktree checks on target (cleanliness/untracked)");
+    let result = early_worktree_checks(dir);
+    debug_manager.log_sanity_check("early_worktree_checks", &result);
+    result?;
+    checks_performed += 1;
+
+    // Note: preflight focuses on target. Source validity is verified later in pipeline setup.
+
+    // Create context once to avoid repeated Git command executions (potentially expensive)
     debug_manager.log_message("Creating sanity check context");
     let ctx = SanityCheckContext::new(dir)?;
     debug_manager.log_context_creation(&ctx);
@@ -2493,6 +2524,81 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
     let total_duration = preflight_start.elapsed();
     debug_manager.log_preflight_summary(total_duration, checks_performed);
 
+    Ok(())
+}
+
+/// Fast-path checks that do not require constructing the full context.
+///
+/// Runs cleanliness and untracked checks early to avoid users waiting on
+/// heavy ref/reflog scans when the working tree is obviously not ready.
+fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
+    // Skip for bare repositories
+    let is_bare = gitutil::is_bare_repository(dir).unwrap_or(false);
+    if is_bare {
+        return Ok(());
+    }
+
+    let executor = GitCommandExecutor::new(dir);
+
+    // Staged changes
+    let staged_dirty = match executor.run_command(&["diff", "--staged", "--quiet"]) {
+        Ok(_) => false,
+        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true,
+        Err(e) => {
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check staged changes: {e}"),
+            )));
+        }
+    };
+
+    // Unstaged changes
+    let unstaged_dirty = match executor.run_command(&["diff", "--quiet"]) {
+        Ok(_) => false,
+        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true,
+        Err(e) => {
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check unstaged changes: {e}"),
+            )));
+        }
+    };
+    if staged_dirty || unstaged_dirty {
+        return Err(SanityCheckError::WorkingTreeNotClean {
+            staged_dirty,
+            unstaged_dirty,
+        });
+    }
+
+    // Untracked files (honor ignore rules; summarize directories)
+    match executor.run_command(&["ls-files", "-o", "--exclude-standard", "--directory"]) {
+        Ok(output) => {
+            let files: Vec<String> = output
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            if !files.is_empty() {
+                return Err(SanityCheckError::UntrackedFiles { files });
+            }
+        }
+        Err(GitCommandError::ExecutionFailed { .. }) => {
+            // Treat as no untracked on benign failures
+        }
+        Err(e) => {
+            return Err(SanityCheckError::IoError(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to check untracked files: {e}"),
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Ensure both source and target are git repositories before any heavy checks.
+fn quick_repo_checks(target: &Path) -> Result<(), SanityCheckError> {
+    let _ = gitutil::git_dir(target).map_err(SanityCheckError::from)?;
     Ok(())
 }
 #[cfg(test)]

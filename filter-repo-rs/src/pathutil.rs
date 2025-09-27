@@ -121,6 +121,19 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Encode a repository path for git fast-import:
+/// - Apply Windows filename sanitization (on Windows builds)
+/// - Apply C-style quoting if needed (spaces, control, non-ASCII, quotes, backslashes)
+#[allow(dead_code)]
+pub fn encode_path_for_fi(bytes: &[u8]) -> Vec<u8> {
+    let win = sanitize_invalid_windows_path_bytes(bytes);
+    let safe = sanitize_fast_import_path_bytes(&win);
+    if needs_c_style_quote(&safe) {
+        enquote_c_style_bytes(&safe)
+    } else {
+        safe
+    }
+}
 /// Sanitize bytes that git fast-import rejects in pathnames.
 ///
 /// Map ASCII control bytes (0x00..=0x1F, 0x7F) to underscores. This avoids
