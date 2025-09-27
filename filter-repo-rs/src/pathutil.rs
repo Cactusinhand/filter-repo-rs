@@ -140,6 +140,17 @@ pub fn sanitize_fast_import_path_bytes(p: &[u8]) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
+pub fn sanitize_and_encode_path_for_import(path: &[u8]) -> Vec<u8> {
+    let win = sanitize_invalid_windows_path_bytes(path);
+    let safe = sanitize_fast_import_path_bytes(&win);
+    if needs_c_style_quote(&safe) {
+        enquote_c_style_bytes(&safe)
+    } else {
+        safe
+    }
+}
+
+#[allow(dead_code)]
 pub fn needs_c_style_quote(bytes: &[u8]) -> bool {
     // Quote conservatively for fast-import: any space/control/non-ASCII, backslash or quotes
     for &b in bytes {

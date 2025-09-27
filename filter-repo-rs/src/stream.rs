@@ -733,13 +733,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     if drop_inline {
                         // Replace previously appended M inline line with a sanitized deletion
                         commit_buf.truncate(pos);
-                        let win = crate::pathutil::sanitize_invalid_windows_path_bytes(&path_bytes);
-                        let safe = crate::pathutil::sanitize_fast_import_path_bytes(&win);
-                        let enc = if crate::pathutil::needs_c_style_quote(&safe) {
-                            crate::pathutil::enquote_c_style_bytes(&safe)
-                        } else {
-                            safe
-                        };
+                        let enc =
+                            crate::pathutil::sanitize_and_encode_path_for_import(&path_bytes);
                         commit_buf.extend_from_slice(b"D ");
                         commit_buf.extend_from_slice(&enc);
                         commit_buf.push(b'\n');
@@ -762,12 +757,16 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             let mut changed = false;
                             if let Some(r) = &content_replacer {
                                 let tmp = r.apply(new_payload.clone());
-                                changed |= tmp != new_payload;
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
                                 new_payload = tmp;
                             }
                             if let Some(rr) = &content_regex_replacer {
                                 let tmp = rr.apply_regex(new_payload.clone());
-                                changed |= tmp != new_payload;
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
                                 new_payload = tmp;
                             }
                             let header = format!("data {}\n", new_payload.len());
@@ -898,13 +897,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 if drop_path {
                     // Emit deletion for the path (sanitize + quote)
                     let raw = &bytes[path_start..];
-                    let win = crate::pathutil::sanitize_invalid_windows_path_bytes(raw);
-                    let safe = crate::pathutil::sanitize_fast_import_path_bytes(&win);
-                    let enc = if crate::pathutil::needs_c_style_quote(&safe) {
-                        crate::pathutil::enquote_c_style_bytes(&safe)
-                    } else {
-                        safe
-                    };
+                    let enc = crate::pathutil::sanitize_and_encode_path_for_import(raw);
                     commit_buf.extend_from_slice(b"D ");
                     commit_buf.extend_from_slice(&enc);
                     commit_buf.push(b'\n');
@@ -1090,12 +1083,16 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         let mut changed = false;
                         if let Some(r) = &content_replacer {
                             let tmp = r.apply(new_payload.clone());
-                            changed |= tmp != new_payload;
+                            if !changed {
+                                changed = tmp != new_payload;
+                            }
                             new_payload = tmp;
                         }
                         if let Some(rr) = &content_regex_replacer {
                             let tmp = rr.apply_regex(new_payload.clone());
-                            changed |= tmp != new_payload;
+                            if !changed {
+                                changed = tmp != new_payload;
+                            }
                             new_payload = tmp;
                         }
                         let header = format!("data {}\n", new_payload.len());
