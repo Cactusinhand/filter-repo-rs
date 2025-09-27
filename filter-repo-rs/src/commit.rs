@@ -1,5 +1,4 @@
 use std::collections::{BTreeSet, HashMap};
-use std::fs::File;
 use std::io::BufReader;
 use std::io::{self, Read, Write};
 use std::process::{ChildStdin, ChildStdout};
@@ -122,8 +121,8 @@ pub fn process_commit_line(
     line: &[u8],
     opts: &Options,
     fe_out: &mut BufReader<ChildStdout>,
-    orig_file: &mut File,
-    filt_file: &mut File,
+    orig_file: Option<&mut dyn Write>,
+    filt_file: &mut dyn Write,
     mut fi_in: Option<&mut ChildStdin>,
     replacer: &Option<MessageReplacer>,
     short_mapper: Option<&ShortHashMapper>,
@@ -348,7 +347,7 @@ fn parse_merge_mark(line: &[u8]) -> Option<u32> {
 pub fn handle_commit_data(
     header_line: &[u8],
     fe_out: &mut BufReader<ChildStdout>,
-    orig_file: &mut File,
+    orig_file: Option<&mut dyn Write>,
     commit_buf: &mut Vec<u8>,
     replacer: &Option<MessageReplacer>,
     short_mapper: Option<&ShortHashMapper>,
@@ -364,7 +363,9 @@ pub fn handle_commit_data(
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
     let mut payload = vec![0u8; n];
     fe_out.read_exact(&mut payload)?;
-    orig_file.write_all(&payload)?;
+    if let Some(f) = orig_file {
+        f.write_all(&payload)?;
+    }
     let mut new_payload = if let Some(r) = replacer {
         r.apply(payload)
     } else {

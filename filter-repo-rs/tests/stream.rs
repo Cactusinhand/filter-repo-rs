@@ -54,10 +54,10 @@ done
     let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
 
     assert!(filtered.contains("M 100644 :1 \"prefix/sp ace.txt\""));
-    assert!(filtered.contains("M 100644 :1 \"prefix/old\\001.txt\""));
+    assert!(filtered.contains("M 100644 :1 prefix/old_.txt"));
     assert!(filtered.contains("D \"prefix/removed space.txt\""));
     assert!(filtered.contains("C \"prefix/sp ace.txt\" \"prefix/dup space.txt\""));
-    assert!(filtered.contains("R \"prefix/old\\001.txt\" \"prefix/final\\001name.txt\""));
+    assert!(filtered.contains("R prefix/old_.txt prefix/final_name.txt"));
 }
 
 #[test]

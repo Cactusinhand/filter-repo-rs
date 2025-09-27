@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -357,8 +357,17 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     if !debug_dir.exists() {
         create_dir_all(&debug_dir)?;
     }
-    let mut orig_file = File::create(debug_dir.join("fast-export.original"))?;
-    let mut filt_file = File::create(debug_dir.join("fast-export.filtered"))?;
+    // Always produce filtered stream for downstream tooling/tests
+    let mut filt_file = BufWriter::new(File::create(debug_dir.join("fast-export.filtered"))?);
+    // Original stream is heavy I/O; only write when useful for debugging/reporting
+    let write_original = opts.debug_mode || opts.write_report || opts.max_blob_size.is_some();
+    let mut orig_file_opt: Option<BufWriter<File>> = if write_original {
+        Some(BufWriter::new(File::create(
+            debug_dir.join("fast-export.original"),
+        )?))
+    } else {
+        None
+    };
 
     let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
     let mut fe = fe_cmd.spawn().expect("failed to spawn git fast-export");
@@ -484,8 +493,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             break;
         }
 
-        // Always mirror original header/line
-        orig_file.write_all(&line)?;
+        // Mirror original header/line when enabled
+        if let Some(ref mut f) = orig_file_opt {
+            f.write_all(&line)?;
+        }
 
         // If swallowing a skipped annotated tag block, consume its lines and payload
         if skipping_tag_block {
@@ -500,8 +511,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     })?;
                 let mut payload = vec![0u8; n];
                 fe_out.read_exact(&mut payload)?;
-                // Mirror original payload to debug file
-                orig_file.write_all(&payload)?;
+                // Mirror original payload to debug file (when enabled)
+                if let Some(ref mut f) = orig_file_opt {
+                    f.write_all(&payload)?;
+                }
                 // Done skipping this tag block
                 skipping_tag_block = false;
             }
@@ -590,8 +603,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             crate::tag::process_tag_block(
                 &line,
                 &mut fe_out,
-                &mut orig_file,
-                &mut filt_file,
+                orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                &mut filt_file as &mut dyn Write,
                 if let Some(ref mut fi_in) = fi_in_opt {
                     Some(fi_in)
                 } else {
@@ -645,8 +658,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     b"\n",
                     opts,
                     &mut fe_out,
-                    &mut orig_file,
-                    &mut filt_file,
+                    orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                    &mut filt_file as &mut dyn Write,
                     if let Some(ref mut fi_in) = fi_in_opt {
                         Some(fi_in)
                     } else {
@@ -707,8 +720,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         })?;
                     let mut payload = vec![0u8; n];
                     fe_out.read_exact(&mut payload)?;
-                    // Mirror original payload to debug file
-                    orig_file.write_all(&payload)?;
+                    // Mirror original payload to debug file (when enabled)
+                    if let Some(ref mut f) = orig_file_opt {
+                        f.write_all(&payload)?;
+                    }
                     let mut drop_inline = false;
                     if let Some(max) = opts.max_blob_size {
                         if n > max {
@@ -716,10 +731,14 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         }
                     }
                     if drop_inline {
-                        // Replace previously appended M inline line with a deletion
+                        // Replace previously appended M inline line with a sanitized deletion
                         commit_buf.truncate(pos);
+                        let decoded =
+                            crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
+                        let enc =
+                            crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
                         commit_buf.extend_from_slice(b"D ");
-                        commit_buf.extend_from_slice(&path_bytes);
+                        commit_buf.extend_from_slice(&enc);
                         commit_buf.push(b'\n');
                         commit_has_changes = true;
                         // Record report sample for size-based strip
@@ -731,28 +750,38 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         continue;
                     } else {
                         // Keep inline content: apply --replace-text (literal then regex) and append
-                        let mut new_payload = payload.clone();
-                        let mut changed = false;
-                        if let Some(r) = &content_replacer {
-                            let tmp = r.apply(new_payload.clone());
-                            changed |= tmp != new_payload;
-                            new_payload = tmp;
-                        }
-                        if let Some(rr) = &content_regex_replacer {
-                            let tmp = rr.apply_regex(new_payload.clone());
-                            changed |= tmp != new_payload;
-                            new_payload = tmp;
-                        }
-                        let header = format!("data {}\n", new_payload.len());
-                        commit_buf.extend_from_slice(header.as_bytes());
-                        commit_buf.extend_from_slice(&new_payload);
-                        if changed {
-                            if samples_modified.len() < REPORT_SAMPLE_LIMIT
-                                && !samples_modified.iter().any(|p| p == &path_bytes)
-                            {
-                                samples_modified.push(path_bytes.clone());
+                        if content_replacer.is_none() && content_regex_replacer.is_none() {
+                            let header = format!("data {}\n", payload.len());
+                            commit_buf.extend_from_slice(header.as_bytes());
+                            commit_buf.extend_from_slice(&payload);
+                        } else {
+                            let mut new_payload = payload;
+                            let mut changed = false;
+                            if let Some(r) = &content_replacer {
+                                let tmp = r.apply(new_payload.clone());
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
+                                new_payload = tmp;
                             }
-                            inline_modified_paths.insert(path_bytes.clone());
+                            if let Some(rr) = &content_regex_replacer {
+                                let tmp = rr.apply_regex(new_payload.clone());
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
+                                new_payload = tmp;
+                            }
+                            let header = format!("data {}\n", new_payload.len());
+                            commit_buf.extend_from_slice(header.as_bytes());
+                            commit_buf.extend_from_slice(&new_payload);
+                            if changed {
+                                if samples_modified.len() < REPORT_SAMPLE_LIMIT
+                                    && !samples_modified.iter().any(|p| p == &path_bytes)
+                                {
+                                    samples_modified.push(path_bytes.clone());
+                                }
+                                inline_modified_paths.insert(path_bytes.clone());
+                            }
                         }
                         commit_has_changes = true;
                         continue;
@@ -868,11 +897,13 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     }
                 }
                 if drop_path {
-                    // Emit deletion for the path
-                    let mut del = Vec::with_capacity(2 + bytes.len() - path_start);
-                    del.extend_from_slice(b"D ");
-                    del.extend_from_slice(&bytes[path_start..]);
-                    commit_buf.extend_from_slice(&del);
+                    // Emit deletion for the path (sanitize + quote)
+                    let raw = &bytes[path_start..];
+                    let decoded = crate::pathutil::decode_fast_export_path_bytes(raw);
+                    let enc = crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
+                    commit_buf.extend_from_slice(b"D ");
+                    commit_buf.extend_from_slice(&enc);
+                    commit_buf.push(b'\n');
                     commit_has_changes = true;
                     let path_bytes = &bytes[path_start..].to_vec();
                     let (mut r_size, mut r_sha) = (reason_size, reason_sha);
@@ -904,8 +935,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 &line,
                 opts,
                 &mut fe_out,
-                &mut orig_file,
-                &mut filt_file,
+                orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                &mut filt_file as &mut dyn Write,
                 if let Some(ref mut fi_in) = fi_in_opt {
                     Some(fi_in)
                 } else {
@@ -960,8 +991,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
             let mut payload = vec![0u8; n];
             fe_out.read_exact(&mut payload)?;
-            // Always mirror to original
-            orig_file.write_all(&payload)?;
+            // Always mirror to original (when enabled)
+            if let Some(ref mut f) = orig_file_opt {
+                f.write_all(&payload)?;
+            }
             if in_blob {
                 let mut skip_blob = false;
                 let mut reason_size = false;
@@ -1025,43 +1058,71 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             }
                         }
                     }
-                    // Forward header/payload (apply --replace-text if provided). Apply literal first, then optional regex; track whether modified.
-                    let mut new_payload = payload.clone();
-                    let mut changed = false;
-                    if let Some(r) = &content_replacer {
-                        let tmp = r.apply(new_payload.clone());
-                        changed |= tmp != new_payload;
-                        new_payload = tmp;
-                    }
-                    if let Some(rr) = &content_regex_replacer {
-                        let tmp = rr.apply_regex(new_payload.clone());
-                        changed |= tmp != new_payload;
-                        new_payload = tmp;
-                    }
-                    let header = format!("data {}\n", new_payload.len());
-                    filt_file.write_all(header.as_bytes())?;
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        if let Err(e) = fi_in.write_all(header.as_bytes()) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                import_broken = true;
-                            } else {
-                                return Err(e.into());
+                    if content_replacer.is_none() && content_regex_replacer.is_none() {
+                        let header = format!("data {}\n", payload.len());
+                        filt_file.write_all(header.as_bytes())?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(header.as_bytes()) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                } else {
+                                    return Err(e.into());
+                                }
                             }
                         }
-                    }
-                    filt_file.write_all(&new_payload)?;
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        if let Err(e) = fi_in.write_all(&new_payload) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                import_broken = true;
-                            } else {
-                                return Err(e.into());
+                        filt_file.write_all(&payload)?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(&payload) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                } else {
+                                    return Err(e.into());
+                                }
                             }
                         }
-                    }
-                    if changed {
-                        if let Some(m) = last_blob_mark {
-                            modified_marks.insert(m);
+                    } else {
+                        // Forward header/payload with replacements; track whether modified
+                        let mut new_payload = payload;
+                        let mut changed = false;
+                        if let Some(r) = &content_replacer {
+                            let tmp = r.apply(new_payload.clone());
+                            if !changed {
+                                changed = tmp != new_payload;
+                            }
+                            new_payload = tmp;
+                        }
+                        if let Some(rr) = &content_regex_replacer {
+                            let tmp = rr.apply_regex(new_payload.clone());
+                            if !changed {
+                                changed = tmp != new_payload;
+                            }
+                            new_payload = tmp;
+                        }
+                        let header = format!("data {}\n", new_payload.len());
+                        filt_file.write_all(header.as_bytes())?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(header.as_bytes()) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                } else {
+                                    return Err(e.into());
+                                }
+                            }
+                        }
+                        filt_file.write_all(&new_payload)?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(&new_payload) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                } else {
+                                    return Err(e.into());
+                                }
+                            }
+                        }
+                        if changed {
+                            if let Some(m) = last_blob_mark {
+                                modified_marks.insert(m);
+                            }
                         }
                     }
                     // Record emitted blob mark
@@ -1106,7 +1167,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             crate::finalize::flush_lightweight_tag_resets(
                 &mut buffered_tag_resets,
                 &annotated_tag_refs,
-                &mut filt_file,
+                &mut filt_file as &mut dyn Write,
                 if let Some(ref mut fi_in) = fi_in_opt {
                     Some(fi_in)
                 } else {
@@ -1204,6 +1265,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     drop(fi_out_opt);
 
     // Finalize run: flush buffered tags (if any remain), wait, write maps, optional reset
+    // Flush original stream (if present) so finalize can read it for reporting/sampling
+    if let Some(ref mut of) = orig_file_opt {
+        of.flush()?;
+    }
     let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
     crate::finalize::finalize(
         opts,
@@ -1214,7 +1279,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         annotated_tag_refs,
         updated_branch_refs,
         branch_reset_targets,
-        &mut filt_file,
+        &mut filt_file as &mut dyn Write,
         fi_in_opt,
         &mut fe,
         fi.as_mut().map(|c| c),

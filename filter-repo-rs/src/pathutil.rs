@@ -121,6 +121,54 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Sanitize bytes that git fast-import rejects in pathnames.
+///
+/// Map ASCII control bytes (0x00..=0x1F, 0x7F) to underscores. This avoids
+/// fast-import fatal errors like "invalid path" caused by control characters,
+/// while preserving other bytes which are re-quoted later if needed.
+#[allow(dead_code)]
+pub fn sanitize_fast_import_path_bytes(p: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(p.len());
+    for &b in p {
+        let mapped = match b {
+            0x00..=0x1F | 0x7F => b'_',
+            _ => b,
+        };
+        out.push(mapped);
+    }
+    out
+}
+
+#[allow(dead_code)]
+pub fn sanitize_and_encode_path_for_import(path: &[u8]) -> Vec<u8> {
+    let win = sanitize_invalid_windows_path_bytes(path);
+    let safe = sanitize_fast_import_path_bytes(&win);
+    if needs_c_style_quote(&safe) {
+        enquote_c_style_bytes(&safe)
+    } else {
+        safe
+    }
+}
+
+#[allow(dead_code)]
+pub fn decode_fast_export_path_bytes(path: &[u8]) -> Vec<u8> {
+    let mut trimmed = path;
+    if let Some(last) = trimmed.last() {
+        if *last == b'\n' {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        }
+    }
+    if let (Some(first), Some(last)) = (trimmed.first(), trimmed.last()) {
+        if *first == b'"' && *last == b'"' && trimmed.len() >= 2 {
+            return dequote_c_style_bytes(&trimmed[1..trimmed.len() - 1]);
+        }
+    }
+    if trimmed.first() == Some(&b'"') {
+        return dequote_c_style_bytes(&trimmed[1..]);
+    }
+    trimmed.to_vec()
+}
+
 #[allow(dead_code)]
 pub fn needs_c_style_quote(bytes: &[u8]) -> bool {
     // Quote conservatively for fast-import: any space/control/non-ASCII, backslash or quotes
