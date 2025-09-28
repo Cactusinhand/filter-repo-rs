@@ -383,7 +383,7 @@ Rust 实现位置
 
 测试用例
 
-- `merge_parents_dedup_when_side_branch_pruned`：`filter-repo-rs/tests/merge.rs:1`
+- `merge_parents_dedup_when_side_branch_pruned` in `filter-repo-rs/tests/merge.rs`:
   - 场景：功能分支的所有改动被路径过滤掉，仅保留主分支文件。最终合并提交的父列表被去重并剔除无效侧分支，只剩 1 个父；由于该合并包含对保留路径的实际改动，因此仍作为普通提交保留。
 
 与 Python 版本对比
