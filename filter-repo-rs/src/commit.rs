@@ -408,12 +408,18 @@ fn finalize_parent_lines(
         return 0;
     }
 
-    let mut replacements: Vec<Option<Vec<u8>>> = Vec::with_capacity(parent_lines.len());
+    enum ParentReplacement {
+        Canonical { canonical: u32, kind: ParentKind },
+        Raw(Vec<u8>),
+    }
+
+    let mut replacements: Vec<Option<ParentReplacement>> = Vec::with_capacity(parent_lines.len());
     let mut seen_canonical: BTreeSet<u32> = BTreeSet::new();
-    let mut first_kept: Option<u32> = None;
+    let mut first_kept_mark: Option<u32> = None;
+    let mut first_kept_idx: Option<usize> = None;
     let mut kept_count: usize = 0;
 
-    for parent in parent_lines.iter() {
+    for (idx, parent) in parent_lines.iter().enumerate() {
         if let Some(mark) = parent.mark {
             let canonical = resolve_canonical_mark(mark, alias_map);
             if !emitted_marks.contains(&canonical) {
@@ -424,26 +430,55 @@ fn finalize_parent_lines(
                 replacements.push(None);
                 continue;
             }
-            if first_kept.is_none() {
-                first_kept = Some(canonical);
+            if first_kept_idx.is_none() {
+                first_kept_idx = Some(idx);
+                first_kept_mark = Some(canonical);
             }
-            replacements.push(Some(rebuild_parent_line(parent.kind, canonical)));
+            replacements.push(Some(ParentReplacement::Canonical {
+                canonical,
+                kind: parent.kind,
+            }));
             kept_count += 1;
         } else {
             let line = commit_buf[parent.start..parent.end].to_vec();
-            replacements.push(Some(line));
+            if first_kept_idx.is_none() {
+                first_kept_idx = Some(idx);
+            }
+            replacements.push(Some(ParentReplacement::Raw(line)));
             kept_count += 1;
         }
     }
 
     let mut new_buf = Vec::with_capacity(commit_buf.len());
     let mut cursor = 0usize;
-    for (parent, replacement) in parent_lines.iter().zip(replacements.into_iter()) {
+    for (idx, (parent, replacement)) in parent_lines
+        .iter()
+        .zip(replacements.into_iter())
+        .enumerate()
+    {
         if cursor < parent.start {
             new_buf.extend_from_slice(&commit_buf[cursor..parent.start]);
         }
-        if let Some(bytes) = replacement {
-            new_buf.extend_from_slice(&bytes);
+        if let Some(replacement) = replacement {
+            match replacement {
+                ParentReplacement::Canonical { canonical, kind } => {
+                    let effective_kind = if Some(idx) == first_kept_idx {
+                        ParentKind::From
+                    } else {
+                        kind
+                    };
+                    new_buf.extend_from_slice(&rebuild_parent_line(effective_kind, canonical));
+                }
+                ParentReplacement::Raw(mut bytes) => {
+                    if Some(idx) == first_kept_idx && bytes.starts_with(b"merge ") {
+                        let mut rebuilt = Vec::with_capacity(bytes.len());
+                        rebuilt.extend_from_slice(b"from ");
+                        rebuilt.extend_from_slice(&bytes[b"merge ".len()..]);
+                        bytes = rebuilt;
+                    }
+                    new_buf.extend_from_slice(&bytes);
+                }
+            }
         }
         cursor = parent.end;
     }
@@ -453,7 +488,7 @@ fn finalize_parent_lines(
 
     *commit_buf = new_buf;
     parent_lines.clear();
-    *first_parent_mark = first_kept;
+    *first_parent_mark = first_kept_mark;
     kept_count
 }
 
@@ -477,4 +512,61 @@ fn resolve_canonical_mark(mark: u32, alias_map: &HashMap<u32, u32>) -> u32 {
         current = next;
     }
     current
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn finalize_promotes_first_remaining_merge_to_from() {
+        let mut commit_buf = b"from :1\nmerge :2\n".to_vec();
+        let first_line_len = b"from :1\n".len();
+        let total_len = commit_buf.len();
+        let mut parent_lines = vec![
+            ParentLine::new(0, first_line_len, Some(1), ParentKind::From),
+            ParentLine::new(first_line_len, total_len, Some(2), ParentKind::Merge),
+        ];
+        let mut first_parent_mark = Some(1);
+        let emitted_marks: HashSet<u32> = [2u32].into_iter().collect();
+        let alias_map: HashMap<u32, u32> = HashMap::new();
+
+        let kept = finalize_parent_lines(
+            &mut commit_buf,
+            &mut parent_lines,
+            &mut first_parent_mark,
+            &emitted_marks,
+            &alias_map,
+        );
+
+        assert_eq!(kept, 1);
+        assert_eq!(commit_buf, b"from :2\n");
+        assert_eq!(first_parent_mark, Some(2));
+    }
+
+    #[test]
+    fn finalize_promotes_raw_merge_to_from() {
+        let mut commit_buf = b"merge deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n".to_vec();
+        let total_len = commit_buf.len();
+        let mut parent_lines = vec![ParentLine::new(0, total_len, None, ParentKind::Merge)];
+        let mut first_parent_mark = Some(42);
+        let emitted_marks: HashSet<u32> = HashSet::new();
+        let alias_map: HashMap<u32, u32> = HashMap::new();
+
+        let kept = finalize_parent_lines(
+            &mut commit_buf,
+            &mut parent_lines,
+            &mut first_parent_mark,
+            &emitted_marks,
+            &alias_map,
+        );
+
+        assert_eq!(kept, 1);
+        assert_eq!(
+            commit_buf,
+            b"from deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n"
+        );
+        assert_eq!(first_parent_mark, None);
+    }
 }

@@ -351,6 +351,54 @@ git symbolic-ref HEAD refs/heads/<branch-from-bundle>
   - 完整运行（非 `--partial`）前，将 `refs/remotes/origin/*` 迁移到 `refs/heads/*`。
   - 非敏感模式运行后移除 `origin`，避免误推旧历史；敏感模式可抓取所有引用（除非 `--no-fetch`），且保留 `origin`。
 
+合并修剪策略（Merge Simplification）
+-------------------------------
+
+核心概念
+
+- 去除无效父：当某些父提交因过滤未被发出，自动从合并提交中移除这些父引用。
+- 父提交去重：同一提交被多次引用时仅保留一次，保持父列表最小化与有序。
+- 退化合并简化：合并经修剪仅剩一个父时，它将降为普通提交；若该提交没有文件变化，将进一步被剪枝并以 `alias` 指向首父，保持历史连续性。
+
+Rust 实现位置
+
+- 父提交跟踪结构：`filter-repo-rs/src/commit.rs:72`
+  - `ParentLine { start, end, mark, kind }`，`kind` 区分 `From` 与 `Merge` 两类父行（`ParentKind` 定义见 `filter-repo-rs/src/commit.rs:91`）。
+- 解析父提交：`filter-repo-rs/src/commit.rs:120` 起的处理逻辑中，对 `from` 与 `merge` 行分别记录区间与 mark，并推入 `parent_lines`。
+- 修剪核心：`finalize_parent_lines()`（`filter-repo-rs/src/commit.rs:399`）
+  - 丢弃未发出的父（依据 `emitted_marks`）。
+  - 使用 `BTreeSet` 去重父 mark，保留首次出现的规范化 mark（经 `resolve_canonical_mark()` 展开别名）。
+  - 重建父行字节并覆盖提交缓冲，仅保留有效父；更新 `first_parent_mark` 与返回的父计数。
+- 提交保留判定：`should_keep_commit()`（`filter-repo-rs/src/commit.rs:384`）
+  - 如有文件变更、为根提交、无标记、或仍为合并（父数≥2）则保留；否则可剪枝。
+- 别名机制：`build_alias()`（`filter-repo-rs/src/commit.rs:395`）与在提交剪枝分支处写出 `alias` 语句，将被剪枝提交的旧 mark 映射到其首父（仅在首父已发出时生效）。
+
+关键规则与片段
+
+- 丢弃无效父：若父标记（经别名解析）不在 `emitted_marks` 中，则移除该父。
+- 父提交去重：对已见过的规范化 mark 不再追加，避免重复父。
+- 合并简化：修剪后若父数降至 1，提交不再被视为“合并”。此时：
+  - 若仍有文件变更，则保留为普通提交；
+  - 若无文件变更，则通过 `alias` 剪枝到首父，避免制造空节点。
+
+测试用例
+
+- `merge_parents_dedup_when_side_branch_pruned` in `filter-repo-rs/tests/merge.rs`:
+  - 场景：功能分支的所有改动被路径过滤掉，仅保留主分支文件。最终合并提交的父列表被去重并剔除无效侧分支，只剩 1 个父；由于该合并包含对保留路径的实际改动，因此仍作为普通提交保留。
+
+与 Python 版本对比
+
+- Python 版具备更丰富的合并检测/简化选项与回调；
+- Rust 版优势：
+  - 类型安全与内存安全，减少边界错误；
+  - 使用 `BTreeSet`/`HashMap` 做高效去重与别名追溯；
+  - 结构化错误处理与更明确的数据流。
+
+优缺点小结
+
+- 优点：核心规则完备、实现简洁、测试覆盖关键场景、性能良好。
+- 可改进：暴露更多策略开关（如更细粒度的合并保留/剪枝策略）、复杂拓扑的进一步优化、丰富修剪日志。
+
 产物
 ----
 
@@ -371,20 +419,20 @@ Windows 注意
 限制（原型）
 -----------
 
-- 未实现合并简化；尚未剪枝退化合并。
+- 合并修剪已覆盖常见场景，但对极端复杂拓扑的进一步策略与可配置项仍在规划中。
 - 尚无 `--state-branch`（仅导出 marks 到文件）。
 - Windows 路径策略固定为 “sanitize”（暂无 skip/error）。
 - 不计划实现回调 API；基于 mailmap 的身份重写仍可作为后续增强考虑。
 - `--replace-message` 仅支持字面值规则；正则支持计划中。
 - 已启用短哈希重写；`--preserve-commit-hashes` 开关计划中。
-- 尚未支持人类可读大小（如 `5M`）。
+  
 
 路线图 / TODO（与 Python 版对齐）
 ------------------------------
 
 - 路径能力：`--paths-from-file`、`--use-base-name`、`--path-rename-match`/正则改名
 - 消息：`--replace-message` 支持 `regex:`；`--preserve-commit-hashes`
-- 大小参数：支持 `5M`/`2G` 等，并提供 `--strip-blobs-bigger-than` 别名
+- 大小参数：已支持 `K`/`M`/`G` 后缀；考虑提供 `--strip-blobs-bigger-than` 别名
 - 身份：mailmap（`--mailmap`、`--use-mailmap`）
 - 合并：在保证祖先正确性的前提下裁剪退化合并
 - replace-refs 与增量：`--replace-refs …`、`--state-branch`、stash（`refs/stash`）重写
