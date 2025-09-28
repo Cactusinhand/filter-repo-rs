@@ -14,7 +14,6 @@ const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
 /// Stage-3 toggle: set to `false` to disable legacy --analyze-*-warn overrides entirely.
 const LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED: bool = true;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupMode {
     None,
@@ -22,14 +21,12 @@ pub enum CleanupMode {
     Aggressive,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Filter,
     Analyze,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AnalyzeThresholds {
     pub warn_total_bytes: u64,
@@ -61,7 +58,6 @@ impl Default for AnalyzeThresholds {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AnalyzeConfig {
     pub json: bool,
@@ -147,7 +143,6 @@ impl AnalyzeOverrides {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Options {
     pub source: PathBuf,
@@ -312,7 +307,6 @@ mod tests {
     }
 }
 
-#[allow(dead_code)]
 pub fn parse_args() -> Options {
     use std::env;
     let mut args: Vec<String> = env::args().skip(1).collect();
@@ -1274,7 +1268,6 @@ fn get_misc_help_section() -> HelpSection {
     }
 }
 
-#[allow(dead_code)]
 pub fn print_help(debug_mode: bool) {
     println!("filter-repo-rs (prototype)");
     println!("Usage: filter-repo-rs [options]");
