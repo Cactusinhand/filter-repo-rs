@@ -121,6 +121,113 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Normalize CLI-supplied path-like strings to Git's internal style.
+///
+/// Rules:
+/// - Convert '\\' to '/' for all inputs (across platforms)
+/// - Disallow absolute paths (leading '/', Windows drive letters like 'C:', or UNC '//'/'\\\\')
+/// - Disallow any '.' or '..' segments
+/// - Return normalized bytes on success
+pub fn normalize_cli_path_str(s: &str, allow_empty: bool) -> Result<Vec<u8>, String> {
+    if s.is_empty() {
+        if allow_empty {
+            return Ok(Vec::new());
+        } else {
+            return Err("empty path not allowed".to_string());
+        }
+    }
+
+    // Detect absolute Windows drive paths early (e.g., C:\ or D:foo)
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Err(
+            "do not use absolute Windows drive paths; use repo-relative with '/'".to_string(),
+        );
+    }
+    // Detect UNC or POSIX absolute prefixes before slash normalization
+    if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with('/') {
+        return Err("do not use absolute paths; paths are relative to the repo toplevel and must not start with '/' or '//'".to_string());
+    }
+
+    // Normalize path separators: convert Windows '\\' to '/'
+    let mut out: Vec<u8> = s
+        .as_bytes()
+        .iter()
+        .map(|&b| if b == b'\\' { b'/' } else { b })
+        .collect();
+
+    // Re-check absolute after normalization (covers previously-UNC cases)
+    if out.first() == Some(&b'/') {
+        return Err(
+            "do not use absolute paths; paths are relative to the repo toplevel".to_string(),
+        );
+    }
+
+    // Disallow '.' or '..' segments anywhere
+    let mut start = 0usize;
+    for i in 0..=out.len() {
+        let at_end = i == out.len();
+        if at_end || out[i] == b'/' {
+            let seg = &out[start..i];
+            if seg == b"." || seg == b".." {
+                return Err(
+                    "do not use '.' or '..' in paths; specify repo-relative canonical paths"
+                        .to_string(),
+                );
+            }
+            start = i + 1;
+        }
+    }
+
+    Ok(out)
+}
+
+/// Normalize CLI-supplied glob patterns.
+///
+/// We convert '\\' to '/' and reject absolute prefixes and '.'/'..' segments
+/// similar to plain paths. Regex-specific escaping is not relevant here.
+pub fn normalize_cli_glob_str(s: &str) -> Result<Vec<u8>, String> {
+    // Allow empty? CLI enforces value presence; treat empty as error
+    if s.is_empty() {
+        return Err("empty glob not allowed".to_string());
+    }
+    // Same absolute checks
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Err(
+            "do not use absolute Windows drive paths in globs; use repo-relative with '/'"
+                .to_string(),
+        );
+    }
+    if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with('/') {
+        return Err("do not use absolute paths in globs; patterns are repo-relative".to_string());
+    }
+    let mut out: Vec<u8> = s
+        .as_bytes()
+        .iter()
+        .map(|&b| if b == b'\\' { b'/' } else { b })
+        .collect();
+    if out.first() == Some(&b'/') {
+        return Err("do not use absolute paths in globs; patterns are repo-relative".to_string());
+    }
+    // Disallow explicit '.' or '..' directory segments
+    let mut start = 0usize;
+    for i in 0..=out.len() {
+        let at_end = i == out.len();
+        if at_end || out[i] == b'/' {
+            let seg = &out[start..i];
+            if seg == b"." || seg == b".." {
+                return Err(
+                    "do not use '.' or '..' in globs; specify repo-relative canonical patterns"
+                        .to_string(),
+                );
+            }
+            start = i + 1;
+        }
+    }
+    Ok(out)
+}
+
 /// Encode a repository path for git fast-import:
 /// - Apply Windows filename sanitization (on Windows builds)
 /// - Apply C-style quoting if needed (spaces, control, non-ASCII, quotes, backslashes)

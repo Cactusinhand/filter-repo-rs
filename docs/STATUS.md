@@ -46,7 +46,10 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - `--path-rename OLD:NEW` with helpers:
     - `--subdirectory-filter DIR` (equivalent to `--path DIR/ --path-rename DIR/:`).
     - `--to-subdirectory-filter DIR` (equivalent to `--path-rename :DIR/`).
-  - Windows path sanitization when rebuilding filechange lines.
+- Windows path sanitization when rebuilding filechange lines.
+- CLI enforces Git-style path rules across platforms:
+  - converts '\' to '/' in `--path`, `--path-glob`, subdirectory filters, and path renames
+  - rejects absolute paths (leading '/', '//' or Windows drive/UNC), and '.'/'..' segments
 
 - Empty Commit Pruning & Merge Preservation
   - Prunes empty non-merge commits via fast-import `alias` of marks (old mark -> first parent), so downstream refs resolve.
