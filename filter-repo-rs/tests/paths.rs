@@ -358,3 +358,108 @@ fn windows_path_policy_sanitizes_or_preserves_bytes() {
         }
     }
 }
+
+#[test]
+fn cli_path_backslash_normalized_filter() {
+    let repo = init_repo();
+    write_file(&repo, "keep/one.txt", "1\n");
+    write_file(&repo, "drop/two.txt", "2\n");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "seed\n"]);
+
+    let (out, _inv) = run_cli_with_git_spy(&repo, &["--force", "--path", "keep\\"]);
+    assert!(out.status.success(), "cli failed: {:?}", out);
+    let (_c, tree, _e) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(tree.contains("keep/one.txt"));
+    assert!(!tree.contains("drop/two.txt"));
+}
+
+#[test]
+fn cli_glob_backslash_normalized_filter() {
+    let repo = init_repo();
+    write_file(&repo, "keep/a.txt", "a\n");
+    write_file(&repo, "keep/deep/b.txt", "b\n");
+    write_file(&repo, "keep/deep/b.md", "m\n");
+    write_file(&repo, "other/c.txt", "c\n");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "seed\n"]);
+
+    let (out, _inv) = run_cli_with_git_spy(
+        &repo,
+        &["--force", "--path-glob", "keep\\**\\*.txt"],
+    );
+    assert!(out.status.success(), "cli failed: {:?}", out);
+    let (_c, tree, _e) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(tree.contains("keep/a.txt"));
+    assert!(tree.contains("keep/deep/b.txt"));
+    assert!(!tree.contains("keep/deep/b.md"));
+    assert!(!tree.contains("other/c.txt"));
+}
+
+#[test]
+fn cli_subdir_filter_backslash_normalized() {
+    let repo = init_repo();
+    write_file(&repo, "dir/keep/file.txt", "x\n");
+    write_file(&repo, "dir2/drop/file.txt", "y\n");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "seed\n"]);
+
+    let (out, _inv) = run_cli_with_git_spy(
+        &repo,
+        &["--force", "--subdirectory-filter", "dir\\keep"],
+    );
+    assert!(out.status.success(), "cli failed: {:?}", out);
+    let (_c, tree, _e) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(
+        tree.contains("file.txt"),
+        "expected keep subtree flattened: {}",
+        tree
+    );
+    assert!(!tree.contains("dir2/drop/file.txt"));
+}
+
+#[test]
+fn cli_path_rejects_absolute_and_dot_segments() {
+    let repo = init_repo();
+    // Absolute POSIX style
+    let (out1, _inv1) = run_cli_with_git_spy(&repo, &["--path", "/abs/file"]);
+    assert_eq!(out1.status.code(), Some(2));
+
+    // Dot segment
+    let (out2, _inv2) = run_cli_with_git_spy(&repo, &["--path", "src/../file"]);
+    assert_eq!(out2.status.code(), Some(2));
+
+    // Windows drive
+    let (out3, _inv3) = run_cli_with_git_spy(&repo, &["--path", "C:\\foo"]);
+    assert_eq!(out3.status.code(), Some(2));
+}

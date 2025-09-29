@@ -8,6 +8,7 @@ use regex::bytes::Regex;
 use serde::Deserialize;
 
 use crate::gitutil::{self, GitCapabilities};
+use crate::pathutil::{normalize_cli_glob_str, normalize_cli_path_str};
 
 /// Stage-3 toggle: set to `false` to error out instead of accepting legacy cleanup syntax.
 const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
@@ -490,15 +491,30 @@ pub fn parse_args() -> Options {
                 opts.replace_text_file = Some(PathBuf::from(p));
             }
             "--path" => {
-                let p = it.next().expect("--path requires value");
-                opts.paths.push(p.into_bytes());
+                let raw = it.next().expect("--path requires value");
+                match normalize_cli_path_str(&raw, /*allow_empty=*/ false) {
+                    Ok(mut norm) => {
+                        // For directory prefixes, users often omit trailing '/'; keep as-is.
+                        opts.paths.push(std::mem::take(&mut norm));
+                    }
+                    Err(msg) => {
+                        eprintln!("invalid --path '{}': {}", raw, msg);
+                        std::process::exit(2);
+                    }
+                }
             }
             "--invert-paths" => {
                 opts.invert_paths = true;
             }
             "--path-glob" => {
-                let p = it.next().expect("--path-glob requires value");
-                opts.path_globs.push(p.into_bytes());
+                let raw = it.next().expect("--path-glob requires value");
+                match normalize_cli_glob_str(&raw) {
+                    Ok(mut norm) => opts.path_globs.push(std::mem::take(&mut norm)),
+                    Err(msg) => {
+                        eprintln!("invalid --path-glob '{}': {}", raw, msg);
+                        std::process::exit(2);
+                    }
+                }
             }
             "--path-regex" => {
                 let p = it.next().expect("--path-regex requires value");
@@ -517,12 +533,26 @@ pub fn parse_args() -> Options {
                     eprintln!("--path-rename expects OLD:NEW");
                     std::process::exit(2);
                 }
-                opts.path_renames
-                    .push((parts[0].as_bytes().to_vec(), parts[1].as_bytes().to_vec()));
+                let old = parts[0];
+                let new_ = parts[1];
+                let rename = normalize_cli_path_str(old, /*allow_empty=*/ true)
+                    .and_then(|old_n| {
+                        normalize_cli_path_str(new_, /*allow_empty=*/ true)
+                            .map(|new_n| (old_n, new_n))
+                    })
+                    .unwrap_or_else(|m| {
+                        eprintln!("invalid --path-rename '{}': {}", v, m);
+                        std::process::exit(2);
+                    });
+                opts.path_renames.push(rename);
             }
             "--subdirectory-filter" => {
                 let dir = it.next().expect("--subdirectory-filter requires DIRECTORY");
-                let mut d = dir.as_bytes().to_vec();
+                let mut d =
+                    normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
+                        eprintln!("invalid --subdirectory-filter '{}': {}", dir, m);
+                        std::process::exit(2);
+                    });
                 if !d.ends_with(b"/") {
                     d.push(b'/');
                 }
@@ -533,7 +563,11 @@ pub fn parse_args() -> Options {
                 let dir = it
                     .next()
                     .expect("--to-subdirectory-filter requires DIRECTORY");
-                let mut d = dir.as_bytes().to_vec();
+                let mut d =
+                    normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
+                        eprintln!("invalid --to-subdirectory-filter '{}': {}", dir, m);
+                        std::process::exit(2);
+                    });
                 if !d.ends_with(b"/") {
                     d.push(b'/');
                 }
