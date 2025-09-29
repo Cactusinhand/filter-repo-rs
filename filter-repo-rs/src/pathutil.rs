@@ -121,6 +121,96 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
+enum PathLikeKind {
+    Path,
+    Glob,
+}
+
+impl PathLikeKind {
+    fn empty_error(&self) -> &'static str {
+        match self {
+            PathLikeKind::Path => "empty path not allowed",
+            PathLikeKind::Glob => "empty glob not allowed",
+        }
+    }
+
+    fn absolute_windows_error(&self) -> &'static str {
+        match self {
+            PathLikeKind::Path => "do not use absolute Windows drive paths; use repo-relative with '/'",
+            PathLikeKind::Glob => {
+                "do not use absolute Windows drive paths in globs; use repo-relative with '/'"
+            }
+        }
+    }
+
+    fn absolute_prefix_error(&self) -> &'static str {
+        match self {
+            PathLikeKind::Path => {
+                "do not use absolute paths; paths are relative to the repo toplevel and must not start with '/' or '//'"
+            }
+            PathLikeKind::Glob => "do not use absolute paths in globs; patterns are repo-relative",
+        }
+    }
+
+    fn absolute_after_normalization_error(&self) -> &'static str {
+        match self {
+            PathLikeKind::Path => {
+                "do not use absolute paths; paths are relative to the repo toplevel"
+            }
+            PathLikeKind::Glob => "do not use absolute paths in globs; patterns are repo-relative",
+        }
+    }
+
+    fn dot_segment_error(&self) -> &'static str {
+        match self {
+            PathLikeKind::Path => {
+                "do not use '.' or '..' in paths; specify repo-relative canonical paths"
+            }
+            PathLikeKind::Glob => {
+                "do not use '.' or '..' in globs; specify repo-relative canonical patterns"
+            }
+        }
+    }
+}
+
+fn normalize_cli_path_like_str(
+    s: &str,
+    allow_empty: bool,
+    kind: PathLikeKind,
+) -> Result<Vec<u8>, String> {
+    if s.is_empty() {
+        if allow_empty {
+            return Ok(Vec::new());
+        }
+        return Err(kind.empty_error().to_string());
+    }
+
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Err(kind.absolute_windows_error().to_string());
+    }
+    if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with('/') {
+        return Err(kind.absolute_prefix_error().to_string());
+    }
+
+    let out: Vec<u8> = bytes
+        .iter()
+        .map(|&b| if b == b'\\' { b'/' } else { b })
+        .collect();
+
+    if out.first() == Some(&b'/') {
+        return Err(kind.absolute_after_normalization_error().to_string());
+    }
+
+    for seg in out.split(|&b| b == b'/') {
+        if seg == b"." || seg == b".." {
+            return Err(kind.dot_segment_error().to_string());
+        }
+    }
+
+    Ok(out)
+}
+
 /// Normalize CLI-supplied path-like strings to Git's internal style.
 ///
 /// Rules:
@@ -129,57 +219,7 @@ pub fn enquote_c_style_bytes(bytes: &[u8]) -> Vec<u8> {
 /// - Disallow any '.' or '..' segments
 /// - Return normalized bytes on success
 pub fn normalize_cli_path_str(s: &str, allow_empty: bool) -> Result<Vec<u8>, String> {
-    if s.is_empty() {
-        if allow_empty {
-            return Ok(Vec::new());
-        } else {
-            return Err("empty path not allowed".to_string());
-        }
-    }
-
-    // Detect absolute Windows drive paths early (e.g., C:\ or D:foo)
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
-        return Err(
-            "do not use absolute Windows drive paths; use repo-relative with '/'".to_string(),
-        );
-    }
-    // Detect UNC or POSIX absolute prefixes before slash normalization
-    if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with('/') {
-        return Err("do not use absolute paths; paths are relative to the repo toplevel and must not start with '/' or '//'".to_string());
-    }
-
-    // Normalize path separators: convert Windows '\\' to '/'
-    let mut out: Vec<u8> = s
-        .as_bytes()
-        .iter()
-        .map(|&b| if b == b'\\' { b'/' } else { b })
-        .collect();
-
-    // Re-check absolute after normalization (covers previously-UNC cases)
-    if out.first() == Some(&b'/') {
-        return Err(
-            "do not use absolute paths; paths are relative to the repo toplevel".to_string(),
-        );
-    }
-
-    // Disallow '.' or '..' segments anywhere
-    let mut start = 0usize;
-    for i in 0..=out.len() {
-        let at_end = i == out.len();
-        if at_end || out[i] == b'/' {
-            let seg = &out[start..i];
-            if seg == b"." || seg == b".." {
-                return Err(
-                    "do not use '.' or '..' in paths; specify repo-relative canonical paths"
-                        .to_string(),
-                );
-            }
-            start = i + 1;
-        }
-    }
-
-    Ok(out)
+    normalize_cli_path_like_str(s, allow_empty, PathLikeKind::Path)
 }
 
 /// Normalize CLI-supplied glob patterns.
@@ -187,45 +227,7 @@ pub fn normalize_cli_path_str(s: &str, allow_empty: bool) -> Result<Vec<u8>, Str
 /// We convert '\\' to '/' and reject absolute prefixes and '.'/'..' segments
 /// similar to plain paths. Regex-specific escaping is not relevant here.
 pub fn normalize_cli_glob_str(s: &str) -> Result<Vec<u8>, String> {
-    // Allow empty? CLI enforces value presence; treat empty as error
-    if s.is_empty() {
-        return Err("empty glob not allowed".to_string());
-    }
-    // Same absolute checks
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
-        return Err(
-            "do not use absolute Windows drive paths in globs; use repo-relative with '/'"
-                .to_string(),
-        );
-    }
-    if s.starts_with("//") || s.starts_with("\\\\") || s.starts_with('/') {
-        return Err("do not use absolute paths in globs; patterns are repo-relative".to_string());
-    }
-    let mut out: Vec<u8> = s
-        .as_bytes()
-        .iter()
-        .map(|&b| if b == b'\\' { b'/' } else { b })
-        .collect();
-    if out.first() == Some(&b'/') {
-        return Err("do not use absolute paths in globs; patterns are repo-relative".to_string());
-    }
-    // Disallow explicit '.' or '..' directory segments
-    let mut start = 0usize;
-    for i in 0..=out.len() {
-        let at_end = i == out.len();
-        if at_end || out[i] == b'/' {
-            let seg = &out[start..i];
-            if seg == b"." || seg == b".." {
-                return Err(
-                    "do not use '.' or '..' in globs; specify repo-relative canonical patterns"
-                        .to_string(),
-                );
-            }
-            start = i + 1;
-        }
-    }
-    Ok(out)
+    normalize_cli_path_like_str(s, /*allow_empty=*/ false, PathLikeKind::Glob)
 }
 
 /// Encode a repository path for git fast-import:

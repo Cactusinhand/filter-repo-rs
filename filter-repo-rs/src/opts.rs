@@ -535,17 +535,16 @@ pub fn parse_args() -> Options {
                 }
                 let old = parts[0];
                 let new_ = parts[1];
-                let old_n =
-                    normalize_cli_path_str(old, /*allow_empty=*/ true).unwrap_or_else(|m| {
+                let rename = normalize_cli_path_str(old, /*allow_empty=*/ true)
+                    .and_then(|old_n| {
+                        normalize_cli_path_str(new_, /*allow_empty=*/ true)
+                            .map(|new_n| (old_n, new_n))
+                    })
+                    .unwrap_or_else(|m| {
                         eprintln!("invalid --path-rename '{}': {}", v, m);
                         std::process::exit(2);
                     });
-                let new_n =
-                    normalize_cli_path_str(new_, /*allow_empty=*/ true).unwrap_or_else(|m| {
-                        eprintln!("invalid --path-rename '{}': {}", v, m);
-                        std::process::exit(2);
-                    });
-                opts.path_renames.push((old_n, new_n));
+                opts.path_renames.push(rename);
             }
             "--subdirectory-filter" => {
                 let dir = it.next().expect("--subdirectory-filter requires DIRECTORY");
