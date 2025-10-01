@@ -191,16 +191,8 @@ fn extreme_path_length_handling() {
     let long_filename = "a".repeat(long_filename_len);
     #[cfg(windows)]
     {
-        let deep_len = repo
-            .join(&deep_path)
-            .to_string_lossy()
-            .chars()
-            .count();
-        let long_len = repo
-            .join(&long_filename)
-            .to_string_lossy()
-            .chars()
-            .count();
+        let deep_len = repo.join(&deep_path).to_string_lossy().chars().count();
+        let long_len = repo.join(&long_filename).to_string_lossy().chars().count();
         assert!(
             deep_len < 240,
             "test-generated deep path should stay within Windows MAX_PATH"

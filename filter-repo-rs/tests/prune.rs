@@ -363,13 +363,11 @@ fn prune_empty_always_maps_empty_commit_to_zero() {
     let base_new = base_new.expect("expected mapping for base commit");
     let empty_new = empty_new.expect("expected pruned mapping for empty commit");
     assert_ne!(
-        base_new,
-        "0000000000000000000000000000000000000000",
+        base_new, "0000000000000000000000000000000000000000",
         "base commit should be preserved"
     );
     assert_eq!(
-        empty_new,
-        "0000000000000000000000000000000000000000",
+        empty_new, "0000000000000000000000000000000000000000",
         "empty commit should map to zeros when prune-empty=always"
     );
 }
@@ -468,11 +466,9 @@ fn create_octopus_merge_repo() -> (std::path::PathBuf, String) {
     merge_args.extend(branches.iter().copied());
     let merge_result = run_git(&repo, &merge_args);
     assert_eq!(
-        merge_result.0,
-        0,
+        merge_result.0, 0,
         "Octopus merge failed with code {}: {}",
-        merge_result.0,
-        merge_result.2
+        merge_result.0, merge_result.2
     );
     commit(&repo, "octopus merge");
 
@@ -556,8 +552,7 @@ fn empty_merge_with_no_parents() {
     // Create an empty merge by combining identical histories
     let merge_result = run_git(&repo, &["merge", "--no-ff", "--no-commit", "other"]);
     assert_eq!(
-        merge_result.0,
-        0,
+        merge_result.0, 0,
         "empty merge creation failed: {}",
         merge_result.2
     );
