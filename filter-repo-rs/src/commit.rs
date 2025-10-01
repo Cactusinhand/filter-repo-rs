@@ -208,6 +208,7 @@ pub fn process_commit_line(
     }
     // end of commit (blank line)
     if line == b"\n" {
+        let original_parents = parent_lines.len();
         let kept_parents = finalize_parent_lines(
             commit_buf,
             parent_lines,
@@ -216,11 +217,16 @@ pub fn process_commit_line(
             alias_map,
         );
         *parent_count = kept_parents;
+        let was_merge = original_parents >= 2;
+        let is_degenerate = was_merge && kept_parents < 2;
         if should_keep_commit(
             *commit_has_changes,
             *first_parent_mark,
             *commit_mark,
             *parent_count,
+            was_merge,
+            is_degenerate,
+            opts,
         ) {
             // keep commit
             commit_buf.extend_from_slice(b"\n");
@@ -386,9 +392,44 @@ pub fn should_keep_commit(
     first_parent_mark: Option<u32>,
     commit_mark: Option<u32>,
     parent_count: usize,
+    was_merge: bool,
+    is_degenerate: bool,
+    opts: &crate::opts::Options,
 ) -> bool {
-    let is_merge = parent_count >= 2;
-    commit_has_changes || first_parent_mark.is_none() || commit_mark.is_none() || is_merge
+    // Always keep roots and malformed commits for safety
+    if first_parent_mark.is_none() || commit_mark.is_none() {
+        return true;
+    }
+
+    // If there were any file changes, keep regardless of prune settings
+    if commit_has_changes {
+        return true;
+    }
+
+    // No file changes
+    let is_merge_after = parent_count >= 2;
+    if is_merge_after {
+        // Non-degenerate merge (still 2+ parents): keep
+        return true;
+    }
+
+    // If commit started as a merge but became degenerate
+    if was_merge && is_degenerate {
+        if opts.no_ff {
+            // Respect --no-ff: keep degenerate merges
+            return true;
+        }
+        return match opts.prune_degenerate {
+            crate::opts::PruneMode::Never => true,
+            crate::opts::PruneMode::Auto | crate::opts::PruneMode::Always => false,
+        };
+    }
+
+    // Non-merge (0 or 1 parent) empty commit
+    match opts.prune_empty {
+        crate::opts::PruneMode::Never => true,
+        crate::opts::PruneMode::Auto | crate::opts::PruneMode::Always => false,
+    }
 }
 
 // Build an alias stanza to map an old mark to its first parent mark

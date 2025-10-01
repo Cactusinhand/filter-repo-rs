@@ -28,6 +28,13 @@ pub enum Mode {
     Analyze,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneMode {
+    Always,
+    Auto,
+    Never,
+}
+
 #[derive(Debug, Clone)]
 pub struct AnalyzeThresholds {
     pub warn_total_bytes: u64,
@@ -184,6 +191,10 @@ pub struct Options {
     pub analyze: AnalyzeConfig,
     pub debug_mode: bool,
     pub git_caps: GitCapabilities,
+    // Pruning & merge behavior
+    pub prune_empty: PruneMode,
+    pub prune_degenerate: PruneMode,
+    pub no_ff: bool,
 }
 
 impl Default for Options {
@@ -227,6 +238,9 @@ impl Default for Options {
             analyze: AnalyzeConfig::default(),
             debug_mode: false,
             git_caps: GitCapabilities::default(),
+            prune_empty: PruneMode::Auto,
+            prune_degenerate: PruneMode::Auto,
+            no_ff: false,
         }
     }
 }
@@ -663,6 +677,37 @@ pub fn parse_args() -> Options {
             }
             "--dry-run" => {
                 opts.dry_run = true;
+            }
+            "--prune-empty" => {
+                let v = it
+                    .next()
+                    .expect("--prune-empty requires MODE (always|auto|never)");
+                opts.prune_empty = match v.as_str() {
+                    "always" => PruneMode::Always,
+                    "auto" => PruneMode::Auto,
+                    "never" => PruneMode::Never,
+                    _ => {
+                        eprintln!("--prune-empty expects one of always|auto|never");
+                        std::process::exit(2);
+                    }
+                };
+            }
+            "--prune-degenerate" => {
+                let v = it
+                    .next()
+                    .expect("--prune-degenerate requires MODE (always|auto|never)");
+                opts.prune_degenerate = match v.as_str() {
+                    "always" => PruneMode::Always,
+                    "auto" => PruneMode::Auto,
+                    "never" => PruneMode::Never,
+                    _ => {
+                        eprintln!("--prune-degenerate expects one of always|auto|never");
+                        std::process::exit(2);
+                    }
+                };
+            }
+            "--no-ff" => {
+                opts.no_ff = true;
             }
             "--partial" => {
                 opts.partial = true;
@@ -1110,6 +1155,38 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--branch-rename OLD:NEW".to_string(),
                     description: vec!["Rename branches with given prefix".to_string()],
+                },
+            ],
+        },
+        HelpSection {
+            title: "Commit pruning & merges:".to_string(),
+            options: vec![
+                HelpOption {
+                    name: "--prune-empty {always|auto|never}".to_string(),
+                    description: vec![
+                        "Control pruning of empty non-merge commits (default: auto)".to_string(),
+                        "  always: Always prune empty commits".to_string(),
+                        "  auto: Prune empty commits (smart defaults)".to_string(),
+                        "  never: Keep all empty commits".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--prune-degenerate {always|auto|never}".to_string(),
+                    description: vec![
+                        "Control pruning of empty degenerate merges (default: auto)".to_string(),
+                        "  Degenerate merge: Merge that becomes <2 parents after filtering"
+                            .to_string(),
+                        "  always: Always prune degenerate merges".to_string(),
+                        "  auto: Prune degenerate merges unless --no-ff is set".to_string(),
+                        "  never: Keep all degenerate merges".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--no-ff".to_string(),
+                    description: vec![
+                        "Keep degenerate merges (do not fast-forward merges)".to_string(),
+                        "Overrides --prune-degenerate=auto for merge commits".to_string(),
+                    ],
                 },
             ],
         },

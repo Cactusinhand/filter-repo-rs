@@ -200,7 +200,8 @@ Features
   - `--replace-message FILE` applies literal replacements in commit/tag messages.
   - Short/long commit hashes in messages are rewritten to new IDs using the generated `commit-map` (pruned commits map to the zero id `0000000000000000000000000000000000000000`).
   - `--tag-rename` and `--branch-rename` rename by prefix; annotated tags are deduped and emitted once.
-  - Empty non‑merge commits are pruned via `alias` to the first parent mark; merges are preserved.
+  - Pruning & merges: control pruning with `--prune-empty {always|auto|never}` and
+    `--prune-degenerate {always|auto|never}`; keep degenerate merges with `--no-ff`.
   - Atomic ref updates: branches/tags updated in a single batch via `git update-ref --stdin`; `HEAD` updated via `git symbolic-ref`.
 
 - Safety, backup, and analysis

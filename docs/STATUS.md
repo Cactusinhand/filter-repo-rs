@@ -55,7 +55,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 
 - Empty Commit Pruning & Merge Preservation
   - Prunes empty non-merge commits via fast-import `alias` of marks (old mark -> first parent), so downstream refs resolve.
-  - Preserves merge commits (2+ parents) even if filtered to zero filechanges.
+  - Degenerate merges (merges that become <2 parents after filtering) can be pruned when empty via `--prune-degenerate {always|auto|never}` (default: auto). Use `--no-ff` to keep such merges.
 
 - Tag Handling (Annotated-first)
   - Annotated tags: buffer entire tag blocks, optionally rename via `--tag-rename OLD:NEW`, dedupe by final ref, emit once.
