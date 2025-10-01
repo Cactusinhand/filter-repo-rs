@@ -89,6 +89,24 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   filter-repo-rs --branch-rename feature/:exp/
   ```
 
+- 组合用法：标签改名前缀 + 标签消息重写（注解标签会被去重并仅发射一次）
+  ```sh
+  # messages.txt 为提交/标签消息的字面值替换规则
+  # 例如：café==>CAFE 与 🚀==>ROCKET
+  filter-repo-rs \
+    --refs --all \
+    --tag-rename orig-:renamed- \
+    --replace-message messages.txt
+  ```
+
+- 组合用法：分支改名前缀 + 标签消息重写（若 HEAD 所指分支被重命名，会自动更新到新分支）
+  ```sh
+  filter-repo-rs \
+    --refs --all \
+    --branch-rename original-:renamed- \
+    --replace-message messages.txt
+  ```
+
 5) 调整仓库目录结构
 
 - 提取子目录为新根（类似 monorepo 拆分某模块）：
@@ -197,7 +215,9 @@ filter-repo-rs \
 - 提交/标签/引用
   - `--replace-message FILE` 对提交/标签消息执行字面值替换。
   - 自动将消息中的旧提交短/长哈希重写为新哈希（借助生成的 `commit-map`；被剪枝的提交会映射为全零 `0000000000000000000000000000000000000000`）。
+    - 注意：`commit-map` 在执行结束阶段生成；短哈希重写通常在“下一次运行”读取该映射时生效。
   - `--tag-rename`、`--branch-rename` 基于前缀重命名；注解标签去重后仅发射一次。
+  - `HEAD` 终态：若 `HEAD` 原本指向的分支被重命名，将自动更新到新分支；若目标缺失，将回退到已存在的分支。
   - 非合并的空提交通过 `alias` 到其首个父标记而被剪枝；合并提交保留。
   - 原子引用更新：分支/标签通过 `git update-ref --stdin` 批量更新；`HEAD` 通过 `git symbolic-ref` 更新。
 

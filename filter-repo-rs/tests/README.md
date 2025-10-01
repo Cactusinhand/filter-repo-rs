@@ -24,6 +24,10 @@ Layout
 - `sensitive.rs` — sensitive/partial modes vs remotes
 - `stream.rs` — custom fast-export stream overrides
 - `unit.rs` — small focused unit-style checks
+  - Combined flows:
+    - `tag_rename_and_message_rewrite_combined`
+    - `branch_rename_with_tag_message_rewrite`
+    - `head_moves_on_branch_rename`
 
 Running
 - Run everything: `cargo test -p filter-repo-rs`
@@ -38,13 +42,14 @@ Windows notes
     - Use a recent native Git for Windows without MSYS path translation for tests.
     - Or run on WSL/Linux/macOS for these backup tests.
     - Or adjust `backup.rs` locally to use relative paths on Windows.
+  - Avoid reserved device names in file paths (even with extensions): `CON`, `PRN`, `AUX`, `NUL`, `COM1..COM9`, `LPT1..LPT9`. Prefer safe alternatives (e.g., `aux_file.txt`).
 
 Conventions
 - Prefer small, focused tests with clear setup and assertions.
 - Use `run_git(...)` for shelling out and `init_repo()` for isolated repos under `target/it/`.
 - When asserting on fast-export output, normalize quoting via `dequote_c_style_bytes` if needed.
+- Short‑hash remapping relies on `commit-map` written at finalize; tests that assert remapping typically run the pipeline twice (see `messages.rs::second_run_rewrites_short_hashes_in_messages`).
 
 Adding new tests
 - Pick or create a `*.rs` file that matches the feature area.
 - Reuse helpers from `tests/common` and follow the existing patterns to keep tests readable and deterministic.
-

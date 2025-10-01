@@ -157,3 +157,15 @@ Remaining for MVP polish:
 
 5) Tests & docs
    - Initial integration tests added for path filtering + branch rename + HEAD update, and for commit-map pruned entries. Next: annotated vs lightweight tag scenarios, path-rename matrices, and encoding/quoting notes.
+
+## Recent Test Coverage Additions
+
+- Combined rename + message rewrite
+  - Annotated tag rename with tag message rewrite (literal replacements)
+  - Branch rename with annotated tag message rewrite
+- HEAD finalization
+  - `HEAD` moves to the renamed branch via `git symbolic-ref`, with fallbacks when needed
+- Short‑hash remap across runs
+  - Messages referencing short commit IDs are remapped on a subsequent run using `commit-map`
+- Binary integrity
+  - When text replacement rules do not match a blob payload, the blob OID remains unchanged

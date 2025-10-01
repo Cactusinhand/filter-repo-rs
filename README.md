@@ -89,6 +89,24 @@ Use Cases
   filter-repo-rs --branch-rename feature/:exp/
   ```
 
+- Combine tag rename + message rewrite (annotated tags are rewritten and deduped once):
+  ```sh
+  # messages.txt contains literal replacements for commit/tag messages
+  # e.g., café==>CAFE and 🚀==>ROCKET
+  filter-repo-rs \
+    --refs --all \
+    --tag-rename orig-:renamed- \
+    --replace-message messages.txt
+  ```
+
+- Combine branch rename + tag message rewrite (HEAD is updated to the renamed branch when applicable):
+  ```sh
+  filter-repo-rs \
+    --refs --all \
+    --branch-rename original-:renamed- \
+    --replace-message messages.txt
+  ```
+
 5) Adjust directory layout
 
 - Extract a subdirectory as the new root (e.g., splitting a monorepo component):
@@ -199,7 +217,9 @@ Features
 - Commit, tag, and refs
   - `--replace-message FILE` applies literal replacements in commit/tag messages.
   - Short/long commit hashes in messages are rewritten to new IDs using the generated `commit-map` (pruned commits map to the zero id `0000000000000000000000000000000000000000`).
+    - Note: the `commit-map` is written at finalize; short‑hash remapping takes effect on a subsequent run reading that map.
   - `--tag-rename` and `--branch-rename` rename by prefix; annotated tags are deduped and emitted once.
+  - `HEAD` finalization: if `HEAD` pointed to a renamed branch, it is updated to the new branch name. If the target is missing, a best‑effort fallback branch is selected.
   - Pruning & merges: control pruning with `--prune-empty {always|auto|never}` and
     `--prune-degenerate {always|auto|never}`; keep degenerate merges with `--no-ff`.
   - Atomic ref updates: branches/tags updated in a single batch via `git update-ref --stdin`; `HEAD` updated via `git symbolic-ref`.

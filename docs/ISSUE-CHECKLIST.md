@@ -44,6 +44,11 @@ Legend: [ ] todo, [~] in progress, [x] done
 - [x] Integration tests for `--cleanup` semantics.
 - [x] Config precedence tests (config vs CLI).
 - [x] Backward‑compat acceptance of deprecated flags with warnings.
+ - [x] Tag rename + message rewrite combined flow (annotated + lightweight)
+ - [x] Branch rename + tag message rewrite
+ - [x] `HEAD` update on branch rename
+ - [x] Short‑hash remap validated across two runs (commit‑map)
+ - [x] Binary integrity when text rules do not match
 
 8) Release & Communication
 - [ ] Changelog entry summarizing convergence, deprecations, and config migration.
@@ -55,4 +60,4 @@ Cross‑refs
 - docs/PARITY.md (parity and non‑goals)
 - docs/CLI-CONVERGENCE.zh-CN.md (proposal)
 - docs/STATUS.md (roll‑up status)
-
+ - filter-repo-rs/tests/README.md (test layout and platform notes)

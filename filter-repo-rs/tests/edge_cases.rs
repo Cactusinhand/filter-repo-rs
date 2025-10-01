@@ -386,10 +386,41 @@ café==>CAFE
     let result = fr::run(&opts);
     assert!(result.is_ok());
 
-    // Verify messages were replaced
-    let (_c, log_output, _e) = run_git(&repo, &["log", "--oneline", "-n", "20"]);
-    assert!(log_output.contains("MULTI_REPLACED") || !log_output.contains("Multi"));
-    assert!(log_output.contains("QUOTES") || !log_output.contains("quotes"));
+    // Verify messages were replaced across full bodies
+    let (_c, log_output, _e) = run_git(&repo, &["log", "--format=%B", "-n", "50"]);
+    // Expect specific replacements to occur and originals to be gone
+    assert!(
+        log_output.contains("MULTI_REPLACED"),
+        "expected 'Multi' to be replaced"
+    );
+    assert!(
+        !log_output.contains("Multi"),
+        "unexpected original token 'Multi' present"
+    );
+    assert!(
+        log_output.contains("QUOTES"),
+        "expected 'quotes' to be replaced"
+    );
+    assert!(
+        !log_output.contains("quotes"),
+        "unexpected original token 'quotes' present"
+    );
+    assert!(
+        log_output.contains("CAFE"),
+        "expected 'café' to be replaced"
+    );
+    assert!(
+        !log_output.contains("café"),
+        "unexpected original token 'café' present"
+    );
+    assert!(
+        log_output.contains("ROCKET"),
+        "expected '🚀' to be replaced"
+    );
+    assert!(
+        !log_output.contains("🚀"),
+        "unexpected original token '🚀' present"
+    );
 }
 
 #[test]
