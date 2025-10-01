@@ -258,7 +258,7 @@ CLI overview: core vs debug layers
 Core CLI (always available; see [docs/SCOPE.md](docs/SCOPE.md) for prioritized scenarios and [docs/PARITY.md](docs/PARITY.md) for parity/safety context):
 
 - Repository & refs
-  - `--source DIR`, `--target DIR` (default `.`), `--refs` (repeatable, defaults to `--all`)
+  - `--source DIR`, `--target DIR` (default `.`), `--refs` (repeatable, defaults to `--all`; implies `--partial`)
   - `--no-data` forwarded to fast-export
 
 - Paths
@@ -272,7 +272,7 @@ Core CLI (always available; see [docs/SCOPE.md](docs/SCOPE.md) for prioritized s
   - `--replace-message FILE`, `--tag-rename OLD:NEW`, `--branch-rename OLD:NEW`
 
 - Behavior & output
-  - `--write-report`, `--cleanup [none|standard|aggressive]`, `--quiet`, `--no-reset`
+  - `--write-report`, `--cleanup`, `--quiet`, `--no-reset`
   - `--backup [--backup-path PATH]`, `--dry-run`
   - `--partial`, `--sensitive [--no-fetch]`, `--force`, `--enforce-sanity`
   - Analysis entry points: `--analyze`, `--analyze-json`, `--analyze-top`. Configure thresholds via `.filter-repo-rs.toml` or `--config` (see [docs/examples/filter-repo-rs.toml](docs/examples/filter-repo-rs.toml)).

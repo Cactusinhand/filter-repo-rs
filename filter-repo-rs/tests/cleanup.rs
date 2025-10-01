@@ -82,6 +82,43 @@ fn cleanup_aggressive_runs_when_requested() {
 }
 
 #[test]
+fn cleanup_disabled_with_refs_by_default() {
+    let repo = init_repo();
+    // Using --refs should imply --partial, so default cleanup is disabled
+    let (out, inv) = run_cli_with_git_spy(&repo, &["--refs", "--all"]);
+    assert!(out.status.success(), "run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
+
+    assert!(
+        !any_cmd_contains_seq(&cmds, &["reflog", "expire"]) && !any_cmd_contains_seq(&cmds, &["gc"]),
+        "cleanup should not run when --refs is provided by default; cmds: {:?}",
+        cmds
+    );
+}
+
+#[test]
+fn cleanup_can_be_forced_with_refs() {
+    let repo = init_repo();
+    // Even though --refs implies partial, an explicit --cleanup should still run
+    let (out, inv) = run_cli_with_git_spy(&repo, &["--refs", "--all", "--cleanup"]);
+    assert!(out.status.success(), "run should succeed");
+    let cmds = git_commands_for_repo(&repo, &inv);
+
+    assert!(
+        any_cmd_contains_seq(&cmds, &["reflog", "expire", "--expire=now", "--all"]),
+        "expected reflog expire when forcing --cleanup with --refs; cmds: {:?}",
+        cmds
+    );
+    assert!(
+        any_cmd_contains_seq(&cmds, &["gc", "--prune=now"]) 
+            || any_cmd_contains_seq(&cmds, &["gc", "--prune=now", "--quiet"]) 
+            || any_cmd_contains_seq(&cmds, &["gc", "--quiet", "--prune=now"]),
+        "expected git gc --prune=now when forcing --cleanup with --refs; cmds: {:?}",
+        cmds
+    );
+}
+
+#[test]
 fn cleanup_disabled_on_dry_run() {
     let repo = init_repo();
     let (out, inv) = run_cli_with_git_spy(&repo, &["--dry-run"]);

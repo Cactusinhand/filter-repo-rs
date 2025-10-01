@@ -485,7 +485,12 @@ pub fn parse_args() -> Options {
             }
             "--source" => opts.source = PathBuf::from(it.next().expect("--source requires value")),
             "--target" => opts.target = PathBuf::from(it.next().expect("--target requires value")),
-            "--ref" | "--refs" => opts.refs.push(it.next().expect("--ref requires value")),
+            "--ref" | "--refs" => {
+                // --refs implies a partial rewrite
+                // so we do not run remote/cleanup behaviors by default.
+                opts.refs.push(it.next().expect("--ref requires value"));
+                opts.partial = true;
+            }
             "--date-order" => {
                 guard_debug("--date-order", opts.debug_mode);
                 opts.date_order = true;
@@ -1081,7 +1086,10 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 },
                 HelpOption {
                     name: "--refs REF".to_string(),
-                    description: vec!["Ref to export (repeatable; defaults to --all)".to_string()],
+                    description: vec![
+                        "Ref to export (repeatable; defaults to --all)".to_string(),
+                        "Implies --partial".to_string(),
+                    ],
                 },
                 HelpOption {
                     name: "--no-data".to_string(),
@@ -1201,7 +1209,7 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     name: "--cleanup".to_string(),
                     description: vec![
                         "Run post-import cleanup (reflog expire + git gc)".to_string(),
-                        "(disabled by default)".to_string(),
+                        "Defaults to on for full rewrites; disabled with --partial or --dry-run.".to_string(),
                     ],
                 },
                 HelpOption {

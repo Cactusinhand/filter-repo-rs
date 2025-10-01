@@ -255,7 +255,7 @@ cargo test -p filter-repo-rs
 核心 CLI（默认可见；优先级与场景请参见 [docs/SCOPE.md](docs/SCOPE.md)、安全/对齐说明参见 [docs/PARITY.md](docs/PARITY.md)）：
 
 - 仓库与引用
-  - `--source DIR`、`--target DIR`（默认 `.`）、`--refs`（可重复，默认 `--all`）
+  - `--source DIR`、`--target DIR`（默认 `.`）、`--refs`（可重复，默认 `--all`；隐含 `--partial`）
   - `--no-data` 透传给 fast-export
 
 - 路径
@@ -269,7 +269,7 @@ cargo test -p filter-repo-rs
   - `--replace-message FILE`、`--tag-rename OLD:NEW`、`--branch-rename OLD:NEW`
 
 - 行为与输出
-  - `--write-report`、`--cleanup [none|standard|aggressive]`、`--quiet`、`--no-reset`
+  - `--write-report`、`--cleanup`、`--quiet`、`--no-reset`
   - `--backup [--backup-path PATH]`、`--dry-run`
   - `--partial`、`--sensitive [--no-fetch]`、`--force`、`--enforce-sanity`
   - 分析入口：`--analyze`、`--analyze-json`、`--analyze-top`。阈值通过 `.filter-repo-rs.toml` 或 `--config` 配置（参考 [docs/examples/filter-repo-rs.toml](docs/examples/filter-repo-rs.toml) 示例）。
