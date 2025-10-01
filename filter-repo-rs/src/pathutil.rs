@@ -136,7 +136,9 @@ impl PathLikeKind {
 
     fn absolute_windows_error(&self) -> &'static str {
         match self {
-            PathLikeKind::Path => "do not use absolute Windows drive paths; use repo-relative with '/'",
+            PathLikeKind::Path => {
+                "do not use absolute Windows drive paths; use repo-relative with '/'"
+            }
             PathLikeKind::Glob => {
                 "do not use absolute Windows drive paths in globs; use repo-relative with '/'"
             }

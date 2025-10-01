@@ -240,15 +240,11 @@ pub mod blob_regex {
                     continue;
                 }
                 if let Some(rest) = raw.strip_prefix(b"regex:") {
-                    // Split at first occurrence of ==> for pattern/replacement
                     let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
                         (&rest[..pos], rest[pos + 3..].to_vec())
                     } else {
-                        // No replacement specified; default to ***REMOVED***
                         (&rest[..], b"***REMOVED***".to_vec())
                     };
-                    // Pattern is bytes; interpret as UTF-8 for regex parser
-                    // (regex bytes API still requires UTF-8 pattern text)
                     let pat_str = std::str::from_utf8(pat).map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::InvalidInput,
@@ -263,6 +259,47 @@ pub mod blob_regex {
                     })?;
                     let has_dollar = rep.contains(&b'$');
                     rules.push((re, rep, has_dollar));
+                    continue;
+                }
+                if let Some(rest) = raw.strip_prefix(b"glob:") {
+                    // Split at first ==> for replacement; default to ***REMOVED*** if missing
+                    let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
+                        (&rest[..pos], rest[pos + 3..].to_vec())
+                    } else {
+                        (&rest[..], b"***REMOVED***".to_vec())
+                    };
+                    let glob_str = std::str::from_utf8(pat).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid UTF-8 in glob rule: {e}"),
+                        )
+                    })?;
+                    // Convert a simple glob pattern to a bytes regex:
+                    // * -> .*, ? -> ., everything else regex-escaped. No anchors
+                    let mut rx = String::with_capacity(glob_str.len() + 8);
+                    for ch in glob_str.chars() {
+                        match ch {
+                            '*' => rx.push_str(".*"),
+                            '?' => rx.push('.'),
+                            // escape regex meta characters
+                            '.' | '+' | '(' | ')' | '|' | '{' | '}' | '[' | ']' | '^' | '$'
+                            | '\\' => {
+                                rx.push('\\');
+                                rx.push(ch);
+                            }
+                            _ => rx.push(ch),
+                        }
+                    }
+                    let re = Regex::new(&rx).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid glob-derived regex: {e}"),
+                        )
+                    })?;
+                    // For glob-derived rules, treat '$' literally in replacement (no capture groups)
+                    let has_dollar = false;
+                    rules.push((re, rep, has_dollar));
+                    continue;
                 }
             }
             if rules.is_empty() {

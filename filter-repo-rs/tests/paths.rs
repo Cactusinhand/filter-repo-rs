@@ -394,10 +394,7 @@ fn cli_glob_backslash_normalized_filter() {
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "seed\n"]);
 
-    let (out, _inv) = run_cli_with_git_spy(
-        &repo,
-        &["--force", "--path-glob", "keep\\**\\*.txt"],
-    );
+    let (out, _inv) = run_cli_with_git_spy(&repo, &["--force", "--path-glob", "keep\\**\\*.txt"]);
     assert!(out.status.success(), "cli failed: {:?}", out);
     let (_c, tree, _e) = run_git(
         &repo,
@@ -424,10 +421,8 @@ fn cli_subdir_filter_backslash_normalized() {
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "seed\n"]);
 
-    let (out, _inv) = run_cli_with_git_spy(
-        &repo,
-        &["--force", "--subdirectory-filter", "dir\\keep"],
-    );
+    let (out, _inv) =
+        run_cli_with_git_spy(&repo, &["--force", "--subdirectory-filter", "dir\\keep"]);
     assert!(out.status.success(), "cli failed: {:?}", out);
     let (_c, tree, _e) = run_git(
         &repo,

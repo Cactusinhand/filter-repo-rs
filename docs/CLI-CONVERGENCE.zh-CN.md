@@ -20,7 +20,7 @@ CLI 收敛草案（filter-repo-rs）
   - `--path`、`--path-glob`、`--path-regex`、`--invert-paths`
   - `--path-rename OLD:NEW`、`--subdirectory-filter DIR`、`--to-subdirectory-filter DIR`
 - 内容与对象
-  - `--replace-text FILE`（文件内容：字节/regex 规则）
+  - `--replace-text FILE`（文件内容：字节/regex/glob 规则）
   - `--max-blob-size BYTES`、`--strip-blobs-with-ids FILE`
 - 消息与引用
   - `--replace-message FILE`（字面值；哈希自动回写保留）
@@ -131,4 +131,3 @@ warn_max_parents = 8
   - 新增 `--debug-mode` 或 `FRRS_DEBUG` 环境变量的 gating。
   - 读取 `.filter-repo-rs.toml`（解析错误应提供友好提示与示例）。
   - 打印弃用告警与等效建议（阶段 1/2）。
-

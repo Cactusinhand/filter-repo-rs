@@ -189,8 +189,10 @@ Features
   - Helpers: `--subdirectory-filter DIR` and `--to-subdirectory-filter DIR`.
 
 - Blob filtering & redaction
-  - `--replace-text FILE` for content replacements; supports literal rules and `regex:` rules
-    in the same file (e.g., `regex:api_key-[0-9]+==>REDACTED`).
+  - `--replace-text FILE` for content replacements; supports literal rules plus `regex:` and `glob:`
+    rules in the same file (e.g., `regex:api_key-[0-9]+==>REDACTED`, `glob:*secret*==>REDACTED`).
+    - `glob:` patterns support `*` (match any characters) and `?` (match single character)
+    - All other characters are treated literally in glob patterns
   - `--max-blob-size BYTES` drops large blobs and removes paths that reference them.
   - `--strip-blobs-with-ids FILE` drops listed 40‑hex blob IDs.
 
@@ -279,6 +281,8 @@ Examples
   cat > redact.txt <<EOF
   SECRET_TOKEN==>REDACTED
   regex:(API|TOKEN|SECRET)[A-Za-z0-9_-]+==>REDACTED
+  glob:*secret*==>REDACTED
+  # glob:patterns support * (any chars) and ? (single char)
   EOF
 
   # 3) Apply redaction and write a summary report
