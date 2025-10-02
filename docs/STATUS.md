@@ -28,7 +28,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - `pipes.rs`, `gitutil.rs`, `opts.rs`, `pathutil.rs`, `message.rs`: process setup, plumbing, CLI, utilities.
 
 - Message Editing
-  - `--replace-message FILE`: literal byte-based replacements applied to commit and tag messages.
+  - `--replace-message FILE`: literal and regex (via `regex:` lines) byte-based replacements applied to commit and tag messages.
 
 - Blob Filtering
   - `--replace-text FILE`: literal byte-based replacements applied to blob contents.

@@ -1,5 +1,8 @@
 target/
 .claude/
 .serena/
+.kiro/
+.vscode/
+tmpnpm-cache/
 CLAUDE.md
 AGENTS.md

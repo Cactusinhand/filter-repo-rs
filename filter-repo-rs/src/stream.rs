@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::Result as FilterRepoResult;
 use crate::gitutil::git_dir;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
+use crate::message::msg_regex::RegexReplacer as MsgRegexReplacer;
 use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
@@ -468,6 +469,15 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         })?),
         None => None,
     };
+    let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
+        Some(p) => MsgRegexReplacer::from_file(p).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to read --replace-message: {e}"),
+            )
+        })?,
+        None => None,
+    };
     let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
     let content_replacer = match &opts.replace_text_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
@@ -677,6 +687,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         None
                     },
                     replacer: &replacer,
+                    msg_regex: msg_regex_replacer.as_ref(),
                     short_mapper,
                     opts,
                     updated_refs: &mut updated_refs,
@@ -733,6 +744,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         None
                     },
                     &replacer,
+                    msg_regex_replacer.as_ref(),
                     short_mapper,
                     &mut commit_buf,
                     &mut commit_has_changes,
@@ -1007,6 +1019,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     None
                 },
                 &replacer,
+                msg_regex_replacer.as_ref(),
                 short_mapper,
                 &mut commit_buf,
                 &mut commit_has_changes,

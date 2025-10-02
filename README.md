@@ -48,7 +48,7 @@ filter-repo-rs is a Rust prototype implementation of [git-filter-repo](https://g
        --replace-text redact.txt \
        --write-report
      ```
-  4. If commit/tag messages also contain sensitive data, prepare separate message replacement rules (currently literal only):
+  4. If commit/tag messages also contain sensitive data, prepare separate message replacement rules (supports literal and regex via lines starting with `regex:`):
      ```sh
      filter-repo-rs --replace-message msg_rules.txt
      ```
@@ -61,7 +61,7 @@ filter-repo-rs is a Rust prototype implementation of [git-filter-repo](https://g
 
 2. Sensitive information in commit/tag messages needs cleanup
 
-- Prepare message replacement rules (currently literal only):
+- Prepare message replacement rules (literal or regex):
   ```sh
   # messages.txt
   password==>[removed]
@@ -258,7 +258,6 @@ git symbolic-ref HEAD refs/heads/<branch-from-bundle>
 
 - Merge simplification strategy is still being optimized, complex topology scenarios may require manual handling
 - Incremental processing (`--state-branch`) not yet supported
-- `--replace-message` currently only supports literal replacement, regex support in development
 - Windows path policy fixed to "sanitize" mode
 
 ### Usage Recommendations

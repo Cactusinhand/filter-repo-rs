@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use std::process::ChildStdout;
 
 use crate::filechange;
-use crate::message::{MessageReplacer, ShortHashMapper};
+use crate::message::{msg_regex, MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
 pub fn rename_commit_header_ref(
@@ -125,6 +125,7 @@ pub fn process_commit_line(
     filt_file: &mut dyn Write,
     mut fi_in: Option<&mut dyn Write>,
     replacer: &Option<MessageReplacer>,
+    msg_regex: Option<&msg_regex::RegexReplacer>,
     short_mapper: Option<&ShortHashMapper>,
     commit_buf: &mut Vec<u8>,
     commit_has_changes: &mut bool,
@@ -158,7 +159,15 @@ pub fn process_commit_line(
     }
     // commit message data
     if line.starts_with(b"data ") {
-        handle_commit_data(line, fe_out, orig_file, commit_buf, replacer, short_mapper)?;
+        handle_commit_data(
+            line,
+            fe_out,
+            orig_file,
+            commit_buf,
+            replacer,
+            msg_regex,
+            short_mapper,
+        )?;
         return Ok(CommitAction::Consumed);
     }
     // parents
@@ -356,6 +365,7 @@ pub fn handle_commit_data(
     orig_file: Option<&mut dyn Write>,
     commit_buf: &mut Vec<u8>,
     replacer: &Option<MessageReplacer>,
+    msg_regex: Option<&msg_regex::RegexReplacer>,
     short_mapper: Option<&ShortHashMapper>,
 ) -> io::Result<()> {
     if !header_line.starts_with(b"data ") {
@@ -377,6 +387,9 @@ pub fn handle_commit_data(
     } else {
         payload
     };
+    if let Some(rr) = msg_regex {
+        new_payload = rr.apply_regex(new_payload);
+    }
     if let Some(mapper) = short_mapper {
         new_payload = mapper.rewrite(new_payload);
     }

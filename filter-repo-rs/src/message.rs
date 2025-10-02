@@ -373,3 +373,126 @@ pub mod blob_regex {
         out
     }
 }
+
+// Regex support for commit/tag message replacements: support lines beginning with
+// "regex:" in the --replace-message FILE. Patterns are Rust regex (bytes), so use
+// (?m) for multi-line when matching whole lines.
+pub mod msg_regex {
+    use super::*;
+    use regex::bytes::{Captures, Regex};
+
+    #[derive(Clone, Debug, Default)]
+    pub struct RegexReplacer {
+        pub rules: Vec<(Regex, Vec<u8>, bool)>,
+    }
+
+    impl RegexReplacer {
+        pub fn from_file(path: &std::path::Path) -> io::Result<Option<Self>> {
+            let content = std::fs::read(path)?;
+            let mut rules: Vec<(Regex, Vec<u8>, bool)> = Vec::new();
+            for raw in content.split(|&b| b == b'\n') {
+                if raw.is_empty() {
+                    continue;
+                }
+                if raw.starts_with(b"#") {
+                    continue;
+                }
+                if let Some(rest) = raw.strip_prefix(b"regex:") {
+                    let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
+                        (&rest[..pos], rest[pos + 3..].to_vec())
+                    } else {
+                        (rest, b"***REMOVED***".to_vec())
+                    };
+                    let pat_str = std::str::from_utf8(pat).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid UTF-8 in regex rule: {e}"),
+                        )
+                    })?;
+                    let re = Regex::new(pat_str).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("invalid regex pattern: {e}"),
+                        )
+                    })?;
+                    let has_dollar = rep.contains(&b'$');
+                    rules.push((re, rep, has_dollar));
+                }
+            }
+            if rules.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(Self { rules }))
+            }
+        }
+
+        pub fn apply_regex(&self, data: Vec<u8>) -> Vec<u8> {
+            let mut cur = data;
+            for (re, rep, has_dollar) in &self.rules {
+                if *has_dollar {
+                    let tpl = rep.clone();
+                    cur = re
+                        .replace_all(&cur, |caps: &Captures| expand_bytes_template(&tpl, caps))
+                        .into_owned();
+                } else {
+                    cur = re
+                        .replace_all(&cur, regex::bytes::NoExpand(rep))
+                        .into_owned();
+                }
+            }
+            cur
+        }
+    }
+
+    fn expand_bytes_template(tpl: &[u8], caps: &Captures) -> Vec<u8> {
+        // Minimal $1..$9 expansion with $$ -> literal '$'
+        let mut out = Vec::with_capacity(tpl.len() + 16);
+        let mut i = 0;
+        while i < tpl.len() {
+            let b = tpl[i];
+            if b == b'$' {
+                i += 1;
+                if i < tpl.len() {
+                    let nb = tpl[i];
+                    if nb == b'$' {
+                        out.push(b'$');
+                        i += 1;
+                        continue;
+                    }
+                    // parse number
+                    let mut num: usize = 0;
+                    let mut seen = false;
+                    while i < tpl.len() {
+                        let c = tpl[i];
+                        if c.is_ascii_digit() {
+                            seen = true;
+                            num = num * 10 + (c - b'0') as usize;
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if seen && num > 0 {
+                        if let Some(m) = caps.get(num) {
+                            out.extend_from_slice(m.as_bytes());
+                        }
+                        continue;
+                    }
+                    // No valid group number; treat as literal '$' + nb
+                    out.push(b'$');
+                    out.push(nb);
+                    i += 1;
+                    continue;
+                } else {
+                    // Trailing '$'
+                    out.push(b'$');
+                    break;
+                }
+            } else {
+                out.push(b);
+                i += 1;
+            }
+        }
+        out
+    }
+}

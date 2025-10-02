@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::ChildStdout;
 
-use crate::message::{MessageReplacer, ShortHashMapper};
+use crate::message::{msg_regex, MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
 pub struct TagProcessContext<'a> {
@@ -11,6 +11,7 @@ pub struct TagProcessContext<'a> {
     pub filt_file: &'a mut dyn Write,
     pub fi_in: Option<&'a mut dyn Write>,
     pub replacer: &'a Option<MessageReplacer>,
+    pub msg_regex: Option<&'a msg_regex::RegexReplacer>,
     pub short_mapper: Option<&'a ShortHashMapper>,
     pub opts: &'a Options,
     pub updated_refs: &'a mut BTreeSet<Vec<u8>>,
@@ -134,7 +135,7 @@ pub fn process_tag_block(first_line: &[u8], mut ctx: TagProcessContext<'_>) -> i
                 }
             }
 
-            if ctx.replacer.is_none() && ctx.short_mapper.is_none() {
+            if ctx.replacer.is_none() && ctx.msg_regex.is_none() && ctx.short_mapper.is_none() {
                 // No modifications needed; forward header and payload without cloning
                 let header = format!("data {}\n", payload.len());
                 ctx.filt_file.write_all(header.as_bytes())?;
@@ -149,6 +150,9 @@ pub fn process_tag_block(first_line: &[u8], mut ctx: TagProcessContext<'_>) -> i
                 } else {
                     payload
                 };
+                if let Some(rr) = ctx.msg_regex {
+                    new_payload = rr.apply_regex(new_payload);
+                }
                 if let Some(mapper) = ctx.short_mapper {
                     new_payload = mapper.rewrite(new_payload);
                 }

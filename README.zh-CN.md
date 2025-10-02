@@ -48,7 +48,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
        --replace-text redact.txt \
        --write-report
      ```
-  4. 如提交/标签消息中也包含敏感数据，另备一份消息替换规则（当前仅字面值）：
+  4. 如提交/标签消息中也包含敏感数据，另备一份消息替换规则（支持字面值与正则，正则规则以 `regex:` 开头）：
      ```sh
      filter-repo-rs --replace-message msg_rules.txt
      ```
@@ -61,7 +61,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
 
 2. 提交/标签消息里有敏感信息，需要清洗
 
-- 准备一份消息替换规则（当前仅字面值）：
+- 准备一份消息替换规则（可用字面值或正则）：
   ```sh
   # messages.txt
   password==>[removed]
@@ -258,7 +258,6 @@ git symbolic-ref HEAD refs/heads/<branch-from-bundle>
 
 - 合并简化策略仍在优化中，复杂拓扑场景可能需要手动处理
 - 暂不支持增量处理（`--state-branch`）
-- `--replace-message` 目前仅支持字面值替换，正则支持开发中
 - Windows 路径策略固定为 "sanitize" 模式
 
 ### 使用建议
