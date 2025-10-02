@@ -16,7 +16,7 @@ pub fn sanitize_invalid_windows_path_bytes(p: &[u8]) -> Vec<u8> {
     {
         let (head, tail) = out.split_at(pos);
         let mut t = tail.to_vec();
-        while t.last().map_or(false, |c| *c == b'.' || *c == b' ') {
+        while t.last().is_some_and(|c| *c == b'.' || *c == b' ') {
             t.pop();
         }
         let mut combined = head.to_vec();
@@ -24,7 +24,7 @@ pub fn sanitize_invalid_windows_path_bytes(p: &[u8]) -> Vec<u8> {
         return combined;
     }
     let mut o = out;
-    while o.last().map_or(false, |c| *c == b'.' || *c == b' ') {
+    while o.last().is_some_and(|c| *c == b'.' || *c == b' ') {
         o.pop();
     }
     o

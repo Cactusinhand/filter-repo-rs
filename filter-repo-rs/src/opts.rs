@@ -349,8 +349,10 @@ pub fn parse_args() -> Options {
         idx += 1;
     }
 
-    let mut opts = Options::default();
-    opts.debug_mode = debug_mode_enabled(&args);
+    let mut opts = Options {
+        debug_mode: debug_mode_enabled(&args),
+        ..Options::default()
+    };
     let mut overrides = AnalyzeOverrides::default();
     let mut it = args.into_iter();
     while let Some(arg) = it.next() {

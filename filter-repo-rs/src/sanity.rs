@@ -2034,7 +2034,7 @@ fn check_working_tree_cleanliness_with_context(
     // Check for staged changes
     let staged_dirty = match executor.run_command(&["diff", "--staged", "--quiet"]) {
         Ok(_) => false, // Command succeeded, no staged changes
-        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true, // Exit code 1 means differences found
+        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
         Err(e) => {
             return Err(SanityCheckError::IoError(io::Error::new(
                 io::ErrorKind::Other,
@@ -2046,7 +2046,7 @@ fn check_working_tree_cleanliness_with_context(
     // Check for unstaged changes
     let unstaged_dirty = match executor.run_command(&["diff", "--quiet"]) {
         Ok(_) => false, // Command succeeded, no unstaged changes
-        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true, // Exit code 1 means differences found
+        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
         Err(e) => {
             return Err(SanityCheckError::IoError(io::Error::new(
                 io::ErrorKind::Other,
@@ -2533,7 +2533,7 @@ fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
     // Staged changes
     let staged_dirty = match executor.run_command(&["diff", "--staged", "--quiet"]) {
         Ok(_) => false,
-        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true,
+        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
         Err(e) => {
             return Err(SanityCheckError::IoError(io::Error::new(
                 io::ErrorKind::Other,
@@ -2545,7 +2545,7 @@ fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
     // Unstaged changes
     let unstaged_dirty = match executor.run_command(&["diff", "--quiet"]) {
         Ok(_) => false,
-        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code == 1 => true,
+        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
         Err(e) => {
             return Err(SanityCheckError::IoError(io::Error::new(
                 io::ErrorKind::Other,
