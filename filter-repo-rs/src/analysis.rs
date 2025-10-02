@@ -6,14 +6,12 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
-use crate::pathutil::dequote_c_style_bytes;
-use crate::pipes;
 
 // Simple footnote registry to keep human output compact by moving 40-char OIDs
 // to a dedicated footnotes list printed at the bottom.
@@ -85,14 +83,6 @@ pub struct PathStat {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
-pub struct DuplicateBlobStat {
-    pub oid: String,
-    pub paths: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub example_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
 pub struct CommitMessageStat {
     pub oid: String,
     pub length: usize,
@@ -120,7 +110,6 @@ pub struct RepositoryMetrics {
     pub blobs_over_threshold: Vec<ObjectStat>,
     pub directory_hotspots: Option<DirectoryStat>,
     pub longest_path: Option<PathStat>,
-    pub duplicate_blobs: Vec<DuplicateBlobStat>,
     pub max_commit_parents: usize,
     pub oversized_commit_messages: Vec<CommitMessageStat>,
 }
@@ -155,15 +144,118 @@ pub fn generate_report(opts: &Options) -> io::Result<AnalysisReport> {
 fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMetrics> {
     let mut metrics = RepositoryMetrics::default();
     metrics.workdir = Some(repo.display().to_string());
+
+    eprintln!("[*] Starting repository analysis...");
+
+    // First, get all blob sizes in one pass
+    eprintln!("[*] Gathering blob sizes...");
+    let (unpacked_size, packed_size) = gather_all_blob_sizes(repo)?;
+
+    // Initialize metrics with blob sizes - pre-allocate reasonable capacities
+    let estimated_blobs = unpacked_size.len();
+    let _blob_paths: HashMap<String, Vec<String>> = HashMap::new();
+    let mut stats = StatsCollection {
+        blob_paths: HashMap::with_capacity(estimated_blobs),
+        all_names: HashSet::with_capacity(estimated_blobs * 2), // Rough estimate
+        num_commits: 0,
+        max_parents: 0,
+    };
+
+    // Then process commit history
+    eprintln!("[*] Processing commit history...");
+    gather_commit_history(repo, &mut stats)?;
+
+    // Determine maximum number of parents across all commits
+    if let Ok(maxp) = gather_max_parents(repo) {
+        stats.max_parents = maxp;
+    }
+
+    // Now map blob OIDs to paths efficiently using the collected blob sizes
+    eprintln!("[*] Mapping blob paths...");
+    let blob_oids: HashSet<String> = unpacked_size.keys().cloned().collect();
+
+    // Use a simpler approach: git rev-list --objects --all and filter for needed OIDs
+    let mut blob_path_map: HashMap<String, String> = HashMap::new();
+    let output = run_git_capture(repo, &["rev-list", "--objects", "--all"])?;
+
+    for line in output.lines() {
+        let mut parts = line.splitn(2, ' ');
+        if let (Some(oid), Some(path)) = (parts.next(), parts.next()) {
+            if blob_oids.contains(oid) && !path.is_empty() {
+                blob_path_map.insert(oid.to_string(), path.to_string());
+                if blob_path_map.len() >= blob_oids.len() {
+                    break;
+                }
+            }
+        }
+    }
+
+    eprintln!("[*] Found {} blob-to-path mappings", blob_path_map.len());
+
+    // Convert path map (oid -> path) to blob_paths structure (oid -> Vec<path>)
+    for (oid, path) in blob_path_map {
+        stats
+            .blob_paths
+            .entry(oid.clone())
+            .or_insert_with(Vec::new)
+            .push(path.clone());
+        stats.all_names.insert(path);
+    }
+
+    // Quick repository stats
     gather_footprint(repo, &mut metrics)?;
     gather_refs(repo, &mut metrics)?;
-    // History-wide scan via fast-export for reachable blobs/commits and path mapping
-    gather_history_fast_export(repo, cfg, &mut metrics)?;
-    // Tree inventory via cat-file for counts and top sizes (best-effort)
+
+    // Update metrics from gathered data
+    metrics
+        .object_types
+        .insert("blob".to_string(), stats.blob_paths.len() as u64);
+    metrics
+        .object_types
+        .insert("commit".to_string(), stats.num_commits);
+    metrics.max_commit_parents = stats.max_parents;
+
+    // Find largest blobs and prepare path mappings
+    let mut largest_blobs: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
+    let mut threshold_hits: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
+
+    for (oid, _paths) in &stats.blob_paths {
+        let actual_size = unpacked_size
+            .get(oid)
+            .copied()
+            .unwrap_or_else(|| packed_size.get(oid).copied().unwrap_or(0));
+        push_top(&mut largest_blobs, cfg.top, actual_size, oid);
+        if actual_size >= cfg.thresholds.warn_blob_bytes {
+            push_top(&mut threshold_hits, cfg.top, actual_size, oid);
+        }
+    }
+
+    // Convert to ObjectStat with paths
+    metrics.largest_blobs = heap_to_object_stats_with_paths(largest_blobs, &stats.blob_paths);
+    metrics.blobs_over_threshold =
+        heap_to_object_stats_with_paths(threshold_hits, &stats.blob_paths);
+
+    // Tree inventory via cat-file for counts and top sizes (lightweight)
+    eprintln!("[*] Gathering tree inventory...");
     gather_tree_inventory(repo, cfg, &mut metrics)?;
-    // Keep a quick HEAD snapshot for context
-    gather_worktree_snapshot(repo, cfg, &mut metrics)?;
+
+    // Keep a quick HEAD snapshot for context (simplified)
+    eprintln!("[*] Analyzing working directory...");
+    gather_worktree_snapshot_simplified(repo, cfg, &mut metrics)?;
+
+    // Gather oversized commit messages based on configured threshold
+    metrics.oversized_commit_messages =
+        gather_oversized_commit_messages(repo, cfg.thresholds.warn_commit_msg_bytes)?;
+
+    eprintln!("[*] Analysis complete!");
     Ok(metrics)
+}
+
+struct StatsCollection {
+    blob_paths: HashMap<String, Vec<String>>,
+    all_names: HashSet<String>,
+    num_commits: u64,
+    max_parents: usize,
 }
 
 fn gather_footprint(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
@@ -253,9 +345,9 @@ fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
     Ok(())
 }
 
-fn gather_worktree_snapshot(
+fn gather_worktree_snapshot_simplified(
     repo: &Path,
-    cfg: &AnalyzeConfig,
+    _cfg: &AnalyzeConfig,
     metrics: &mut RepositoryMetrics,
 ) -> io::Result<()> {
     let head = run_git_capture(repo, &["rev-parse", "--verify", "HEAD"])
@@ -264,420 +356,369 @@ fn gather_worktree_snapshot(
     if head.is_empty() {
         return Ok(());
     }
-    let mut child = Command::new("git")
-        .current_dir(repo)
-        .arg("ls-tree")
-        .arg("-r")
-        .arg("--full-tree")
-        .arg("-z")
-        .arg(&head)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "failed to capture git ls-tree stdout")
-    })?;
-    let mut reader = BufReader::new(stdout);
-    let mut buf = Vec::new();
+
+    // Use git ls-tree with a simpler format to get basic stats
+    let output = run_git_capture(repo, &["ls-tree", "-r", "--full-tree", &head])?;
     let mut directories: HashMap<String, usize> = HashMap::new();
-    let mut duplicates: HashMap<String, DuplicateBlobStat> = HashMap::new();
-    let mut sample_paths: HashMap<String, String> = HashMap::new();
-    while read_until(&mut reader, 0, &mut buf)? {
-        if buf.is_empty() {
-            continue;
-        }
-        let entry = String::from_utf8_lossy(&buf[..buf.len() - 1]);
-        let mut parts = entry.splitn(2, '\t');
-        let meta = parts.next().unwrap_or("");
+    let mut longest_path_len = 0;
+    let mut longest_path = String::new();
+
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        let _mode = parts.next().unwrap_or("");
+        let typ = parts.next().unwrap_or("");
+        let _oid = parts.next().unwrap_or("");
         let path = parts.next().unwrap_or("");
-        let mut meta_parts = meta.split_whitespace();
-        let _mode = meta_parts.next();
-        let typ = meta_parts.next().unwrap_or("");
-        let oid = meta_parts.next().unwrap_or("");
+
         if typ == "blob" {
             let len = path.len();
-            if let Some(current) = &mut metrics.longest_path {
-                if len > current.length {
-                    *current = PathStat {
-                        path: path.to_string(),
-                        length: len,
-                    };
-                }
-            } else {
-                metrics.longest_path = Some(PathStat {
-                    path: path.to_string(),
-                    length: len,
-                });
+            if len > longest_path_len {
+                longest_path_len = len;
+                longest_path = path.to_string();
             }
-            sample_paths
-                .entry(oid.to_string())
-                .or_insert_with(|| path.to_string());
-            let entry = duplicates
-                .entry(oid.to_string())
-                .or_insert_with(|| DuplicateBlobStat {
-                    oid: oid.to_string(),
-                    paths: 0,
-                    example_path: Some(path.to_string()),
-                });
-            entry.paths += 1;
         }
+
         if let Some(dir) = parent_directory(path) {
             *directories.entry(dir).or_insert(0) += 1;
         } else {
             *directories.entry(String::from(".")).or_insert(0) += 1;
         }
-        buf.clear();
     }
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, "git ls-tree failed"));
+
+    // Update metrics with collected data
+    if !longest_path.is_empty() {
+        metrics.longest_path = Some(PathStat {
+            path: longest_path,
+            length: longest_path_len,
+        });
     }
-    // If some of the top blobs are not present in HEAD, look up a historical path
-    // from any revision in the repository history to improve readability.
-    let mut needed: HashSet<String> = HashSet::new();
-    for b in metrics
-        .largest_blobs
-        .iter()
-        .chain(&metrics.blobs_over_threshold)
-    {
-        if !sample_paths.contains_key(&b.oid) {
-            needed.insert(b.oid.clone());
-        }
-    }
-    let mut history_paths: HashMap<String, String> = HashMap::new();
-    if !needed.is_empty() {
-        history_paths = map_oids_to_paths_from_history(repo, &needed)?;
-    }
-    let mut duplicates_vec: Vec<DuplicateBlobStat> = duplicates
-        .into_iter()
-        .filter(|(_, stat)| stat.paths > 1)
-        .map(|(_, stat)| stat)
-        .collect();
-    duplicates_vec.sort_by(|a, b| b.paths.cmp(&a.paths));
-    duplicates_vec.truncate(cfg.top);
-    metrics.duplicate_blobs = duplicates_vec;
-    for blob in metrics
-        .largest_blobs
-        .iter_mut()
-        .chain(&mut metrics.blobs_over_threshold)
-    {
-        if let Some(path) = sample_paths.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        } else if let Some(path) = history_paths.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        }
-    }
+
     if let Some((path, entries)) = directories.into_iter().max_by_key(|(_, count)| *count) {
         metrics.directory_hotspots = Some(DirectoryStat { path, entries });
     }
+
     Ok(())
 }
 
-// Map a set of blob OIDs to one example path from repository history (any revision).
-// Uses `git rev-list --objects --all -z` to safely parse paths with spaces.
-fn map_oids_to_paths_from_history(
-    repo: &Path,
-    needed: &HashSet<String>,
-) -> io::Result<HashMap<String, String>> {
-    let mut found: HashMap<String, String> = HashMap::new();
-    let mut child = Command::new("git")
-        .current_dir(repo)
-        .arg("rev-list")
-        .arg("--objects")
-        .arg("--all")
-        .arg("-z")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to capture git rev-list stdout",
-        )
-    })?;
-    let mut reader = BufReader::new(stdout);
-    let mut rec = Vec::new();
-    while read_until(&mut reader, 0, &mut rec)? {
-        if rec.is_empty() {
+// History-wide metrics via single rev-list | diff-tree pipeline
+fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashMap<String, u64>)> {
+    let output = run_git_capture(
+        repo,
+        &[
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize) %(objectsize:disk)",
+            "--batch-all-objects",
+        ],
+    )?;
+
+    // Count total lines first for progress bar
+    let lines: Vec<&str> = output.lines().collect();
+    let total_lines = lines.len();
+
+    // Pre-allocate with reasonable capacity based on typical repository size
+    let mut unpacked_size = HashMap::with_capacity(100_000);
+    let mut packed_size = HashMap::with_capacity(100_000);
+    let mut blob_count = 0;
+    let mut processed_objects = 0;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-        // Record is "<oid> <path>" or just "<oid>" (for commits or objects without path)
-        let line = String::from_utf8_lossy(&rec[..rec.len() - 1]);
-        // Split once on whitespace
-        let mut it = line.splitn(2, char::is_whitespace);
-        let oid = it.next().unwrap_or("");
-        if needed.contains(oid) {
-            if let Some(path) = it.next() {
-                if !path.is_empty() && !found.contains_key(oid) {
-                    found.insert(oid.to_string(), path.to_string());
-                    if found.len() >= needed.len() {
-                        break;
-                    }
+
+        // Use more efficient parsing - avoid Vec allocation
+        let mut parts_iter = trimmed.split_whitespace();
+        if let (Some(sha), Some(objtype), Some(objsize_str), Some(objdisksize_str)) = (
+            parts_iter.next(),
+            parts_iter.next(),
+            parts_iter.next(),
+            parts_iter.next(),
+        ) {
+            if objtype == "blob" {
+                if let (Ok(objsize), Ok(objdisksize)) =
+                    (objsize_str.parse::<u64>(), objdisksize_str.parse::<u64>())
+                {
+                    unpacked_size.insert(sha.to_string(), objsize);
+                    packed_size.insert(sha.to_string(), objdisksize);
+                    blob_count += 1;
                 }
             }
         }
-        rec.clear();
+
+        processed_objects += 1;
+
+        // Update progress bar every 1000 items
+        if idx % 1000 == 0 && total_lines > 0 {
+            let progress = ((processed_objects as f64 / total_lines as f64) * 100.0) as u32;
+            let bar_length = 30;
+            let filled = progress as usize * bar_length / 100;
+            let bar: String = (0..bar_length)
+                .map(|i| if i < filled { '=' } else { ' ' })
+                .collect();
+            print!(
+                "\r[*] Processing objects [{}] {}% ({}/{})",
+                bar, progress, processed_objects, total_lines
+            );
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+        }
     }
-    drop(reader);
-    let _ = child.wait();
-    Ok(found)
+
+    // Show final progress at 100%
+    if total_lines > 0 {
+        let bar_length = 30;
+        let bar: String = (0..bar_length).map(|_| '=').collect();
+        println!(
+            "\r[*] Processing objects [{}] 100% ({}/{})",
+            bar, processed_objects, total_lines
+        );
+        use std::io::Write;
+        std::io::stdout().flush().unwrap();
+    }
+
+    eprintln!(
+        "[*] Found {} blobs out of {} total objects",
+        blob_count, processed_objects
+    );
+    Ok((unpacked_size, packed_size))
 }
 
-// History-wide metrics via fast-export: blob/path mapping, sizes for top N, commit parents,
-// oversized commit messages. This intentionally ignores blob payloads.
-fn gather_history_fast_export(
+fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result<()> {
+    // Use a more efficient batch processing approach
+    // Process commits in batches of 5000 to balance memory and performance
+    const BATCH_SIZE: usize = 5000;
+
+    // Get total commit count first
+    let rev_list_output = run_git_capture(repo, &["rev-list", "--all", "--count"])?;
+    let total_commits = rev_list_output
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Could not parse commit count"))?;
+
+    let mut processed = 0;
+    while processed < total_commits {
+        let batch_start = processed;
+        let batch_end = std::cmp::min(processed + BATCH_SIZE, total_commits);
+
+        // Get a batch of commits using skip and max-count
+        let batch_output = run_git_capture(
+            repo,
+            &[
+                "rev-list",
+                "--all",
+                "--skip",
+                &batch_start.to_string(),
+                "--max-count",
+                &(batch_end - batch_start).to_string(),
+            ],
+        )?;
+
+        let commits: Vec<&str> = batch_output.trim().split_whitespace().collect();
+
+        // Process this batch using a single git log command
+        if !commits.is_empty() {
+            let commit_range = format!("{}..{}", commits[0], commits[commits.len() - 1]);
+            let log_output = run_git_capture(
+                repo,
+                &[
+                    "log",
+                    "--pretty=format:%H %P",
+                    "--name-status",
+                    "--no-renames",
+                    &commit_range,
+                ],
+            )?;
+
+            // Parse the batch output
+            parse_batch_log_output(&log_output, stats, repo)?;
+            processed += commits.len();
+
+            // Update progress bar after each batch
+            let progress = ((processed as f64 / total_commits as f64) * 100.0) as u32;
+            let bar_length = 30;
+            let filled = progress as usize * bar_length / 100;
+            let bar: String = (0..bar_length)
+                .map(|i| if i < filled { '=' } else { ' ' })
+                .collect();
+            print!(
+                "\r[*] Processing commits [{}] {}% ({}/{})",
+                bar, progress, processed, total_commits
+            );
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+        } else {
+            break;
+        }
+    }
+
+    // Clear progress line and show final result
+    println!();
+    stats.num_commits = total_commits as u64;
+    eprintln!(
+        "[*] Commit processing completed. Total: {}",
+        stats.num_commits
+    );
+    Ok(())
+}
+
+fn gather_max_parents(repo: &Path) -> io::Result<usize> {
+    let output = run_git_capture(repo, &["rev-list", "--parents", "--all"])?;
+    let mut max_parents: usize = 0;
+    for line in output.lines() {
+        let count = line.split_whitespace().count();
+        if count > 0 {
+            let parents = count - 1; // first is commit itself
+            if parents > max_parents {
+                max_parents = parents;
+            }
+        }
+    }
+    Ok(max_parents)
+}
+
+fn gather_oversized_commit_messages(
     repo: &Path,
-    cfg: &AnalyzeConfig,
-    metrics: &mut RepositoryMetrics,
+    threshold_bytes: usize,
+) -> io::Result<Vec<CommitMessageStat>> {
+    if threshold_bytes == 0 {
+        return Ok(Vec::new());
+    }
+    let output = run_git_capture(repo, &["log", "--all", "--pretty=%H%x00%B%x00"])?;
+    let mut stats = Vec::new();
+    let mut iter = output.split('\0');
+    while let Some(oid) = iter.next() {
+        if oid.is_empty() {
+            break;
+        }
+        if let Some(msg) = iter.next() {
+            let len = msg.as_bytes().len();
+            if len >= threshold_bytes {
+                stats.push(CommitMessageStat {
+                    oid: oid.trim().to_string(),
+                    length: len,
+                });
+            }
+        } else {
+            break;
+        }
+    }
+    Ok(stats)
+}
+
+fn parse_batch_log_output(
+    output: &str,
+    stats: &mut StatsCollection,
+    _repo: &Path,
 ) -> io::Result<()> {
-    let mut fe_opts = Options::default();
-    fe_opts.source = repo.to_path_buf();
-    fe_opts.no_data = true;
-    fe_opts.quotepath = true;
-    let mut cmd = pipes::build_fast_export_cmd(&fe_opts)?;
-    let mut child = cmd.stdout(Stdio::piped()).spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to capture git fast-export stdout",
-        )
-    })?;
-    let mut reader = BufReader::new(stdout);
+    let lines: Vec<&str> = output.lines().collect();
+    let mut i = 0;
 
-    let mut line = Vec::new();
-    let mut in_commit = false;
-    let mut cur_commit_oid: Option<String> = None;
-    let mut cur_parents: usize = 0;
-    let mut commit_count: u64 = 0;
+    while i < lines.len() {
+        let line = lines[i].trim();
 
-    let mut blob_paths: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut blob_example_path: HashMap<String, String> = HashMap::new();
-
-    while reader.read_until(b'\n', &mut line)? != 0 {
-        if line.starts_with(b"commit ") {
-            in_commit = true;
-            cur_commit_oid = None;
-            cur_parents = 0;
-            commit_count = commit_count.saturating_add(1);
-            line.clear();
+        // Skip empty lines
+        if line.is_empty() {
+            i += 1;
             continue;
         }
-        if in_commit {
-            if line == b"\n" {
-                if cur_parents > metrics.max_commit_parents {
-                    metrics.max_commit_parents = cur_parents;
-                }
-                in_commit = false;
-                line.clear();
-                continue;
-            }
-            if line.starts_with(b"original-oid ") {
-                let s = String::from_utf8_lossy(&line[b"original-oid ".len()..])
-                    .trim()
-                    .to_string();
-                cur_commit_oid = Some(s);
-                line.clear();
-                continue;
-            }
-            if line.starts_with(b"from ") || line.starts_with(b"merge ") {
-                cur_parents = cur_parents.saturating_add(1);
-                line.clear();
-                continue;
-            }
-            if line.starts_with(b"data ") {
-                let n = parse_size_after_data(&line)?;
-                if n > cfg.thresholds.warn_commit_msg_bytes {
-                    if let Some(oid) = cur_commit_oid.clone() {
-                        metrics
-                            .oversized_commit_messages
-                            .push(CommitMessageStat { oid, length: n });
-                    }
-                }
-                // Read and discard payload
-                let mut payload = vec![0u8; n];
-                reader.read_exact(&mut payload)?;
-                line.clear();
-                continue;
-            }
-            if line.starts_with(b"M ") {
-                if let Some((oid, path)) = parse_modify_line(&line) {
-                    if oid.len() == 40 && oid.chars().all(|c| c.is_ascii_hexdigit()) {
-                        let oid_lower = oid.to_ascii_lowercase();
-                        blob_paths
-                            .entry(oid_lower.clone())
-                            .or_default()
-                            .insert(path.clone());
-                        blob_example_path.entry(oid_lower).or_insert(path);
-                    }
-                }
-                line.clear();
-                continue;
-            }
-        }
-        line.clear();
-    }
-    let _ = child.wait();
 
-    // Summarize object type counts from what we observed
-    metrics
-        .object_types
-        .insert("commit".to_string(), commit_count);
-    metrics
-        .object_types
-        .insert("blob".to_string(), blob_paths.len() as u64);
+        // Check if this is a commit line. We allow either a bare 40-hex hash
+        // or a hash followed by one or more parent hashes ("%H %P" output).
+        let is_commit_line = if line.len() >= 40 {
+            let (head, rest) = line.split_at(40);
+            head.chars().all(|c| c.is_ascii_hexdigit())
+                && (rest.is_empty() || rest.starts_with(' '))
+        } else {
+            false
+        };
 
-    // Fetch sizes for all observed blobs, then compute top lists
-    let sizes = batch_check_blob_sizes(repo, blob_paths.keys())?;
-    let mut largest_blobs: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
-    let mut threshold_hits: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
-    for (oid, size) in &sizes {
-        push_top(&mut largest_blobs, cfg.top, *size, oid);
-        if *size >= cfg.thresholds.warn_blob_bytes {
-            push_top(&mut threshold_hits, cfg.top, *size, oid);
-        }
-    }
-    metrics.largest_blobs = heap_to_vec(largest_blobs);
-    for blob in &mut metrics.largest_blobs {
-        if let Some(path) = blob_example_path.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        }
-    }
-    metrics.blobs_over_threshold = heap_to_vec(threshold_hits);
-    for blob in &mut metrics.blobs_over_threshold {
-        if let Some(path) = blob_example_path.get(&blob.oid) {
-            blob.path = Some(path.clone());
-        }
-    }
+        if is_commit_line {
+            // Parse commit and optional parents from the line
+            let mut parts = line.split_whitespace();
+            let commit = parts.next().unwrap_or("").to_string();
+            let parents: Vec<String> = parts.map(|s| s.to_string()).collect();
+            i += 1;
 
-    // Duplicate blobs across history: rank by unique path count
-    let mut dups: Vec<DuplicateBlobStat> = blob_paths
-        .into_iter()
-        .filter_map(|(oid, paths)| {
-            let count = paths.len();
-            if count > 1 {
-                Some(DuplicateBlobStat {
-                    oid,
-                    paths: count,
-                    example_path: None,
-                })
-            } else {
-                None
-            }
-        })
-        .collect();
-    dups.sort_by(|a, b| b.paths.cmp(&a.paths));
-    dups.truncate(cfg.top);
-    metrics.duplicate_blobs = dups;
+            // Collect file changes for this commit
+            let mut file_changes = Vec::new();
 
-    Ok(())
-}
+            while i < lines.len() {
+                let change_line = lines[i].trim();
 
-fn parse_size_after_data(line: &[u8]) -> io::Result<usize> {
-    if !line.starts_with(b"data ") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "expected data header",
-        ));
-    }
-    let size_bytes = &line[b"data ".len()..];
-    let n = std::str::from_utf8(size_bytes)
-        .ok()
-        .map(|s| s.trim())
-        .and_then(|s| s.parse::<usize>().ok())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
-    Ok(n)
-}
-
-// Parse an 'M <mode> <id> <path>' fast-export line; return (id, decoded_path)
-fn parse_modify_line(line: &[u8]) -> Option<(String, String)> {
-    if !line.starts_with(b"M ") {
-        return None;
-    }
-    let rest = &line[2..];
-    let space1 = rest.iter().position(|&b| b == b' ')?;
-    let rest = &rest[space1 + 1..]; // after mode
-    let space2 = rest.iter().position(|&b| b == b' ')?;
-    let id = String::from_utf8_lossy(&rest[..space2]).to_string();
-    let path_part = &rest[space2 + 1..];
-    // Decode path with C-style quoting if needed, strip trailing newline
-    let decoded = if !path_part.is_empty() && path_part[0] == b'"' {
-        // find closing quote respecting escapes
-        let mut idx = 1usize;
-        let mut found = None;
-        while idx < path_part.len() {
-            if path_part[idx] == b'"' {
-                // count preceding backslashes
-                let mut backslashes = 0usize;
-                let mut j = idx;
-                while j > 0 && path_part[j - 1] == b'\\' {
-                    backslashes += 1;
-                    j -= 1;
-                }
-                if backslashes % 2 == 0 {
-                    found = Some(idx);
+                // Stop if we hit the next commit or empty line
+                if change_line.is_empty()
+                    || (change_line.len() == 40
+                        && change_line.chars().all(|c| c.is_ascii_hexdigit()))
+                {
                     break;
                 }
+
+                // Parse file change: <status> <path>
+                let mut parts = change_line.split_whitespace();
+                if let (Some(status), Some(path)) = (parts.next(), parts.next()) {
+                    // Don't add placeholder hashes to stats - blob mapping will be done later
+                    // Just track file changes for commit processing
+                    let placeholder_id = format!("placeholder_{}", path.len());
+
+                    file_changes.push((
+                        vec!["100644".to_string()], // default mode
+                        vec![placeholder_id], // placeholder that won't interfere with real hashes
+                        status.to_string(),
+                        vec![path.to_string()],
+                    ));
+                }
+
+                i += 1;
             }
-            idx += 1;
+
+            // Analyze this commit
+            analyze_commit(stats, commit, parents, file_changes);
+            stats.num_commits += 1;
+        } else {
+            i += 1;
         }
-        let end = found?;
-        let bytes = dequote_c_style_bytes(&path_part[1..end]);
-        String::from_utf8_lossy(&bytes).to_string()
-    } else {
-        let s = String::from_utf8_lossy(path_part).to_string();
-        s.trim().to_string()
-    };
-    Some((id, decoded))
+    }
+
+    Ok(())
 }
 
-fn batch_check_blob_sizes<'a, I>(repo: &Path, oids: I) -> io::Result<HashMap<String, u64>>
-where
-    I: IntoIterator<Item = &'a String>,
-{
-    let mut child = Command::new("git")
-        .current_dir(repo)
-        .arg("cat-file")
-        .arg("--batch-check")
-        .stdout(Stdio::piped())
-        .stdin(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    // Feed all OIDs
-    for oid in oids {
-        stdin.write_all(oid.as_bytes())?;
-        stdin.write_all(b"\n")?;
+fn analyze_commit(
+    stats: &mut StatsCollection,
+    _commit: String,
+    parents: Vec<String>,
+    file_changes: Vec<(Vec<String>, Vec<String>, String, Vec<String>)>,
+) {
+    // Track max parents seen
+    if stats.max_parents < parents.len() {
+        stats.max_parents = parents.len();
     }
-    drop(stdin);
-    let mut sizes: HashMap<String, u64> = HashMap::new();
-    let mut line = String::new();
-    while {
-        line.clear();
-        stdout.read_line(&mut line)? != 0
-    } {
-        // Format: "<oid> <type> <size>"
-        let mut it = line.split_whitespace();
-        let oid = match it.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let typ = match it.next() {
-            Some(s) => s,
-            None => continue,
-        };
-        let sz = match it.next() {
-            Some(s) => s.parse::<u64>().ok(),
-            None => None,
-        };
-        if typ == "blob" {
-            if let Some(n) = sz {
-                sizes.insert(oid.to_string(), n);
-            }
+    for change in file_changes {
+        let (modes, shas, change_types, filenames) = change;
+        let mode = &modes[modes.len() - 1];
+        let sha = &shas[shas.len() - 1];
+        let filename = &filenames[filenames.len() - 1];
+
+        // Skip submodules and deletions
+        if mode == "160000" || mode == "000000" {
+            continue;
         }
+
+        // Track deletions - more efficient check
+        let has_additions = !change_types.is_empty()
+            && change_types
+                .bytes()
+                .any(|c| matches!(c, b'A' | b'M' | b'T'));
+        if !has_additions {
+            continue;
+        }
+
+        // Record blob paths - use the hash as-is to avoid to_ascii_lowercase allocation
+        // Git hashes are already lowercase in most cases, and case insensitivity isn't critical for analysis
+        let paths_entry = stats.blob_paths.entry(sha.clone()).or_insert_with(Vec::new);
+        paths_entry.push(filename.clone());
+        stats.all_names.insert(filename.clone());
     }
-    let _ = child.wait();
-    Ok(sizes)
 }
 
 // (removed old gather_history_stats; superseded by gather_history_fast_export)
@@ -765,17 +806,6 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
             ),
         });
     }
-    if let Some(top) = metrics.duplicate_blobs.first() {
-        if top.paths >= thresholds.warn_duplicate_paths {
-            warnings.push(Warning {
-        level: WarningLevel::Warning,
-        message: format!(
-          "Blob {} appears {} times in the working tree (threshold {}).", top.oid, top.paths, thresholds.warn_duplicate_paths
-        ),
-        recommendation: Some("Avoid repeating identical payloads; prefer build-time generation or configuration.".to_string()),
-      });
-        }
-    }
     if metrics.max_commit_parents > thresholds.warn_max_parents {
         warnings.push(Warning {
             level: WarningLevel::Info,
@@ -812,7 +842,7 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
     warnings
 }
 
-fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
+fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
     let mut foot = FootnoteRegistry::new();
     println!("{}", banner("Repository analysis"));
     if let Some(path) = &report.metrics.workdir {
@@ -893,37 +923,6 @@ fn print_human(report: &AnalysisReport, cfg: &AnalyzeConfig) {
         );
     }
 
-    if !report.metrics.duplicate_blobs.is_empty() {
-        let shown = report.metrics.duplicate_blobs.len().min(cfg.top);
-        println!("  Duplicate blobs (top {}):", format_count(shown as u64));
-        let rows = report
-            .metrics
-            .duplicate_blobs
-            .iter()
-            .enumerate()
-            .map(|(idx, dup)| {
-                let rf = foot.note(&dup.oid, dup.example_path.as_deref());
-                vec![
-                    Cow::Owned(format!("{}", idx + 1)),
-                    Cow::Owned(format_count(dup.paths as u64)),
-                    dup.example_path
-                        .as_deref()
-                        .map(Cow::Borrowed)
-                        .unwrap_or(Cow::Borrowed("")),
-                    Cow::Owned(rf),
-                ]
-            })
-            .collect();
-        print_table(
-            &[
-                ("#", CellAlignment::Right),
-                ("Paths", CellAlignment::Right),
-                ("Path", CellAlignment::Left),
-                ("OID", CellAlignment::Center),
-            ],
-            rows,
-        );
-    }
     // History oddities are summarized above; keep oversized messages as a list
     if !report.metrics.oversized_commit_messages.is_empty() {
         println!("  Oversized commit messages:");
@@ -1070,13 +1069,6 @@ fn find_blob_context<'a>(metrics: &'a RepositoryMetrics, oid: &str) -> Option<St
                 .find(|b| b.oid == oid)
                 .and_then(|b| b.path.as_ref())
         })
-        .or_else(|| {
-            metrics
-                .duplicate_blobs
-                .iter()
-                .find(|d| d.oid == oid)
-                .and_then(|d| d.example_path.as_ref())
-        })
         .cloned()
 }
 
@@ -1094,12 +1086,6 @@ fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-fn read_until<R: BufRead>(reader: &mut R, byte: u8, buf: &mut Vec<u8>) -> io::Result<bool> {
-    buf.clear();
-    let n = reader.read_until(byte, buf)?;
-    Ok(n != 0)
 }
 
 fn parent_directory(path: &str) -> Option<String> {
@@ -1132,6 +1118,21 @@ fn heap_to_vec(heap: BinaryHeap<Reverse<(u64, String)>>) -> Vec<ObjectStat> {
             oid,
             size,
             path: None,
+        })
+        .collect()
+}
+
+fn heap_to_object_stats_with_paths(
+    heap: BinaryHeap<Reverse<(u64, String)>>,
+    blob_paths: &HashMap<String, Vec<String>>,
+) -> Vec<ObjectStat> {
+    heap.into_sorted_vec()
+        .into_iter()
+        .map(|Reverse((size, oid))| {
+            let path = blob_paths
+                .get(&oid)
+                .and_then(|paths| paths.first().cloned());
+            ObjectStat { oid, size, path }
         })
         .collect()
 }

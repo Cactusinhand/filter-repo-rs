@@ -1209,7 +1209,8 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     name: "--cleanup".to_string(),
                     description: vec![
                         "Run post-import cleanup (reflog expire + git gc)".to_string(),
-                        "Defaults to on for full rewrites; disabled with --partial or --dry-run.".to_string(),
+                        "Defaults to on for full rewrites; disabled with --partial or --dry-run."
+                            .to_string(),
                     ],
                 },
                 HelpOption {

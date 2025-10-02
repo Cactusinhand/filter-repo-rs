@@ -89,10 +89,6 @@ fn analyze_mode_limits_top_entries_and_populates_paths() {
         "threshold hits exceeded top limit"
     );
     assert!(
-        report.metrics.duplicate_blobs.len() <= opts.analyze.top,
-        "duplicate blob list exceeded top limit"
-    );
-    assert!(
         report
             .metrics
             .largest_blobs
@@ -107,14 +103,6 @@ fn analyze_mode_limits_top_entries_and_populates_paths() {
             .iter()
             .all(|b| b.path.is_some()),
         "expected sample paths for threshold hits"
-    );
-    assert!(
-        report
-            .metrics
-            .duplicate_blobs
-            .iter()
-            .all(|d| d.example_path.is_some()),
-        "expected example paths for duplicates"
     );
 }
 

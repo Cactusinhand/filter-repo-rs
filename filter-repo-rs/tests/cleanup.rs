@@ -90,7 +90,8 @@ fn cleanup_disabled_with_refs_by_default() {
     let cmds = git_commands_for_repo(&repo, &inv);
 
     assert!(
-        !any_cmd_contains_seq(&cmds, &["reflog", "expire"]) && !any_cmd_contains_seq(&cmds, &["gc"]),
+        !any_cmd_contains_seq(&cmds, &["reflog", "expire"])
+            && !any_cmd_contains_seq(&cmds, &["gc"]),
         "cleanup should not run when --refs is provided by default; cmds: {:?}",
         cmds
     );
@@ -110,8 +111,8 @@ fn cleanup_can_be_forced_with_refs() {
         cmds
     );
     assert!(
-        any_cmd_contains_seq(&cmds, &["gc", "--prune=now"]) 
-            || any_cmd_contains_seq(&cmds, &["gc", "--prune=now", "--quiet"]) 
+        any_cmd_contains_seq(&cmds, &["gc", "--prune=now"])
+            || any_cmd_contains_seq(&cmds, &["gc", "--prune=now", "--quiet"])
             || any_cmd_contains_seq(&cmds, &["gc", "--quiet", "--prune=now"]),
         "expected git gc --prune=now when forcing --cleanup with --refs; cmds: {:?}",
         cmds
