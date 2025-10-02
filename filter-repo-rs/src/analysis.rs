@@ -142,8 +142,10 @@ pub fn generate_report(opts: &Options) -> io::Result<AnalysisReport> {
 }
 
 fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMetrics> {
-    let mut metrics = RepositoryMetrics::default();
-    metrics.workdir = Some(repo.display().to_string());
+    let mut metrics = RepositoryMetrics {
+        workdir: Some(repo.display().to_string()),
+        ..Default::default()
+    };
 
     eprintln!("[*] Starting repository analysis...");
 
@@ -197,7 +199,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         stats
             .blob_paths
             .entry(oid.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(path.clone());
         stats.all_names.insert(path);
     }
@@ -219,7 +221,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     let mut largest_blobs: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
     let mut threshold_hits: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
 
-    for (oid, _paths) in &stats.blob_paths {
+    for oid in stats.blob_paths.keys() {
         let actual_size = unpacked_size
             .get(oid)
             .copied()
@@ -514,7 +516,7 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
             ],
         )?;
 
-        let commits: Vec<&str> = batch_output.trim().split_whitespace().collect();
+        let commits: Vec<&str> = batch_output.split_whitespace().collect();
 
         // Process this batch using a single git log command
         if !commits.is_empty() {
@@ -592,7 +594,7 @@ fn gather_oversized_commit_messages(
             break;
         }
         if let Some(msg) = iter.next() {
-            let len = msg.as_bytes().len();
+            let len = msg.len();
             if len >= threshold_bytes {
                 stats.push(CommitMessageStat {
                     oid: oid.trim().to_string(),
@@ -683,11 +685,14 @@ fn parse_batch_log_output(
     Ok(())
 }
 
+// Type alias to reduce complexity
+type FileChange = (Vec<String>, Vec<String>, String, Vec<String>);
+
 fn analyze_commit(
     stats: &mut StatsCollection,
     _commit: String,
     parents: Vec<String>,
-    file_changes: Vec<(Vec<String>, Vec<String>, String, Vec<String>)>,
+    file_changes: Vec<FileChange>,
 ) {
     // Track max parents seen
     if stats.max_parents < parents.len() {
@@ -715,7 +720,7 @@ fn analyze_commit(
 
         // Record blob paths - use the hash as-is to avoid to_ascii_lowercase allocation
         // Git hashes are already lowercase in most cases, and case insensitivity isn't critical for analysis
-        let paths_entry = stats.blob_paths.entry(sha.clone()).or_insert_with(Vec::new);
+        let paths_entry = stats.blob_paths.entry(sha.clone()).or_default();
         paths_entry.push(filename.clone());
         stats.all_names.insert(filename.clone());
     }
@@ -1048,14 +1053,10 @@ fn is_hex_40(s: &str) -> bool {
     if s.len() != 40 {
         return false;
     }
-    s.chars().all(|c| {
-        matches!(c,
-            '0'..='9' | 'a'..='f' | 'A'..='F'
-        )
-    })
+    s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn find_blob_context<'a>(metrics: &'a RepositoryMetrics, oid: &str) -> Option<String> {
+fn find_blob_context(metrics: &RepositoryMetrics, oid: &str) -> Option<String> {
     // Prefer example path if present
     metrics
         .blobs_over_threshold
@@ -1157,11 +1158,11 @@ fn banner(title: &str) -> String {
 }
 
 fn print_section(title: &str) {
-    println!("");
+    println!();
     println!("{:-^64}", format!(" {} ", title));
 }
 
-fn print_table<'a>(headers: &[(&str, CellAlignment)], rows: Vec<Vec<Cow<'a, str>>>) {
+fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<Cow<'_, str>>>) {
     if rows.is_empty() {
         return;
     }
@@ -1210,7 +1211,7 @@ fn format_size_gib(bytes: u64) -> String {
     format!("{:.2} GiB", to_gib(bytes))
 }
 
-fn build_summary_rows<'a>(metrics: &'a RepositoryMetrics) -> Vec<Vec<Cow<'a, str>>> {
+fn build_summary_rows(metrics: &RepositoryMetrics) -> Vec<Vec<Cow<'_, str>>> {
     let mut rows: Vec<Vec<Cow<'_, str>>> = Vec::new();
 
     // Overall repository size
@@ -1232,18 +1233,18 @@ fn build_summary_rows<'a>(metrics: &'a RepositoryMetrics) -> Vec<Vec<Cow<'a, str
     rows.push(vec![
         Cow::Borrowed("  * Loose objects"),
         Cow::Owned(format!(
-            "{} ({} MiB)",
+            "{} ({:.2} MiB)",
             format_count(metrics.loose_objects),
-            format!("{:.2}", to_mib(metrics.loose_size_bytes))
+            to_mib(metrics.loose_size_bytes)
         )),
     ]);
     // * Packed objects
     rows.push(vec![
         Cow::Borrowed("  * Packed objects"),
         Cow::Owned(format!(
-            "{} ({} MiB)",
+            "{} ({:.2} MiB)",
             format_count(metrics.packed_objects),
-            format!("{:.2}", to_mib(metrics.packed_size_bytes))
+            to_mib(metrics.packed_size_bytes)
         )),
     ]);
 

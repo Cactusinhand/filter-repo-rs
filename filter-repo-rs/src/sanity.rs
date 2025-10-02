@@ -240,27 +240,30 @@ impl fmt::Display for SanityCheckError {
                 actual,
                 is_bare,
             } => {
-                write!(f, "Git directory structure validation failed.\n")?;
+                writeln!(f, "Git directory structure validation failed.")?;
                 if *is_bare {
-                    write!(
+                    writeln!(
                         f,
-                        "Bare repository GIT_DIR should be '{}', but found '{}'.\n",
+                        "Bare repository GIT_DIR should be '{}', but found '{}'.",
                         expected, actual
                     )?;
-                    write!(f, "Ensure you're running filter-repo-rs from the root of the bare repository.\n")?;
+                    writeln!(f, "Ensure you're running filter-repo-rs from the root of the bare repository.")?;
                 } else {
-                    write!(
+                    writeln!(
                         f,
-                        "Non-bare repository GIT_DIR should be '{}', but found '{}'.\n",
+                        "Non-bare repository GIT_DIR should be '{}', but found '{}'.",
                         expected, actual
                     )?;
-                    write!(f, "Ensure you're running filter-repo-rs from the repository root directory.\n")?;
-                    write!(
+                    writeln!(
                         f,
-                        "The .git directory should be present in the current directory.\n"
+                        "Ensure you're running filter-repo-rs from the repository root directory."
+                    )?;
+                    writeln!(
+                        f,
+                        "The .git directory should be present in the current directory."
                     )?;
                 }
-                write!(f, "This indicates an improperly structured repository.\n")?;
+                writeln!(f, "This indicates an improperly structured repository.")?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::ReferenceConflict {
@@ -269,43 +272,43 @@ impl fmt::Display for SanityCheckError {
             } => {
                 match conflict_type {
                     ConflictType::CaseInsensitive => {
-                        write!(
+                        writeln!(
                             f,
-                            "Reference name conflicts detected (case-insensitive filesystem):\n"
+                            "Reference name conflicts detected (case-insensitive filesystem):"
                         )?;
                     }
                     ConflictType::UnicodeNormalization => {
-                        write!(
+                        writeln!(
                             f,
-                            "Reference name conflicts detected (Unicode normalization):\n"
+                            "Reference name conflicts detected (Unicode normalization):"
                         )?;
                     }
                 }
                 for (normalized, conflicting_refs) in conflicts {
-                    write!(
+                    writeln!(
                         f,
-                        "  Conflicting references for '{}': {}\n",
+                        "  Conflicting references for '{}': {}",
                         normalized,
                         conflicting_refs.join(", ")
                     )?;
                 }
-                write!(
-                    f,
-                    "These conflicts could cause issues on this filesystem.\n"
-                )?;
+                writeln!(f, "These conflicts could cause issues on this filesystem.")?;
                 match conflict_type {
                     ConflictType::CaseInsensitive => {
-                        write!(f, "Rename conflicting references to have unique case-insensitive names.\n")?;
-                        write!(f, "Example: 'git branch -m Main main-old' to resolve Main/main conflicts.\n")?;
+                        writeln!(
+                            f,
+                            "Rename conflicting references to have unique case-insensitive names."
+                        )?;
+                        writeln!(f, "Example: 'git branch -m Main main-old' to resolve Main/main conflicts.")?;
                     }
                     ConflictType::UnicodeNormalization => {
-                        write!(
+                        writeln!(
                             f,
-                            "Rename references to use consistent Unicode normalization.\n"
+                            "Rename references to use consistent Unicode normalization."
                         )?;
-                        write!(
+                        writeln!(
                             f,
-                            "This typically occurs with accented characters in reference names.\n"
+                            "This typically occurs with accented characters in reference names."
                         )?;
                     }
                 }
@@ -315,9 +318,9 @@ impl fmt::Display for SanityCheckError {
                 problematic_reflogs,
             } => {
                 let total = problematic_reflogs.len();
-                write!(
+                writeln!(
                     f,
-                    "Repository is not fresh (multiple reflog entries detected in {} refs).\n",
+                    "Repository is not fresh (multiple reflog entries detected in {} refs).",
                     total
                 )?;
                 // Only show examples in debug mode to avoid overwhelming output
@@ -327,51 +330,48 @@ impl fmt::Display for SanityCheckError {
                     .unwrap_or(false);
                 if show_examples && total > 0 {
                     let limit = 20usize.min(total);
-                    write!(f, "Examples ({} of {}):\n", limit, total)?;
+                    writeln!(f, "Examples ({} of {}):", limit, total)?;
                     for (name, cnt) in problematic_reflogs.iter().take(limit) {
-                        write!(f, "  {}: {} entries\n", name, cnt)?;
+                        writeln!(f, "  {}: {} entries", name, cnt)?;
                     }
                 }
-                write!(
+                writeln!(f, "Expected a fresh clone (at most one entry per reflog).",)?;
+                writeln!(
                     f,
-                    "Expected a fresh clone (at most one entry per reflog).\n",
-                )?;
-                write!(
-                    f,
-                    "Consider using a fresh clone, or run 'git reflog expire --expire=now --all' and 'git gc --prune=now'.\n",
+                    "Consider using a fresh clone, or run 'git reflog expire --expire=now --all' and 'git gc --prune=now'.",
                 )?;
                 if !show_examples {
-                    write!(f, "Set FRRS_DEBUG=1 to see example refs.\n")?;
+                    writeln!(f, "Set FRRS_DEBUG=1 to see example refs.")?;
                 }
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::UnpushedChanges { unpushed_branches } => {
-                write!(f, "Unpushed changes detected:\n")?;
+                writeln!(f, "Unpushed changes detected:")?;
                 for branch in unpushed_branches {
                     match &branch.remote_hash {
                         Some(remote_hash) if remote_hash != "missing" => {
-                            write!(
+                            writeln!(
                                 f,
-                                "  {}: local {} != origin {}\n",
+                                "  {}: local {} != origin {}",
                                 branch.branch_name,
                                 &branch.local_hash[..8.min(branch.local_hash.len())],
                                 &remote_hash[..8.min(remote_hash.len())]
                             )?;
                         }
                         _ => {
-                            write!(
+                            writeln!(
                                 f,
-                                "  {}: exists locally but not on origin\n",
+                                "  {}: exists locally but not on origin",
                                 branch.branch_name
                             )?;
                         }
                     }
                 }
-                write!(
+                writeln!(
                     f,
-                    "All local branches should match their origin counterparts.\n"
+                    "All local branches should match their origin counterparts."
                 )?;
-                write!(f, "Push your changes or use a fresh clone.\n")?;
+                writeln!(f, "Push your changes or use a fresh clone.")?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::NotFreshlyPacked {
@@ -379,7 +379,7 @@ impl fmt::Display for SanityCheckError {
                 loose_count,
                 replace_refs_count,
             } => {
-                write!(f, "Repository is not freshly packed.\n")?;
+                writeln!(f, "Repository is not freshly packed.")?;
                 write!(
                     f,
                     "Found {} pack(s) and {} loose object(s)",
@@ -388,35 +388,32 @@ impl fmt::Display for SanityCheckError {
                 if *replace_refs_count > 0 {
                     write!(f, " ({} are replace refs)", replace_refs_count)?;
                 }
-                write!(f, ".\n")?;
-                write!(
+                writeln!(f, ".")?;
+                writeln!(
                     f,
-                    "Expected freshly packed repository (≤1 pack and <100 loose objects).\n"
+                    "Expected freshly packed repository (≤1 pack and <100 loose objects)."
                 )?;
-                write!(
+                writeln!(
                     f,
-                    "Run 'git gc' to pack the repository or use a fresh clone.\n"
+                    "Run 'git gc' to pack the repository or use a fresh clone."
                 )?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::MultipleWorktrees { count } => {
-                write!(f, "Multiple worktrees found ({} total).\n", count)?;
-                write!(
+                writeln!(f, "Multiple worktrees found ({} total).", count)?;
+                writeln!(
                     f,
-                    "Repository filtering should be performed on a single worktree.\n"
+                    "Repository filtering should be performed on a single worktree."
                 )?;
-                write!(f, "Remove additional worktrees or use the main worktree.\n")?;
+                writeln!(f, "Remove additional worktrees or use the main worktree.")?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::StashedChanges => {
-                write!(f, "Stashed changes present.\n")?;
-                write!(
+                writeln!(f, "Stashed changes present.")?;
+                writeln!(f, "Repository should have a clean state before filtering.")?;
+                writeln!(
                     f,
-                    "Repository should have a clean state before filtering.\n"
-                )?;
-                write!(
-                    f,
-                    "Apply or drop stashed changes: 'git stash pop' or 'git stash drop'.\n"
+                    "Apply or drop stashed changes: 'git stash pop' or 'git stash drop'."
                 )?;
                 write!(f, "Use --force to bypass this check.")
             }
@@ -424,49 +421,49 @@ impl fmt::Display for SanityCheckError {
                 staged_dirty,
                 unstaged_dirty,
             } => {
-                write!(f, "Working tree is not clean.\n")?;
+                writeln!(f, "Working tree is not clean.")?;
                 if *staged_dirty {
-                    write!(f, "  - Staged changes detected\n")?;
+                    writeln!(f, "  - Staged changes detected")?;
                 }
                 if *unstaged_dirty {
-                    write!(f, "  - Unstaged changes detected\n")?;
+                    writeln!(f, "  - Unstaged changes detected")?;
                 }
-                write!(f, "Commit or stash your changes before filtering.\n")?;
+                writeln!(f, "Commit or stash your changes before filtering.")?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::UntrackedFiles { files } => {
-                write!(f, "Untracked files present:\n")?;
+                writeln!(f, "Untracked files present:")?;
                 for file in files.iter().take(10) {
                     // Show first 10 files
-                    write!(f, "  {}\n", file)?;
+                    writeln!(f, "  {}", file)?;
                 }
                 if files.len() > 10 {
-                    write!(f, "  ... and {} more files\n", files.len() - 10)?;
+                    writeln!(f, "  ... and {} more files", files.len() - 10)?;
                 }
-                write!(
+                writeln!(
                     f,
-                    "Add, commit, or remove untracked files before filtering.\n"
+                    "Add, commit, or remove untracked files before filtering."
                 )?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::InvalidRemotes { remotes } => {
-                write!(f, "Invalid remote configuration.\n")?;
+                writeln!(f, "Invalid remote configuration.")?;
 
                 // Context-aware guidance for local clone detection
                 if Self::detect_local_clone(remotes) {
-                    write!(
+                    writeln!(
                         f,
-                        "Note: when cloning local repositories, use 'git clone --no-local'\n"
+                        "Note: when cloning local repositories, use 'git clone --no-local'"
                     )?;
-                    write!(f, "to avoid filesystem-specific issues.\n")?;
+                    writeln!(f, "to avoid filesystem-specific issues.")?;
                 }
 
-                write!(
+                writeln!(
                     f,
-                    "Expected one remote 'origin' or no remotes, but found: {}\n",
+                    "Expected one remote 'origin' or no remotes, but found: {}",
                     remotes.join(", ")
                 )?;
-                write!(f, "Use a repository with proper remote configuration.\n")?;
+                writeln!(f, "Use a repository with proper remote configuration.")?;
                 write!(f, "Use --force to bypass this check.")
             }
             SanityCheckError::AlreadyRan {
@@ -474,12 +471,9 @@ impl fmt::Display for SanityCheckError {
                 age_hours,
                 user_confirmed,
             } => {
-                write!(
-                    f,
-                    "Filter-repo-rs has already been run on this repository.\n"
-                )?;
-                write!(f, "Found marker file: {}\n", ran_file.display())?;
-                write!(f, "Last run was {} hours ago.\n", age_hours)?;
+                writeln!(f, "Filter-repo-rs has already been run on this repository.")?;
+                writeln!(f, "Found marker file: {}", ran_file.display())?;
+                writeln!(f, "Last run was {} hours ago.", age_hours)?;
                 if !user_confirmed {
                     write!(
                         f,
@@ -490,16 +484,16 @@ impl fmt::Display for SanityCheckError {
                 }
             }
             SanityCheckError::SensitiveDataIncompatible { option, suggestion } => {
-                write!(
+                writeln!(
                     f,
-                    "Sensitive data removal mode is incompatible with {}.\n",
+                    "Sensitive data removal mode is incompatible with {}.",
                     option
                 )?;
-                write!(
+                writeln!(
                     f,
-                    "This combination could compromise the security of sensitive data removal.\n"
+                    "This combination could compromise the security of sensitive data removal."
                 )?;
-                write!(f, "Suggestion: {}\n", suggestion)?;
+                writeln!(f, "Suggestion: {}", suggestion)?;
                 write!(
                     f,
                     "Use --force to bypass this check if you understand the security implications."
@@ -588,10 +582,10 @@ impl fmt::Display for GitCommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GitCommandError::NotFound => {
-                write!(f, "Git executable not found on PATH.\n")?;
-                write!(
+                writeln!(f, "Git executable not found on PATH.")?;
+                writeln!(
                     f,
-                    "Please install Git and ensure it's available in your PATH.\n"
+                    "Please install Git and ensure it's available in your PATH."
                 )?;
                 write!(
                     f,
@@ -603,8 +597,8 @@ impl fmt::Display for GitCommandError {
                 stderr,
                 exit_code,
             } => {
-                write!(f, "Git command failed: {}\n", command)?;
-                write!(f, "Exit code: {}\n", exit_code)?;
+                writeln!(f, "Git command failed: {}", command)?;
+                writeln!(f, "Exit code: {}", exit_code)?;
                 if !stderr.is_empty() {
                     write!(f, "Error output: {}", stderr)
                 } else {
@@ -612,12 +606,8 @@ impl fmt::Display for GitCommandError {
                 }
             }
             GitCommandError::Timeout { command, timeout } => {
-                write!(
-                    f,
-                    "Git command timed out after {:?}: {}\n",
-                    timeout, command
-                )?;
-                write!(f, "The operation may be taking longer than expected.\n")?;
+                writeln!(f, "Git command timed out after {:?}: {}", timeout, command)?;
+                writeln!(f, "The operation may be taking longer than expected.")?;
                 write!(
                     f,
                     "Consider checking your repository size or network connectivity."
@@ -631,9 +621,9 @@ impl fmt::Display for GitCommandError {
                 attempts,
                 last_error,
             } => {
-                write!(
+                writeln!(
                     f,
-                    "Git command failed after {} attempts: {}\n",
+                    "Git command failed after {} attempts: {}",
                     attempts, command
                 )?;
                 write!(f, "Last error: {}", last_error)
@@ -1764,7 +1754,7 @@ impl SensitiveModeValidator {
 /// Check Git directory structure validation using context
 fn check_git_dir_structure_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
     // Validate the Git directory structure using cached context data
-    if let Err(_) = gitutil::validate_git_dir_structure(&ctx.repo_path, ctx.is_bare) {
+    if gitutil::validate_git_dir_structure(&ctx.repo_path, ctx.is_bare).is_err() {
         let git_dir = gitutil::git_dir(&ctx.repo_path).map_err(SanityCheckError::from)?;
         let actual = if ctx.is_bare {
             git_dir.display().to_string()
@@ -1976,7 +1966,7 @@ fn check_replace_refs_in_loose_objects_with_context(
     // If all loose objects are replace refs, consider the repo freshly packed
     if loose_count <= replace_refs.len() {
         // Apply the same logic but treat effective loose count as 0
-        return (packs <= 1 && (packs == 0 || 0 == 0)) || (packs == 0 && 0 < 100);
+        return (packs <= 1) || (packs == 0 && 0 < 100);
     }
 
     // If there are more loose objects than replace refs, apply normal rules
@@ -2028,12 +2018,10 @@ fn check_stash_presence_with_context(ctx: &SanityCheckContext) -> Result<(), San
             // If command fails with non-zero exit, no stash exists
             Ok(())
         }
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to check stash status: {e}"),
-            )));
-        }
+        Err(e) => Err(SanityCheckError::IoError(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to check stash status: {e}"),
+        ))),
     }
 }
 
@@ -2070,7 +2058,7 @@ fn check_working_tree_cleanliness_with_context(
     if staged_dirty || unstaged_dirty {
         return Err(SanityCheckError::WorkingTreeNotClean {
             staged_dirty,
-            unstaged_dirty: unstaged_dirty,
+            unstaged_dirty,
         });
     }
 
@@ -3804,10 +3792,10 @@ mod tests {
         // Let me test what the actual code does:
 
         // Case 1: 0 packs, 0 loose objects - should be fresh
-        assert_eq!(test_freshness_logic(0, 0), true);
+        assert!(test_freshness_logic(0, 0));
 
         // Case 2: 0 packs, 50 loose objects - should be fresh (no packs, <100 loose)
-        assert_eq!(test_freshness_logic(0, 50), true);
+        assert!(test_freshness_logic(0, 50));
 
         // Case 3: 0 packs, 150 loose objects - let's see what it actually returns
         let result = test_freshness_logic(0, 150);
@@ -3816,16 +3804,16 @@ mod tests {
         // = (true && (true || false)) || (true && false)
         // = (true && true) || false = true
         // So the original logic actually considers this fresh! This seems wrong but let's go with it.
-        assert_eq!(result, true);
+        assert!(result);
 
         // Case 4: 1 pack, 0 loose objects - should be fresh (<=1 pack, no loose)
-        assert_eq!(test_freshness_logic(1, 0), true);
+        assert!(test_freshness_logic(1, 0));
 
         // Case 5: 1 pack, 10 loose objects - should NOT be fresh (<=1 pack, but has loose)
-        assert_eq!(test_freshness_logic(1, 10), false);
+        assert!(!test_freshness_logic(1, 10));
 
         // Case 6: 2 packs, 0 loose objects - should NOT be fresh (>1 pack)
-        assert_eq!(test_freshness_logic(2, 0), false);
+        assert!(!test_freshness_logic(2, 0));
     }
 
     fn test_freshness_logic(packs: usize, count: usize) -> bool {
@@ -3843,7 +3831,7 @@ mod tests {
 
         // Verify context fields are populated
         assert_eq!(ctx.repo_path, temp_repo.path());
-        assert_eq!(ctx.is_bare, false); // Should be non-bare
+        assert!(!ctx.is_bare); // Should be non-bare
         assert!(!ctx.refs.is_empty()); // Should have refs after commit
                                        // replace_refs might be empty, that's fine
 
@@ -3859,7 +3847,7 @@ mod tests {
 
         // Verify context fields
         assert_eq!(ctx.repo_path, temp_repo.path());
-        assert_eq!(ctx.is_bare, true); // Should be bare
+        assert!(ctx.is_bare); // Should be bare
 
         Ok(())
     }

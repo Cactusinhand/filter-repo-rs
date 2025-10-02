@@ -301,8 +301,8 @@ mod tests {
 
         let config = GitConfig::read_from_repo(temp_repo.path())?;
 
-        assert_eq!(config.ignore_case, true);
-        assert_eq!(config.precompose_unicode, false);
+        assert!(config.ignore_case);
+        assert!(!config.precompose_unicode);
         assert_eq!(
             config.origin_url,
             Some("https://github.com/example/repo.git".to_string())
@@ -343,7 +343,7 @@ mod tests {
             GitConfig::get_bool_config(temp_repo.path(), "core.precomposeunicode")?
                 .unwrap_or(false);
 
-        assert_eq!(config.ignore_case, true);
+        assert!(config.ignore_case);
         assert_eq!(config.precompose_unicode, expected_precompose);
         assert_eq!(config.origin_url, None); // default
 

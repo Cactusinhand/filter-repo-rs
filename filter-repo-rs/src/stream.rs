@@ -369,10 +369,7 @@ impl BlobSizeTracker {
         if self.prefetch_ok {
             return false;
         }
-        let size = match self.query_size_via_batch(sha) {
-            Ok(sz) => sz,
-            Err(_) => 0,
-        };
+        let size = self.query_size_via_batch(sha).unwrap_or_default();
         if size > max {
             self.oversize.insert(sha.to_vec());
             true
@@ -402,6 +399,7 @@ impl Drop for BatchCat {
     fn drop(&mut self) {
         // Best-effort shutdown
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
@@ -604,7 +602,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             }
             for b in &mut v {
                 if *b >= b'A' && *b <= b'F' {
-                    *b = *b + 32;
+                    *b += 32;
                 }
             }
             last_blob_orig_sha = Some(v);
@@ -624,7 +622,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             let mut num: u32 = 0;
             let mut seen = false;
             for &b in line[b"mark :".len()..].iter() {
-                if b >= b'0' && b <= b'9' {
+                if b.is_ascii_digit() {
                     seen = true;
                     num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
                 } else {
@@ -669,21 +667,23 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             let short_mapper = short_hash_mapper.as_ref();
             crate::tag::process_tag_block(
                 &line,
-                &mut fe_out,
-                orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                &mut filt_file as &mut dyn Write,
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    Some(fi_in as &mut dyn Write)
-                } else {
-                    None
+                crate::tag::TagProcessContext {
+                    fe_out: &mut fe_out,
+                    orig_file: orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                    filt_file: &mut filt_file as &mut dyn Write,
+                    fi_in: if let Some(ref mut fi_in) = fi_in_opt {
+                        Some(fi_in as &mut dyn Write)
+                    } else {
+                        None
+                    },
+                    replacer: &replacer,
+                    short_mapper,
+                    opts,
+                    updated_refs: &mut updated_refs,
+                    annotated_tag_refs: &mut annotated_tag_refs,
+                    ref_renames: &mut ref_renames,
+                    emitted_marks: &mut emitted_marks,
                 },
-                &replacer,
-                short_mapper,
-                opts,
-                &mut updated_refs,
-                &mut annotated_tag_refs,
-                &mut ref_renames,
-                &mut emitted_marks,
             )?;
             continue;
         }
@@ -910,7 +910,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     let mut j = 1;
                     while j < id.len() {
                         let b = id[j];
-                        if b >= b'0' && b <= b'9' {
+                        if b.is_ascii_digit() {
                             seen = true;
                             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
                         } else {
@@ -985,12 +985,11 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         {
                             samples_size.push(path_bytes.clone());
                         }
-                    } else if r_sha {
-                        if samples_sha.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_sha.iter().any(|p| p == path_bytes)
-                        {
-                            samples_sha.push(path_bytes.clone());
-                        }
+                    } else if r_sha
+                        && samples_sha.len() < REPORT_SAMPLE_LIMIT
+                        && !samples_sha.iter().any(|p| p == path_bytes)
+                    {
+                        samples_sha.push(path_bytes.clone());
                     }
                     continue;
                 }
@@ -1275,15 +1274,11 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         );
                         rebuilt.extend_from_slice(b"reset ");
                         rebuilt.extend_from_slice(b"refs/heads/");
-                        rebuilt.extend_from_slice(&new_);
+                        rebuilt.extend_from_slice(new_);
                         rebuilt.extend_from_slice(&bname[old.len()..]);
                         rebuilt.push(b'\n');
-                        let new_full = [
-                            b"refs/heads/".as_ref(),
-                            new_.as_slice(),
-                            &bname[old.len()..],
-                        ]
-                        .concat();
+                        let new_full =
+                            [b"refs/heads/".as_ref(), new_, &bname[old.len()..]].concat();
                         ref_renames.insert((name.to_vec(), new_full.clone()));
                         final_ref = new_full;
                         out = rebuilt;
@@ -1347,7 +1342,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         &mut filt_file as &mut dyn Write,
         fi_writer_for_finalize,
         &mut fe,
-        fi.as_mut().map(|c| c),
+        fi.as_mut(),
         import_broken,
         allow_flush_tag_resets,
         {
@@ -1373,6 +1368,12 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         },
         &blob_size_tracker,
     )?;
+
+    // Wait for child processes to finish
+    let _ = fe.wait()?;
+    if let Some(mut child) = fi {
+        let _ = child.wait()?;
+    }
 
     Ok(())
 }
@@ -1406,7 +1407,7 @@ fn resolve_mark_oid(
             let mut seen_digit = false;
             while idx < rest.len() {
                 let b = rest[idx];
-                if (b'0'..=b'9').contains(&b) {
+                if b.is_ascii_digit() {
                     seen_digit = true;
                     value = value.saturating_mul(10).saturating_add((b - b'0') as u32);
                     idx += 1;

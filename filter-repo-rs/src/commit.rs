@@ -31,7 +31,7 @@ pub fn rename_commit_header_ref(
                 );
                 rebuilt.extend_from_slice(b"commit ");
                 rebuilt.extend_from_slice(b"refs/tags/");
-                rebuilt.extend_from_slice(&new_);
+                rebuilt.extend_from_slice(new_);
                 rebuilt.extend_from_slice(&name[old.len()..]);
                 rebuilt.push(b'\n');
                 let new_full =
@@ -51,7 +51,7 @@ pub fn rename_commit_header_ref(
                 );
                 rebuilt.extend_from_slice(b"commit ");
                 rebuilt.extend_from_slice(b"refs/heads/");
-                rebuilt.extend_from_slice(&new_);
+                rebuilt.extend_from_slice(new_);
                 rebuilt.extend_from_slice(&name[old.len()..]);
                 rebuilt.push(b'\n');
                 let new_full =
@@ -230,9 +230,9 @@ pub fn process_commit_line(
         ) {
             // keep commit
             commit_buf.extend_from_slice(b"\n");
-            filt_file.write_all(&commit_buf)?;
+            filt_file.write_all(commit_buf)?;
             if let Some(ref mut fi) = fi_in {
-                if let Err(e) = fi.write_all(&commit_buf) {
+                if let Err(e) = fi.write_all(commit_buf) {
                     if e.kind() == io::ErrorKind::BrokenPipe {
                         *import_broken = true;
                     } else {
@@ -285,7 +285,7 @@ pub fn parse_mark_number(line: &[u8]) -> Option<u32> {
     let mut num: u32 = 0;
     let mut seen = false;
     for &b in line[b"mark :".len()..].iter() {
-        if b >= b'0' && b <= b'9' {
+        if b.is_ascii_digit() {
             seen = true;
             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
         } else {
@@ -310,7 +310,7 @@ pub fn parse_from_mark(line: &[u8]) -> Option<u32> {
     let mut num: u32 = 0;
     let mut seen = false;
     for &b in line[b"from :".len()..].iter() {
-        if b >= b'0' && b <= b'9' {
+        if b.is_ascii_digit() {
             seen = true;
             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
         } else {
@@ -334,7 +334,7 @@ fn parse_merge_mark(line: &[u8]) -> Option<u32> {
     let mut num: u32 = 0;
     let mut seen = false;
     for &b in line[b"merge :".len()..].iter() {
-        if b >= b'0' && b <= b'9' {
+        if b.is_ascii_digit() {
             seen = true;
             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
         } else {

@@ -52,7 +52,7 @@ pub struct AnalyzeThresholds {
 impl Default for AnalyzeThresholds {
     fn default() -> Self {
         Self {
-            warn_total_bytes: 1 * 1024 * 1024 * 1024,
+            warn_total_bytes: 1024 * 1024 * 1024,
             crit_total_bytes: 5 * 1024 * 1024 * 1024,
             warn_blob_bytes: 10 * 1024 * 1024,
             warn_ref_count: 20_000,

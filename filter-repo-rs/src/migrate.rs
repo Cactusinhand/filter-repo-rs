@@ -66,7 +66,7 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
         }
         let suffix = refname
             .strip_prefix("refs/remotes/origin/")
-            .unwrap_or(&refname);
+            .unwrap_or(refname);
         let newref = format!("refs/heads/{}", suffix);
         // Only create if newref does not exist
         let exist = refs.contains_key(&newref);

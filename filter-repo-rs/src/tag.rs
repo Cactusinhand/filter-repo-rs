@@ -5,6 +5,20 @@ use std::process::ChildStdout;
 use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
+pub struct TagProcessContext<'a> {
+    pub fe_out: &'a mut BufReader<ChildStdout>,
+    pub orig_file: Option<&'a mut dyn Write>,
+    pub filt_file: &'a mut dyn Write,
+    pub fi_in: Option<&'a mut dyn Write>,
+    pub replacer: &'a Option<MessageReplacer>,
+    pub short_mapper: Option<&'a ShortHashMapper>,
+    pub opts: &'a Options,
+    pub updated_refs: &'a mut BTreeSet<Vec<u8>>,
+    pub annotated_tag_refs: &'a mut BTreeSet<Vec<u8>>,
+    pub ref_renames: &'a mut BTreeSet<(Vec<u8>, Vec<u8>)>,
+    pub emitted_marks: &'a mut std::collections::HashSet<u32>,
+}
+
 pub fn precheck_duplicate_tag(
     line: &[u8],
     opts: &Options,
@@ -22,7 +36,7 @@ pub fn precheck_duplicate_tag(
         }
         let mut renamed = name.to_vec();
         if renamed.starts_with(&old[..]) {
-            let mut v = new_.clone();
+            let mut v = new_.to_vec();
             v.extend_from_slice(&renamed[old.len()..]);
             renamed = v;
         }
@@ -32,20 +46,7 @@ pub fn precheck_duplicate_tag(
     false
 }
 
-pub fn process_tag_block(
-    first_line: &[u8],
-    fe_out: &mut BufReader<ChildStdout>,
-    mut orig_file: Option<&mut dyn Write>,
-    filt_file: &mut dyn Write,
-    mut fi_in: Option<&mut dyn Write>,
-    replacer: &Option<MessageReplacer>,
-    short_mapper: Option<&ShortHashMapper>,
-    opts: &Options,
-    updated_refs: &mut BTreeSet<Vec<u8>>,
-    annotated_tag_refs: &mut BTreeSet<Vec<u8>>,
-    ref_renames: &mut BTreeSet<(Vec<u8>, Vec<u8>)>,
-    emitted_marks: &mut std::collections::HashSet<u32>,
-) -> io::Result<()> {
+pub fn process_tag_block(first_line: &[u8], mut ctx: TagProcessContext<'_>) -> io::Result<()> {
     // Extract tag name
     let mut tagname = &first_line[b"tag ".len()..];
     if let Some(&last) = tagname.last() {
@@ -58,11 +59,11 @@ pub fn process_tag_block(
     let mut hdrs: Vec<Vec<u8>> = Vec::new();
     loop {
         let mut l = Vec::with_capacity(256);
-        let read2 = fe_out.read_until(b'\n', &mut l)?;
+        let read2 = ctx.fe_out.read_until(b'\n', &mut l)?;
         if read2 == 0 {
             break;
         }
-        if let Some(f) = orig_file.as_mut() {
+        if let Some(f) = ctx.orig_file.as_mut() {
             (*f).write_all(&l)?;
         }
         if l.starts_with(b"data ") {
@@ -74,14 +75,14 @@ pub fn process_tag_block(
                 .and_then(|s| s.parse::<usize>().ok())
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
             let mut payload = vec![0u8; n];
-            fe_out.read_exact(&mut payload)?;
-            if let Some(f) = orig_file.as_mut() {
+            ctx.fe_out.read_exact(&mut payload)?;
+            if let Some(f) = ctx.orig_file.as_mut() {
                 (*f).write_all(&payload)?;
             }
 
             // Rename tag name
             let mut renamed = tagname.to_vec();
-            if let Some((ref old, ref new_)) = opts.tag_rename {
+            if let Some((ref old, ref new_)) = ctx.opts.tag_rename {
                 if renamed.starts_with(&old[..]) {
                     let mut v = new_.clone();
                     v.extend_from_slice(&renamed[old.len()..]);
@@ -91,14 +92,14 @@ pub fn process_tag_block(
             let target_ref = [b"refs/tags/".as_ref(), renamed.as_slice()].concat();
 
             // Dedupe annotated tags
-            if updated_refs.contains(&target_ref) {
+            if ctx.updated_refs.contains(&target_ref) {
                 return Ok(()); // skip emitting
             }
-            updated_refs.insert(target_ref.clone());
-            annotated_tag_refs.insert(target_ref.clone());
+            ctx.updated_refs.insert(target_ref.clone());
+            ctx.annotated_tag_refs.insert(target_ref.clone());
             if renamed != tagname {
                 let old_full = [b"refs/tags/".as_ref(), tagname].concat();
-                ref_renames.insert((old_full, target_ref.clone()));
+                ctx.ref_renames.insert((old_full, target_ref.clone()));
             }
 
             // Emit to filtered/import streams
@@ -106,13 +107,13 @@ pub fn process_tag_block(
             out.extend_from_slice(b"tag ");
             out.extend_from_slice(&renamed);
             out.push(b'\n');
-            filt_file.write_all(&out)?;
-            if let Some(ref mut fi) = fi_in {
+            ctx.filt_file.write_all(&out)?;
+            if let Some(ref mut fi) = ctx.fi_in {
                 fi.write_all(&out)?;
             }
             for h in hdrs.into_iter() {
-                filt_file.write_all(&h)?;
-                if let Some(ref mut fi) = fi_in {
+                ctx.filt_file.write_all(&h)?;
+                if let Some(ref mut fi) = ctx.fi_in {
                     fi.write_all(&h)?;
                 }
                 // Record emitted tag mark
@@ -120,7 +121,7 @@ pub fn process_tag_block(
                     let mut num: u32 = 0;
                     let mut seen = false;
                     for &b in h[b"mark :".len()..].iter() {
-                        if b >= b'0' && b <= b'9' {
+                        if b.is_ascii_digit() {
                             seen = true;
                             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
                         } else {
@@ -128,33 +129,33 @@ pub fn process_tag_block(
                         }
                     }
                     if seen {
-                        emitted_marks.insert(num);
+                        ctx.emitted_marks.insert(num);
                     }
                 }
             }
 
-            if replacer.is_none() && short_mapper.is_none() {
+            if ctx.replacer.is_none() && ctx.short_mapper.is_none() {
                 // No modifications needed; forward header and payload without cloning
                 let header = format!("data {}\n", payload.len());
-                filt_file.write_all(header.as_bytes())?;
-                filt_file.write_all(&payload)?;
-                if let Some(ref mut fi) = fi_in {
+                ctx.filt_file.write_all(header.as_bytes())?;
+                ctx.filt_file.write_all(&payload)?;
+                if let Some(ref mut fi) = ctx.fi_in {
                     fi.write_all(header.as_bytes())?;
                     fi.write_all(&payload)?;
                 }
             } else {
-                let mut new_payload = if let Some(r) = replacer {
+                let mut new_payload = if let Some(r) = ctx.replacer {
                     r.apply(payload)
                 } else {
                     payload
                 };
-                if let Some(mapper) = short_mapper {
+                if let Some(mapper) = ctx.short_mapper {
                     new_payload = mapper.rewrite(new_payload);
                 }
                 let header = format!("data {}\n", new_payload.len());
-                filt_file.write_all(header.as_bytes())?;
-                filt_file.write_all(&new_payload)?;
-                if let Some(ref mut fi) = fi_in {
+                ctx.filt_file.write_all(header.as_bytes())?;
+                ctx.filt_file.write_all(&new_payload)?;
+                if let Some(ref mut fi) = ctx.fi_in {
                     fi.write_all(header.as_bytes())?;
                     fi.write_all(&new_payload)?;
                 }
@@ -207,12 +208,7 @@ pub fn process_reset_header(
     if let Some((ref old, ref new_)) = opts.tag_rename {
         let tagname = &name[b"refs/tags/".len()..];
         if tagname.starts_with(&old[..]) {
-            let new_full = [
-                b"refs/tags/".as_ref(),
-                new_.as_slice(),
-                &tagname[old.len()..],
-            ]
-            .concat();
+            let new_full = [b"refs/tags/".as_ref(), new_, &tagname[old.len()..]].concat();
             ref_renames.insert((name.to_vec(), new_full.clone()));
             ref_full = new_full;
         }

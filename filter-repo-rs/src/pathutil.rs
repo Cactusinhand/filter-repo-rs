@@ -66,7 +66,7 @@ pub fn dequote_c_style_bytes(s: &[u8]) -> Vec<u8> {
                 let mut count = 0;
                 while count < 2 && i < s.len() {
                     let d = s[i];
-                    if d < b'0' || d > b'7' {
+                    if !(b'0'..=b'7').contains(&d) {
                         break;
                     }
                     i += 1;

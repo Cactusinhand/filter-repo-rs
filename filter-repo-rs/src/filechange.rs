@@ -139,20 +139,14 @@ fn is_line_end(rest: &[u8]) -> bool {
 }
 
 fn path_matches(path: &[u8], opts: &Options) -> bool {
-    if !opts.paths.is_empty() {
-        if opts.paths.iter().any(|pref| path.starts_with(pref)) {
-            return true;
-        }
+    if !opts.paths.is_empty() && opts.paths.iter().any(|pref| path.starts_with(pref)) {
+        return true;
     }
-    if !opts.path_globs.is_empty() {
-        if opts.path_globs.iter().any(|g| glob_match_bytes(g, path)) {
-            return true;
-        }
+    if !opts.path_globs.is_empty() && opts.path_globs.iter().any(|g| glob_match_bytes(g, path)) {
+        return true;
     }
-    if !opts.path_regexes.is_empty() {
-        if opts.path_regexes.iter().any(|re| re.is_match(path)) {
-            return true;
-        }
+    if !opts.path_regexes.is_empty() && opts.path_regexes.iter().any(|re| re.is_match(path)) {
+        return true;
     }
     false
 }

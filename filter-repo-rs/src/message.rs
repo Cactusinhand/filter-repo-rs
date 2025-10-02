@@ -170,17 +170,11 @@ impl ShortHashMapper {
             return None;
         }
         let key = short[..MIN_SHORT_HASH_LEN].to_vec();
-        let entries = match self.prefix_index.get(&key) {
-            Some(v) => v,
-            None => return None,
-        };
+        let entries = self.prefix_index.get(&key)?;
         let mut matches_iter = entries
             .iter()
             .filter(|full| full.len() >= orig_len && &full[..orig_len] == short);
-        let full_old = match matches_iter.next() {
-            Some(m) => m,
-            None => return None,
-        };
+        let full_old = matches_iter.next()?;
         if matches_iter.next().is_some() {
             return None;
         }
@@ -243,7 +237,7 @@ pub mod blob_regex {
                     let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
                         (&rest[..pos], rest[pos + 3..].to_vec())
                     } else {
-                        (&rest[..], b"***REMOVED***".to_vec())
+                        (rest, b"***REMOVED***".to_vec())
                     };
                     let pat_str = std::str::from_utf8(pat).map_err(|e| {
                         io::Error::new(
@@ -266,7 +260,7 @@ pub mod blob_regex {
                     let (pat, rep) = if let Some(pos) = super::find_subslice(rest, b"==>") {
                         (&rest[..pos], rest[pos + 3..].to_vec())
                     } else {
-                        (&rest[..], b"***REMOVED***".to_vec())
+                        (rest, b"***REMOVED***".to_vec())
                     };
                     let glob_str = std::str::from_utf8(pat).map_err(|e| {
                         io::Error::new(
@@ -347,7 +341,7 @@ pub mod blob_regex {
                     let mut seen = false;
                     while i < tpl.len() {
                         let c = tpl[i];
-                        if c >= b'0' && c <= b'9' {
+                        if c.is_ascii_digit() {
                             seen = true;
                             num = num * 10 + (c - b'0') as usize;
                             i += 1;

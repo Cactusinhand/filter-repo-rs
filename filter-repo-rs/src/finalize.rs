@@ -136,9 +136,9 @@ pub fn finalize(
     if !refs.is_empty() {
         let mut f = File::create(debug_dir.join("ref-map"))?;
         for (old, new_) in &refs {
-            f.write_all(&old)?;
+            f.write_all(old)?;
             f.write_all(b" ")?;
-            f.write_all(&new_)?;
+            f.write_all(new_)?;
             f.write_all(b"\n")?;
         }
     }
@@ -264,7 +264,7 @@ pub fn finalize(
                     let mut num: u32 = 0;
                     let mut seen = false;
                     for &b in line[b"mark :".len()..].iter() {
-                        if b >= b'0' && b <= b'9' {
+                        if b.is_ascii_digit() {
                             seen = true;
                             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
                         } else {
@@ -420,7 +420,7 @@ pub fn finalize(
                                     + (tail_b.len().saturating_sub(old.len())),
                             );
                             new_full.extend_from_slice(b"refs/heads/");
-                            new_full.extend_from_slice(&new_);
+                            new_full.extend_from_slice(new_);
                             new_full.extend_from_slice(&tail_b[old.len()..]);
                             let new_str = String::from_utf8_lossy(&new_full).to_string();
                             if repo_refs_after.contains_key(&new_str) {
@@ -442,7 +442,7 @@ pub fn finalize(
                             .filter(|name| name.starts_with("refs/heads/"))
                             .collect();
                         branches.sort();
-                        branches.into_iter().next().map(|name| name.clone())
+                        branches.into_iter().next().cloned()
                     });
                 if let Some(refstr) = fallback.filter(|s| !s.is_empty()) {
                     let status = Command::new("git")
@@ -533,7 +533,7 @@ fn resolve_reset_target(
         let mut num: u32 = 0;
         let mut seen = false;
         for &b in &target[1..] {
-            if (b'0'..=b'9').contains(&b) {
+            if b.is_ascii_digit() {
                 seen = true;
                 num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
             } else {
@@ -551,15 +551,12 @@ fn resolve_reset_target(
             return Ok(None);
         }
     }
-    let is_hex = target.len() == 40
-        && target
-            .iter()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'));
+    let is_hex = target.len() == 40 && target.iter().all(|b| b.is_ascii_hexdigit());
     if is_hex {
         let mut out = target.to_vec();
         for b in &mut out {
             if (b'A'..=b'F').contains(b) {
-                *b = *b + 32;
+                *b += 32;
             }
         }
         return Ok(Some(out));
