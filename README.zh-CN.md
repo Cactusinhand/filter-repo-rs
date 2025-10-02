@@ -1,27 +1,39 @@
-﻿filter-repo-rs（git-filter-repo 的 Rust 原型）
-=============================================
+﻿# filter-repo-rs
 
-filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 的 Rust 原型实现。
+[English](README.md) | [中文](README.zh-CN.md)
 
-它通过 `git fast-export` → 进程内过滤 → `git fast-import` 的流式管线工作，
-输出调试流，并强调跨平台（含 Windows）的安全与性能。
+filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 的 Rust 原型实现，用于高效地重写 Git 仓库历史。
 
-- [English](README.md) | [中文](README.zh-CN.md)
+**主要特性：**
 
-状态：原型。尚未完全等同 Python 版，但已可用于常见场景。
+- 🚀 **高性能流式处理**：基于 `git fast-export` → 过滤器 → `git fast-import` 的管道架构
+- 🔒 **敏感数据清理**：从提交历史中安全移除 API 密钥、密码等敏感信息
+- 📁 **灵活的路径操作**：支持目录重构、文件删除、批量重命名等操作
+- 🏷️ **引用管理**：智能处理分支和标签的重命名与迁移
+- 💾 **安全备份机制**：自动备份原始历史，支持完整恢复
+- 🔍 **仓库分析工具**：检查仓库健康度，识别大文件和潜在问题
 
-为了快速立即这个工具，请看典型的使用场景：
+**核心用途：**
 
-典型使用场景
-------------
+- 从版本历史中彻底清除意外提交的敏感信息（密钥、令牌、密码等）
+- 通过移除大文件来减小仓库体积，提升克隆和操作性能
+- 重构目录结构，提取子目录或调整项目布局
+- 批量重命名分支和标签，规范命名约定
+- 在 CI/CD 中进行仓库健康度检查和合规性验证
 
-1) 历史记录中误提交了密钥/令牌（API_TOKEN、SECRET 等）
+**⚠️ 项目状态：** 这是一个原型项目，正在积极开发中。虽然核心功能已经稳定，但某些高级特性仍在完善。建议在生产环境使用前进行充分测试。
+
+> 为了快速立即这个工具，请看典型的使用场景：
+
+## 典型使用场景
+
+1. 历史记录中误提交了密钥/令牌（API_TOKEN、SECRET 等）
 
 - 目标：从所有提交历史中清除敏感字串（包含文件内容与可选的提交说明），覆盖所有 refs。
 - 建议流程：
   1. 先备份当前历史（强烈推荐）：
      ```sh
-     filter-repo-rs --backup --refs --all
+     filter-repo-rs --backup
      ```
   2. 编写内容替换规则（支持字面值与正则）：
      ```sh
@@ -47,7 +59,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
      ```
   6. 与团队/CI 协调，清理下游 fork/clone 缓存，防止旧历史回流。
 
-2) 提交/标签消息里有敏感信息，需要清洗
+2. 提交/标签消息里有敏感信息，需要清洗
 
 - 准备一份消息替换规则（当前仅字面值）：
   ```sh
@@ -60,7 +72,7 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   ```
 - 可与 `--backup`、`--sensitive`、`--dry-run` 搭配以安全预演与全量覆盖。
 
-3) 仓库因大文件/二进制文件膨胀，需要瘦身
+3. 仓库因大文件/二进制文件膨胀，需要瘦身
 
 - 先分析体积与大对象分布：
   ```sh
@@ -78,23 +90,24 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   ```
 - 建议将大媒体转移至 Git LFS 或外部存储，避免后续再次膨胀。
 
-4) 批量重命名标签/分支
+4. 批量重命名标签/分支
 
 - 标签前缀迁移：
   ```sh
   filter-repo-rs --tag-rename v1.:legacy/v1.
   ```
 - 分支前缀迁移：
+
   ```sh
   filter-repo-rs --branch-rename feature/:exp/
   ```
 
 - 组合用法：标签改名前缀 + 标签消息重写（注解标签会被去重并仅发射一次）
+
   ```sh
   # messages.txt 为提交/标签消息的字面值替换规则
   # 例如：café==>CAFE 与 🚀==>ROCKET
   filter-repo-rs \
-    --refs --all \
     --tag-rename orig-:renamed- \
     --replace-message messages.txt
   ```
@@ -102,12 +115,11 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
 - 组合用法：分支改名前缀 + 标签消息重写（若 HEAD 所指分支被重命名，会自动更新到新分支）
   ```sh
   filter-repo-rs \
-    --refs --all \
     --branch-rename original-:renamed- \
     --replace-message messages.txt
   ```
 
-5) 调整仓库目录结构
+5. 调整仓库目录结构
 
 - 提取子目录为新根（类似 monorepo 拆分某模块）：
   ```sh
@@ -122,18 +134,18 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   filter-repo-rs --path-rename old/:new/
   ```
 
-6) 从历史中删除特定文件
+6. 从历史中删除特定文件
 
 - 从所有历史中删除特定文件（如意外提交的敏感文件）：
+
   ```sh
   # 1. 先备份（强烈推荐）
-  filter-repo-rs --backup --refs --all
+  filter-repo-rs --backup
 
   # 2. 干运行验证操作
   filter-repo-rs \
     --path docs/STATUS.md \
     --invert-paths \
-    --refs --all \
     --dry-run \
     --write-report
 
@@ -141,44 +153,71 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
   filter-repo-rs \
     --path docs/STATUS.md \
     --invert-paths \
-    --refs --all \
     --write-report
 
   # 4. 强制推送新历史
   git push --force --all
   git push --force --tags
   ```
+
 - 删除匹配模式的文件：
   ```sh
-  filter-repo-rs --path-glob "*.log" --invert-paths --refs --all
+  filter-repo-rs --path-glob "*.log" --invert-paths
   ```
 - 使用正则表达式删除文件：
   ```sh
-  filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths --refs --all
+  filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths
   ```
 
-7) 安全执行建议与常用开关
+7. 安全执行建议与常用开关
 
 - 预演不落盘：`--dry-run`
 - 产出审计报告：`--write-report`
 - 重写前自动备份：`--backup [--backup-path PATH]`
 - 敏感模式（覆盖所有远端引用）：`--sensitive`（配合 `--no-fetch` 可跳过抓取）
-- 仅重写本地、跳过远端清理：`--partial`
+- 仅重写本地、跳过远端清理：`--partial`（注意：传入 `--refs` 等价于隐式开启 `--partial`）
 - 必要时跳过保护：`--force`（谨慎使用）
 
-8) CI 中的健康度分析预警
+8. CI 中的健康度分析预警
 
 - 在 CI 里执行：
   ```sh
-  filter-repo-rs --analyze --analyze-json \
-    --analyze-large-blob 10_000_000 \
-    --analyze-commit-msg-warn 4096 \
-    --analyze-max-parents-warn 8
+  filter-repo-rs --analyze --analyze-json
   ```
-- 根据阈值输出 `warnings`，用于阻断超限提交或提醒库体积趋势。
+- 将阈值配置到仓库根目录的 `.filter-repo-rs.toml`（优先于旧式 CLI 旗标）：
+  ```toml
+  [analyze]
+  top = 10
 
-快速开始
---------
+  [analyze.thresholds]
+  warn_blob_bytes = 10_000_000
+  warn_commit_msg_bytes = 4096
+  warn_max_parents = 8
+  ```
+- 兼容期内，`--analyze-large-blob` 等旧旗标需要 `--debug-mode`/`FRRS_DEBUG=1`，并会打印弃用告警。参见 `docs/CLI-CONVERGENCE.zh-CN.md`。
+
+## 快速开始
+
+## 环境要求
+
+- PATH 中可用的 Git（建议较新版本）
+- Rust 工具链（stable）
+- 支持 Linux/macOS/Windows
+
+## 构建
+
+```sh
+cargo build -p filter-repo-rs --release
+```
+
+## 测试
+
+```sh
+cargo test -p filter-repo-rs
+```
+
+- 单元测试位于 `src/` 模块内；集成测试位于 `filter-repo-rs/tests/`，以公开 API 跑通完整的导出 → 过滤 → 导入。
+- 测试会创建临时 Git 仓库（无需联网），并在其 `.git/filter-repo/` 下写入调试产物（commit-map、ref-map、report）。
 
 在 Git 仓库中运行（或传入 `--source`/`--target`）：
 
@@ -186,163 +225,10 @@ filter-repo-rs 是 [git-filter-repo](https://github.com/newren/git-filter-repo) 
 filter-repo-rs \
   --source . \
   --target . \
-  --refs --all \
-  --date-order \
   --replace-message replacements.txt
 ```
 
-特性
-----
-
-- 流式 pipeline
-  - `fast-export` → 过滤器 → `fast-import`，调试副本写至 `.git/filter-repo/`。
-  - 始终写出 `fast-export.filtered`；`fast-export.original` 仅在调试/报告或需要体积采样时写出（降低超大仓库 I/O）。
-  - 已启用的 fast-export 选项：`--show-original-ids`、`--signed-tags=strip`、
-    `--tag-of-filtered-object=rewrite`、`--fake-missing-tagger`、
-    `--reference-excluded-parents`、`--use-done-feature`。
-  - `fast-import` 使用 `-c core.ignorecase=false`，marks 输出至 `.git/filter-repo/target-marks`。
-
-- 路径选择与重写
-  - 支持按前缀 `--path`、glob `--path-glob`（`*`、`?`、`**`）或正则 `--path-regex`（Rust regex，不支持环视/反向引用）。
-  - `--invert-paths` 反转选择；`--path-rename OLD:NEW` 执行前缀重命名。
-  - 便捷项：`--subdirectory-filter DIR`、`--to-subdirectory-filter DIR`。
-
-- Blob 过滤与脱敏
-  - `--replace-text FILE` 替换文件内容；支持字面值与 `regex:` 规则（如 `regex:api_key-[0-9]+==>REDACTED`）。
-  - `--max-blob-size BYTES` 移除超大 blob，并删除引用它们的路径。
-  - `--strip-blobs-with-ids FILE` 移除文件中列出的 40 十六进制 blob。
-
-- 提交/标签/引用
-  - `--replace-message FILE` 对提交/标签消息执行字面值替换。
-  - 自动将消息中的旧提交短/长哈希重写为新哈希（借助生成的 `commit-map`；被剪枝的提交会映射为全零 `0000000000000000000000000000000000000000`）。
-    - 注意：`commit-map` 在执行结束阶段生成；短哈希重写通常在“下一次运行”读取该映射时生效。
-  - `--tag-rename`、`--branch-rename` 基于前缀重命名；注解标签去重后仅发射一次。
-  - `HEAD` 终态：若 `HEAD` 原本指向的分支被重命名，将自动更新到新分支；若目标缺失，将回退到已存在的分支。
-  - 非合并的空提交通过 `alias` 到其首个父标记而被剪枝；合并提交保留。
-  - 原子引用更新：分支/标签通过 `git update-ref --stdin` 批量更新；`HEAD` 通过 `git symbolic-ref` 更新。
-
-- 安全、备份与分析
-  - 可选预检；`--backup` 重写前创建 bundle；`--write-report` 输出总结。
-  - 分析模式：`--analyze`（人类可读）或 `--analyze --analyze-json`（机器可读）。
-
-环境要求
---------
-
-- PATH 中可用的 Git（建议较新版本）
-- Rust 工具链（stable）
-- 支持 Linux/macOS/Windows
-
-构建
-----
-
-```sh
-cargo build -p filter-repo-rs --release
-```
-
-测试
-----
-
-```sh
-cargo test -p filter-repo-rs
-```
-
-- 单元测试位于 `src/` 模块内；集成测试位于 `filter-repo-rs/tests/`，以公开 API 跑通完整的导出→过滤→导入。
-- 测试会创建临时 Git 仓库（无需联网），并在其 `.git/filter-repo/` 下写入调试产物（commit-map、ref-map、report）。
-
-命令概览：核心 vs 调试分层
------------------------------
-
-核心 CLI（默认可见；优先级与场景请参见 [docs/SCOPE.md](docs/SCOPE.md)、安全/对齐说明参见 [docs/PARITY.md](docs/PARITY.md)）：
-
-- 仓库与引用
-  - `--source DIR`、`--target DIR`（默认 `.`）、`--refs`（可重复，默认 `--all`；隐含 `--partial`）
-  - `--no-data` 透传给 fast-export
-
-- 路径
-  - `--path`、`--path-glob`、`--path-regex`、`--invert-paths`
-  - `--path-rename OLD:NEW`、`--subdirectory-filter DIR`、`--to-subdirectory-filter DIR`
-
-- 内容与 blob
-  - `--replace-text FILE`、`--max-blob-size BYTES`、`--strip-blobs-with-ids FILE`
-
-- 消息与引用
-  - `--replace-message FILE`、`--tag-rename OLD:NEW`、`--branch-rename OLD:NEW`
-
-- 行为与输出
-  - `--write-report`、`--cleanup`、`--quiet`、`--no-reset`
-  - `--backup [--backup-path PATH]`、`--dry-run`
-  - `--partial`、`--sensitive [--no-fetch]`、`--force`、`--enforce-sanity`
-  - 分析入口：`--analyze`、`--analyze-json`、`--analyze-top`。阈值通过 `.filter-repo-rs.toml` 或 `--config` 配置（参考 [docs/examples/filter-repo-rs.toml](docs/examples/filter-repo-rs.toml) 示例）。
-
-调试覆盖层（通过 `--debug-mode` 或 `FRRS_DEBUG=1` 显示；旧兼容开关默认隐藏）：
-
-- 分析阈值 / 兼容旗标
-  - `--analyze-total-warn`、`--analyze-total-critical`、`--analyze-large-blob`、`--analyze-ref-warn`、`--analyze-object-warn`、`--analyze-tree-entries`、`--analyze-path-length`、`--analyze-duplicate-paths`、`--analyze-commit-msg-warn`、`--analyze-max-parents-warn`
-  - 会提示对应 `.filter-repo-rs.toml` 配置键，方便迁移。
-
-- fast-export 透传
-  - `--date-order`、`--no-reencode`、`--no-quotepath`、`--no-mark-tags`、`--mark-tags`
-
-- 清理与流覆盖
-  - `--no-reset`、`--cleanup-aggressive`、`--fe_stream_override`
-
-示例
-----
-
-- 清除历史中的敏感信息（文件内容）
-
-  ```sh
-  # 1) 备份（推荐）
-  filter-repo-rs --backup --refs --all
-
-  # 2) 编写替换规则
-  cat > redact.txt <<EOF
-  SECRET_TOKEN==>REDACTED
-  regex:(API|TOKEN|SECRET)[A-Za-z0-9_-]+==>REDACTED
-  EOF
-
-  # 3) 执行并输出报告
-  filter-repo-rs --sensitive --replace-text redact.txt --write-report
-
-  # 4) 强制推送新历史
-  git push --force --all && git push --force --tags
-  ```
-
-- 清洗提交/标签消息（字面值规则）
-
-  ```sh
-  cat > messages.txt <<EOF
-  password==>[removed]
-  EOF
-  filter-repo-rs --replace-message messages.txt --write-report
-  ```
-
-- 通过移除大对象瘦身
-
-  ```sh
-  # 先分析
-  filter-repo-rs --analyze
-  filter-repo-rs --analyze --analyze-json
-
-  # 移除 >5MB 的 blob，并删除对应路径
-  filter-repo-rs --max-blob-size 5_000_000 --write-report
-  ```
-
-- 目录重构
-
-  ```sh
-  # 提取子目录为新根
-  filter-repo-rs --subdirectory-filter frontend
-
-  # 将当前根移动到子目录
-  filter-repo-rs --to-subdirectory-filter app/
-
-  # 批量路径前缀改名
-  filter-repo-rs --path-rename old/:new/
-  ```
-
-备份与恢复
-----------
+## 备份与恢复
 
 `--backup` 默认在 `.git/filter-repo/` 下创建带时间戳的 bundle。
 
@@ -356,71 +242,7 @@ git bundle unbundle /path/to/backup-YYYYMMDD-HHMMSS-XXXXXXXXX.bundle
 git symbolic-ref HEAD refs/heads/<branch-from-bundle>
 ```
 
-功能要点
---------
-
-- 调试流：`.git/filter-repo/fast-export.{original,filtered}`。
-- 非合并空提交剪枝（`alias` 到首个父标记）；合并提交保留。
-- 标签
-  - 注解标签：缓冲、可改名、去重后仅发射一次。
-  - 轻量标签：`reset`/`from` 配对缓冲，在 `done` 前刷新。
-- 引用
-  - 仅当新引用存在时删除旧引用；`ref-map` 记录重命名。
-  - 尝试将 HEAD 更新到有效分支（优先映射后的分支）。
-- 远端
-  - 完整运行（非 `--partial`）前，将 `refs/remotes/origin/*` 迁移到 `refs/heads/*`。
-  - 非敏感模式运行后移除 `origin`，避免误推旧历史；敏感模式可抓取所有引用（除非 `--no-fetch`），且保留 `origin`。
-
-合并修剪策略（Merge Simplification）
--------------------------------
-
-核心概念
-
-- 去除无效父：当某些父提交因过滤未被发出，自动从合并提交中移除这些父引用。
-- 父提交去重：同一提交被多次引用时仅保留一次，保持父列表最小化与有序。
-- 退化合并简化：合并经修剪仅剩一个父时，它将降为普通提交；若该提交没有文件变化，将进一步被剪枝并以 `alias` 指向首父，保持历史连续性。
-
-Rust 实现位置
-
-- 父提交跟踪结构：`filter-repo-rs/src/commit.rs:72`
-  - `ParentLine { start, end, mark, kind }`，`kind` 区分 `From` 与 `Merge` 两类父行（`ParentKind` 定义见 `filter-repo-rs/src/commit.rs:91`）。
-- 解析父提交：`filter-repo-rs/src/commit.rs:120` 起的处理逻辑中，对 `from` 与 `merge` 行分别记录区间与 mark，并推入 `parent_lines`。
-- 修剪核心：`finalize_parent_lines()`（`filter-repo-rs/src/commit.rs:399`）
-  - 丢弃未发出的父（依据 `emitted_marks`）。
-  - 使用 `BTreeSet` 去重父 mark，保留首次出现的规范化 mark（经 `resolve_canonical_mark()` 展开别名）。
-  - 重建父行字节并覆盖提交缓冲，仅保留有效父；更新 `first_parent_mark` 与返回的父计数。
-- 提交保留判定：`should_keep_commit()`（`filter-repo-rs/src/commit.rs:384`）
-  - 如有文件变更、为根提交、无标记、或仍为合并（父数≥2）则保留；否则可剪枝。
-- 别名机制：`build_alias()`（`filter-repo-rs/src/commit.rs:395`）与在提交剪枝分支处写出 `alias` 语句，将被剪枝提交的旧 mark 映射到其首父（仅在首父已发出时生效）。
-
-关键规则与片段
-
-- 丢弃无效父：若父标记（经别名解析）不在 `emitted_marks` 中，则移除该父。
-- 父提交去重：对已见过的规范化 mark 不再追加，避免重复父。
-- 合并简化：修剪后若父数降至 1，提交不再被视为“合并”。此时：
-  - 若仍有文件变更，则保留为普通提交；
-  - 若无文件变更，则通过 `alias` 剪枝到首父，避免制造空节点。
-
-测试用例
-
-- `merge_parents_dedup_when_side_branch_pruned` in `filter-repo-rs/tests/merge.rs`:
-  - 场景：功能分支的所有改动被路径过滤掉，仅保留主分支文件。最终合并提交的父列表被去重并剔除无效侧分支，只剩 1 个父；由于该合并包含对保留路径的实际改动，因此仍作为普通提交保留。
-
-与 Python 版本对比
-
-- Python 版具备更丰富的合并检测/简化选项与回调；
-- Rust 版优势：
-  - 类型安全与内存安全，减少边界错误；
-  - 使用 `BTreeSet`/`HashMap` 做高效去重与别名追溯；
-  - 结构化错误处理与更明确的数据流。
-
-优缺点小结
-
-- 优点：核心规则完备、实现简洁、测试覆盖关键场景、性能良好。
-- 可改进：暴露更多策略开关（如更细粒度的合并保留/剪枝策略）、复杂拓扑的进一步优化、丰富修剪日志。
-
-产物
-----
+## 产物
 
 - `.git/filter-repo/commit-map`：旧提交 → 新提交
 - `.git/filter-repo/ref-map`：旧引用 → 新引用
@@ -430,37 +252,110 @@ Rust 实现位置
 - `.git/filter-repo/fast-export.original`: git fast-export 原输出（调试/报告/体积采样时）
 - `.git/filter-repo/1758125153-834782600.bundle`: 备份文件
 
-Windows 注意
------------
+## 限制与注意事项
 
-- 重新构建的路径会进行 Windows 兼容化（保留字替换、去除结尾点/空格）。
-- 部分备份测试可能受 MSYS/Cygwin 路径转换影响，见 tests/README 的规避方法。
+### 当前限制
 
-限制（原型）
------------
+- 合并简化策略仍在优化中，复杂拓扑场景可能需要手动处理
+- 暂不支持增量处理（`--state-branch`）
+- `--replace-message` 目前仅支持字面值替换，正则支持开发中
+- Windows 路径策略固定为 "sanitize" 模式
 
-- 合并修剪已覆盖常见场景，但对极端复杂拓扑的进一步策略与可配置项仍在规划中。
-- 尚无 `--state-branch`（仅导出 marks 到文件）。
-- Windows 路径策略固定为 “sanitize”（暂无 skip/error）。
-- 不计划实现回调 API；基于 mailmap 的身份重写仍可作为后续增强考虑。
-- `--replace-message` 仅支持字面值规则；正则支持计划中。
-- 已启用短哈希重写；`--preserve-commit-hashes` 开关计划中。
-  
+### 使用建议
 
-路线图 / TODO（与 Python 版对齐）
-------------------------------
+- 大型仓库操作前务必使用 `--backup` 创建备份
+- 敏感操作建议先用 `--dry-run` 预演
+- 团队协作时需协调清理下游缓存，防止旧历史回流
+- 生产环境使用前建议在测试仓库上验证
 
-- 路径能力：`--paths-from-file`、`--use-base-name`、`--path-rename-match`/正则改名
-- 消息：`--replace-message` 支持 `regex:`；`--preserve-commit-hashes`
-- 大小参数：已支持 `K`/`M`/`G` 后缀；考虑提供 `--strip-blobs-bigger-than` 别名
-- 身份：mailmap（`--mailmap`、`--use-mailmap`）
-- 合并：在保证祖先正确性的前提下裁剪退化合并
-- replace-refs 与增量：`--replace-refs …`、`--state-branch`、stash（`refs/stash`）重写
-- 分析与报告：LFS 相关输出；更丰富的产物
-- Windows 路径策略：`--windows-path-policy=[sanitize|skip|error]` 与报表
-- 非目标：回调框架（filename/refname/blob/commit/tag/reset/message/name/email）。本项目不计划提供回调 API，倾向通过显式 CLI 选项覆盖常见需求。
-- 安全默认：考虑默认开启更严格的预检；完善 partial/sensitive 文档
+## 路线图
 
-更多背景：
-- 参见 [docs/PARITY.md](docs/PARITY.md)（与 Python 版的对齐状态与安全说明）。
-- 参见 [docs/SCOPE.zh-CN.md](docs/SCOPE.zh-CN.md)（范围与优先级、取舍清单、边界建议）。
+### 近期计划 (v0.1)
+
+- [x] 基础流式管道架构
+- [x] 路径过滤与重命名
+- [x] 内容与消息替换
+- [x] 分支标签管理
+- [x] 备份恢复机制
+
+### 中期规划 (v0.2)
+
+- [ ] 增量处理支持 (`--state-branch`)
+- [ ] Mailmap 身份重写
+- [ ] 合并简化策略优化
+- [ ] LFS 集成与检测
+- [ ] Windows 路径策略选项
+
+### 长期目标 (v1.0)
+
+- [ ] 性能基准测试与优化
+- [ ] 完整的国际化支持
+- [ ] 图形界面工具
+- [ ] 插件系统架构
+
+## 贡献指南
+
+我们欢迎各种形式的贡献！无论是错误报告、功能建议、代码贡献还是文档改进。
+
+### 🐛 问题报告
+
+如果您发现 bug 或有功能建议，请：
+
+1. 检查 [Issues](../../issues) 确认问题未被报告
+2. 使用提供的模板创建新 issue
+3. 提供详细的复现步骤和环境信息
+4. 如果可能，提供最小化的测试用例
+
+### 💻 代码贡献
+
+1. **Fork 本仓库**并创建您的功能分支
+2. **遵循代码规范**：运行 `cargo fmt` 和 `cargo clippy`
+3. **添加测试**：确保新功能有对应的测试用例
+4. **更新文档**：包括代码注释和用户文档
+5. **提交 Pull Request**：描述清楚变更内容和原因
+
+### 📝 文档贡献
+
+- 改进 README 和使用指南
+- 补充 API 文档和代码注释
+- 翻译文档到其他语言
+- 提供使用示例和最佳实践
+
+## 致谢
+
+### 🙏 特别感谢
+
+本项目深受 **[git-filter-repo](https://github.com/newren/git-filter-repo)** 的启发，这是一个由 [Elijah Newren](https://github.com/newren) 开发的优秀 Python 项目。`git-filter-repo` 为 Git 仓库历史重写提供了强大而灵活的解决方案，我们的 Rust 实现在设计理念和功能特性上大量借鉴了原项目的智慧。
+
+**原项目特点：**
+
+- 🎯 成熟稳定的生产级工具
+- 🔧 丰富的功能和回调 API
+- 📚 完善的文档和社区支持
+- 🏆 Git 官方推荐的历史重写工具
+
+我们建议用户根据具体需求选择合适的工具：
+
+- **选择 git-filter-repo（Python）** 如果您需要最大的功能完整性和生态支持
+- **选择 filter-repo-rs（Rust）** 如果您看重性能、内存安全和现代语言特性
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE) 开源。
+
+## 联系方式
+
+- **项目主页**: [GitHub 仓库](https://github.com/cactusinhand/filter-repo-rs)
+- **问题报告**: [Issues](../../issues)
+- **功能请求**: [Discussions](../../discussions)
+- **安全问题**: 请通过 GitHub 私有报告功能联系
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ and 🦀 by the Cactusinhand </sub>
+</p>
+
+<p align="center">
+  <sub>如果本项目对您有帮助，请考虑给我们一个 ⭐️ Star</sub>
+</p>
