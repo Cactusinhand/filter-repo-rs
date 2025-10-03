@@ -338,7 +338,8 @@ fn commit_message_edge_cases() {
 
     // Create commits with edge case messages
     let long_message = "A".repeat(1000);
-    let edge_case_messages = ["",            // Empty message
+    let edge_case_messages = [
+        "",            // Empty message
         " ",           // Single space
         "\n",          // Single newline
         "   \n   ",    // Whitespace only
@@ -348,7 +349,8 @@ fn commit_message_edge_cases() {
         "Message with [brackets] {braces} (parentheses)",
         "Message with &lt;HTML&gt; entities",
         "Message with café naïve résumé",
-        "Message with 🚀 emoji and 💡 symbols"];
+        "Message with 🚀 emoji and 💡 symbols",
+    ];
 
     for (i, message) in edge_case_messages.iter().enumerate() {
         write_file(&repo, &format!("file{}.txt", i), &format!("Content {}", i));

@@ -134,10 +134,7 @@ fn max_blob_size_fallback_behavior() {
     let (c, _o, e) = run_git(repo_path, &["init"]);
     assert_eq!(c, 0, "git init failed: {}", e);
     run_git(repo_path, &["config", "user.name", "A U Thor"]);
-    run_git(
-        repo_path,
-        &["config", "user.email", "a.u.thor@example.com"],
-    );
+    run_git(repo_path, &["config", "user.email", "a.u.thor@example.com"]);
     write_file(repo_path, "test.txt", "hello");
     run_git(repo_path, &["add", "."]);
     run_git(repo_path, &["commit", "-m", "add test file"]);
