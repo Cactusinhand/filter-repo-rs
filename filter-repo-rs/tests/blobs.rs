@@ -8,7 +8,7 @@ fn max_blob_size_drops_large_blobs() {
     let small = vec![b'B'; 10];
     std::fs::write(repo.join("big.bin"), &big).unwrap();
     std::fs::write(repo.join("small.bin"), &small).unwrap();
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add blobs"]).0, 0);
     run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1024);
@@ -26,7 +26,7 @@ fn max_blob_size_threshold_boundary() {
     let just_over = vec![b'Y'; 1025];
     std::fs::write(repo.join("exact.txt"), &exact_content).unwrap();
     std::fs::write(repo.join("over.txt"), &just_over).unwrap();
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add boundary test files"]).0,
         0

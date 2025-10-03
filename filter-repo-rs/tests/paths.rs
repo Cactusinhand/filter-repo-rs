@@ -9,7 +9,7 @@ fn path_filter_includes_only_prefix() {
     let repo = init_repo();
     write_file(&repo, "src/keep.txt", "k");
     write_file(&repo, "docs/drop.txt", "d");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add files"]).0, 0);
     run_tool_expect_success(&repo, |o| {
         o.paths.push(b"src/".to_vec());
@@ -42,7 +42,7 @@ fn path_filter_includes_only_prefix() {
 fn path_rename_applies_to_paths() {
     let repo = init_repo();
     write_file(&repo, "a/file.txt", "x");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add a/file.txt"]).0,
         0
@@ -70,7 +70,7 @@ fn path_glob_selects_md_under_src() {
     write_file(&repo, "src/a.txt", "t");
     write_file(&repo, "src/deep/b.md", "m");
     write_file(&repo, "docs/x.md", "m");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add various files"]).0,
         0
@@ -108,7 +108,7 @@ fn path_filter_and_rename_updates_commit_and_ref_maps() {
     // Create a branch that will be renamed and populate src/ with content to keep.
     assert_eq!(run_git(&repo, &["checkout", "-b", "feature/topic"]).0, 0);
     write_file(&repo, "src/lib.rs", "fn main() { println!(\"hi\"); }\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add src content"]).0,
         0
@@ -222,7 +222,7 @@ fn invert_paths_drops_prefix() {
     let repo = init_repo();
     write_file(&repo, "src/keep.txt", "k");
     write_file(&repo, "drop/file.txt", "d");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "prepare files"]).0,
         0
@@ -251,7 +251,7 @@ fn quoted_paths_roundtrip_with_rename() {
     run_git(&repo, &["config", "core.quotepath", "true"]);
     // Create a filename with non-ASCII to trigger C-style quoting
     write_file(&repo, "src/ümlaut.txt", "u");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add umlaut"]).0, 0);
     // Move everything into X/ using to-subdirectory behavior; disable our quotepath override
     run_tool_expect_success(&repo, |o| {
@@ -268,7 +268,7 @@ fn quoted_paths_roundtrip_with_rename() {
             continue;
         }
         let norm = if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-            let inner = &s.as_bytes()[1..s.as_bytes().len() - 1];
+            let inner = &s.as_bytes()[1..s.len() - 1];
             String::from_utf8_lossy(&fr::dequote_c_style_bytes(inner)).to_string()
         } else {
             s.to_string()
@@ -291,7 +291,7 @@ fn path_regex_filters_and_respects_invert() {
     write_file(&repo, "src/lib.rs", "fn main() {}\n");
     write_file(&repo, "README.md", "docs\n");
     write_file(&repo, "scripts/build.sh", "echo hi\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "seed files"]).0, 0);
     run_tool_expect_success(&repo, |o| {
         o.path_regexes.push(Regex::new(r".*\.rs$").unwrap());
@@ -316,7 +316,7 @@ fn path_regex_filters_and_respects_invert() {
     write_file(&repo2, "src/main.rs", "fn main() {}\n");
     write_file(&repo2, "docs/readme.md", "docs\n");
     write_file(&repo2, "notes/todo.txt", "todo\n");
-    run_git(&repo2, &["add", "."]).0;
+    run_git(&repo2, &["add", "."]);
     assert_eq!(run_git(&repo2, &["commit", "-q", "-m", "seed docs"]).0, 0);
     run_tool_expect_success(&repo2, |o| {
         o.path_regexes.push(Regex::new(r".*\.md$").unwrap());

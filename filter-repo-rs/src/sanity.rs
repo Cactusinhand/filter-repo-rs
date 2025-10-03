@@ -3436,7 +3436,7 @@ mod tests {
         // Create a remote tracking branch that matches the local branch
         Command::new("git")
             .arg("update-ref")
-            .arg(&format!("refs/remotes/origin/{}", current_branch))
+            .arg(format!("refs/remotes/origin/{}", current_branch))
             .arg(&local_hash)
             .current_dir(temp_repo.path())
             .output()?;
@@ -3492,7 +3492,7 @@ mod tests {
 
         Command::new("git")
             .arg("update-ref")
-            .arg(&format!("refs/remotes/origin/{}", current_branch))
+            .arg(format!("refs/remotes/origin/{}", current_branch))
             .arg(&remote_hash)
             .current_dir(temp_repo.path())
             .output()?;
@@ -3571,7 +3571,7 @@ mod tests {
         // Create matching remote tracking branch
         Command::new("git")
             .arg("update-ref")
-            .arg(&format!("refs/remotes/origin/{}", current_branch))
+            .arg(format!("refs/remotes/origin/{}", current_branch))
             .arg(&local_hash)
             .current_dir(temp_repo.path())
             .output()?;
@@ -3629,25 +3629,20 @@ mod tests {
         let ctx = SanityCheckContext::new(temp_repo.path())?;
 
         // Test with different pack and loose object counts
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 0),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 0)
         ); // 0 packs, 0 loose objects = fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50)
         ); // 0 packs, <100 loose objects = fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 150),
-            false
+        assert!(
+            !check_replace_refs_in_loose_objects_with_context(&ctx, 0, 150)
         ); // 0 packs, >=100 loose objects = not fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 0),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 0)
         ); // 1 pack, 0 loose objects = fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 10),
-            false
+        assert!(
+            !check_replace_refs_in_loose_objects_with_context(&ctx, 1, 10)
         ); // 1 pack, >0 loose objects = not fresh
 
         Ok(())
@@ -3670,29 +3665,24 @@ mod tests {
         let ctx = SanityCheckContext::new(temp_repo.path())?;
 
         // Test that loose objects equal to replace refs count is considered fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 1),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 1)
         ); // 1 loose object, 1 replace ref = fresh
 
         // Test that more loose objects than replace refs uses adjusted count
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50)
         ); // 50 loose objects - 1 replace ref = 49 < 100 = fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 150),
-            false
+        assert!(
+            !check_replace_refs_in_loose_objects_with_context(&ctx, 0, 150)
         ); // 0 packs, >=100 loose objects (after replace refs) = not fresh
 
         // Test with packs
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 1),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 1)
         ); // 1 pack, 1 loose object (all replace refs) = fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 1, 5),
-            false
+        assert!(
+            !check_replace_refs_in_loose_objects_with_context(&ctx, 1, 5)
         ); // 1 pack, 5 loose objects (4 non-replace) = not fresh
 
         Ok(())
@@ -3717,21 +3707,18 @@ mod tests {
         let ctx = SanityCheckContext::new(temp_repo.path())?;
 
         // Test that loose objects equal to replace refs count is considered fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 3),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 3)
         ); // 3 loose objects, 3 replace refs = fresh
 
         // Test that fewer loose objects than replace refs is considered fresh
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 2),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 2)
         ); // 2 loose objects, 3 replace refs = fresh
 
         // Test adjusted counting with multiple replace refs
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 50)
         ); // 50 - 3 = 47 < 100 = fresh
 
         Ok(())
@@ -3775,9 +3762,8 @@ mod tests {
 
         // Empty repo with no replace refs should be fresh using context-based function
         let ctx = SanityCheckContext::new(temp_repo.path())?;
-        assert_eq!(
-            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 0),
-            true
+        assert!(
+            check_replace_refs_in_loose_objects_with_context(&ctx, 0, 0)
         );
 
         Ok(())
@@ -4489,7 +4475,7 @@ fn test_debug_output_manager_sanity_check_reasoning() {
     ];
 
     for (check_name, error) in error_cases {
-        debug_manager.log_sanity_check(&check_name, &Err(error));
+        debug_manager.log_sanity_check(check_name, &Err(error));
     }
 }
 

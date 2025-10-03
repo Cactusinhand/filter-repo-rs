@@ -131,22 +131,21 @@ fn max_blob_size_batch_optimization_verification() {
 fn max_blob_size_fallback_behavior() {
     let repo = tempfile::TempDir::new().unwrap();
     let repo_path = repo.path();
-    let (c, _o, e) = run_git(&repo_path, &["init"]);
+    let (c, _o, e) = run_git(repo_path, &["init"]);
     assert_eq!(c, 0, "git init failed: {}", e);
-    run_git(&repo_path, &["config", "user.name", "A U Thor"]).0;
+    run_git(repo_path, &["config", "user.name", "A U Thor"]);
     run_git(
-        &repo_path,
+        repo_path,
         &["config", "user.email", "a.u.thor@example.com"],
-    )
-    .0;
-    write_file(&repo_path, "test.txt", "hello");
-    run_git(&repo_path, &["add", "."]);
-    run_git(&repo_path, &["commit", "-m", "add test file"]);
-    run_tool_expect_success(&repo_path, |o| {
+    );
+    write_file(repo_path, "test.txt", "hello");
+    run_git(repo_path, &["add", "."]);
+    run_git(repo_path, &["commit", "-m", "add test file"]);
+    run_tool_expect_success(repo_path, |o| {
         o.max_blob_size = Some(1000);
     });
     let (_c2, tree, _e2) = run_git(
-        &repo_path,
+        repo_path,
         &[
             "-c",
             "core.quotepath=false",
@@ -165,18 +164,16 @@ fn max_blob_size_no_git_objects() {
     let repo_path = repo.path();
     let (c, _o, e) = run_git(repo_path, &["init"]);
     assert_eq!(c, 0, "git init failed: {}", e);
-    run_git(repo_path, &["config", "user.name", "test"]).0;
-    run_git(repo_path, &["config", "user.email", "test@example.com"]).0;
+    run_git(repo_path, &["config", "user.name", "test"]);
+    run_git(repo_path, &["config", "user.email", "test@example.com"]);
     run_git(
         repo_path,
         &["commit", "--allow-empty", "-q", "-m", "empty commit 1"],
-    )
-    .0;
+    );
     run_git(
         repo_path,
         &["commit", "--allow-empty", "-q", "-m", "empty commit 2"],
-    )
-    .0;
+    );
     run_tool_expect_success(repo_path, |o| {
         o.max_blob_size = Some(1000);
     });

@@ -14,7 +14,7 @@ fn strip_report_written() {
     f.write_all(&big_data).unwrap();
     f.flush().unwrap();
     drop(f);
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add files"]).0, 0);
     run_tool_expect_success(&repo, |o| {
         o.max_blob_size = Some(1024);
@@ -34,7 +34,7 @@ fn strip_report_written() {
 fn strip_ids_report_written() {
     let repo = init_repo();
     write_file(&repo, "secret.bin", "topsecret\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add secret.bin"]).0,
         0

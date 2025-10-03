@@ -44,7 +44,7 @@ fn memory_management_path_filtering_memory() {
         ],
     );
     let files: Vec<&str> = tree.split_whitespace().collect();
-    assert!(files.len() > 0 && files.len() < 1000);
+    assert!(!files.is_empty() && files.len() < 1000);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn memory_management_blob_size_precomputation_stress() {
         ],
     );
     let files: Vec<&str> = tree.split_whitespace().collect();
-    assert!(files.len() > 0);
+    assert!(!files.is_empty());
 }
 
 #[test]
@@ -124,9 +124,9 @@ fn memory_management_edge_case_empty_repositories() {
     let repo = tempfile::TempDir::new().unwrap();
     let repo_path = repo.path();
     run_git(repo_path, &["init"]);
-    run_git(repo_path, &["config", "user.name", "tester"]).0;
-    run_git(repo_path, &["config", "user.email", "tester@example.com"]).0;
-    run_git(repo_path, &["commit", "--allow-empty", "-m", "empty"]).0;
+    run_git(repo_path, &["config", "user.name", "tester"]);
+    run_git(repo_path, &["config", "user.email", "tester@example.com"]);
+    run_git(repo_path, &["commit", "--allow-empty", "-m", "empty"]);
     common::run_tool(repo_path, |o| {
         o.max_blob_size = Some(1000);
     })

@@ -112,12 +112,12 @@ fn create_test_repo() -> Result<TempDir, FilterRepoError> {
 
     // Set up git config
     std::process::Command::new("git")
-        .args(&["config", "user.name", "Test User"])
+        .args(["config", "user.name", "Test User"])
         .current_dir(temp_dir.path())
         .output()?;
 
     std::process::Command::new("git")
-        .args(&["config", "user.email", "test@example.com"])
+        .args(["config", "user.email", "test@example.com"])
         .current_dir(temp_dir.path())
         .output()?;
 

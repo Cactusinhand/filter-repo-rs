@@ -5,7 +5,7 @@ use common::*;
 fn replace_text_redacts_blob_contents() {
     let repo = init_repo();
     write_file(&repo, "secret.txt", "token=SECRET-ABC-123\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add secret"]).0, 0);
     let repl = repo.join("repl-blobs.txt");
     std::fs::write(&repl, "SECRET-ABC-123==>REDACTED\n").unwrap();
@@ -22,7 +22,7 @@ fn replace_text_redacts_blob_contents() {
 fn replace_text_regex_redacts_blob() {
     let repo = init_repo();
     write_file(&repo, "data.txt", "foo123 foo999\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add data"]).0, 0);
     let repl = repo.join("repl-regex.txt");
     std::fs::write(&repl, "regex:foo[0-9]+==>X\n").unwrap();
@@ -39,7 +39,7 @@ fn replace_text_regex_redacts_blob() {
 fn replace_text_glob_redacts_blob() {
     let repo = init_repo();
     write_file(&repo, "data.txt", "foo123 foo999 bar\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "add data glob"]).0,
         0
@@ -62,7 +62,7 @@ fn replace_text_glob_redacts_blob() {
 fn replace_text_glob_question_mark_wildcard() {
     let repo = init_repo();
     write_file(&repo, "test.txt", "cat bat rat\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add test"]).0, 0);
     let repl = repo.join("repl-question.txt");
     std::fs::write(&repl, "glob:?at==>MATCH\n").unwrap();
@@ -81,7 +81,7 @@ fn replace_text_glob_question_mark_wildcard() {
 fn replace_text_glob_regex_special_chars_literal() {
     let repo = init_repo();
     write_file(&repo, "special.txt", "a.b c+d e*f g[h]\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add special"]).0, 0);
     let repl = repo.join("repl-special.txt");
     std::fs::write(&repl, "glob:a.b==>DOT\n").unwrap();
@@ -101,7 +101,7 @@ fn replace_text_glob_regex_special_chars_literal() {
 fn replace_text_glob_empty_pattern() {
     let repo = init_repo();
     write_file(&repo, "empty.txt", "test content\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add empty"]).0, 0);
     let repl = repo.join("repl-empty.txt");
     std::fs::write(&repl, "glob:==>REPLACED\n").unwrap();
@@ -120,7 +120,7 @@ fn replace_text_glob_empty_pattern() {
 fn replace_text_glob_no_replacement_specified() {
     let repo = init_repo();
     write_file(&repo, "default.txt", "secret data\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add default"]).0, 0);
     let repl = repo.join("repl-default.txt");
     std::fs::write(&repl, "glob:secret\n").unwrap();
@@ -137,7 +137,7 @@ fn replace_text_glob_no_replacement_specified() {
 fn replace_text_mixed_types_in_same_file() {
     let repo = init_repo();
     write_file(&repo, "mixed.txt", "API_KEY_SECRET foo123\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add mixed"]).0, 0);
     let repl = repo.join("repl-mixed.txt");
     // Use patterns that work together: regex (specific) then glob (greedy)
@@ -161,7 +161,7 @@ fn replace_text_glob_complex_pattern() {
         "complex.txt",
         "config-production.yaml config-dev.yaml backup.txt\n",
     );
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add complex"]).0, 0);
     let repl = repo.join("repl-complex.txt");
     std::fs::write(&repl, "glob:config-*.yaml==>CONFIG\n").unwrap();
@@ -181,7 +181,7 @@ fn replace_text_glob_complex_pattern() {
 fn replace_text_glob_invalid_utf8() {
     let repo = init_repo();
     write_file(&repo, "invalid.txt", "test\n");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add invalid"]).0, 0);
     let repl = repo.join("repl-invalid.txt");
     // Create invalid UTF-8 bytes for the glob pattern

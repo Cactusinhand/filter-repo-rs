@@ -42,12 +42,12 @@ impl SanityTestUtils {
 
         // Configure git user for commits
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(temp_dir.path())
             .output()?;
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(temp_dir.path())
             .output()?;
 
@@ -61,12 +61,12 @@ impl SanityTestUtils {
 
         // Add and commit
         Command::new("git")
-            .args(&["add", "test.txt"])
+            .args(["add", "test.txt"])
             .current_dir(repo_path)
             .output()?;
 
         Command::new("git")
-            .args(&["commit", "-m", "Test commit"])
+            .args(["commit", "-m", "Test commit"])
             .current_dir(repo_path)
             .output()?;
 

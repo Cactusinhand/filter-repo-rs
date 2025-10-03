@@ -58,8 +58,8 @@ fn sensitive_fetch_all_from_bare_remote() {
     let seed = init_repo();
     assert_eq!(run_git(&seed, &["checkout", "-b", "extra"]).0, 0);
     write_file(&seed, "extra.txt", "hello\n");
-    run_git(&seed, &["add", "."]).0;
-    run_git(&seed, &["commit", "-m", "extra"]).0;
+    run_git(&seed, &["add", "."]);
+    run_git(&seed, &["commit", "-m", "extra"]);
     let bare_str = bare.to_string_lossy().to_string();
     assert_eq!(run_git(&seed, &["remote", "add", "origin", &bare_str]).0, 0);
     assert_eq!(run_git(&seed, &["push", "-q", "origin", "--all"]).0, 0);

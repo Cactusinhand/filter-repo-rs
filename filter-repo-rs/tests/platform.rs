@@ -4,13 +4,11 @@ use common::*;
 #[test]
 fn cross_platform_windows_path_handling() {
     let repo = init_repo();
-    let windows_paths = vec![
-        "file_with_backslash/path/test.txt",
+    let windows_paths = ["file_with_backslash/path/test.txt",
         "file/with/mixed/separators.txt",
         "relative/path/file.txt",
         "./hidden/file.txt",
-        "../parent/file.txt",
-    ];
+        "../parent/file.txt"];
     for (i, path_str) in windows_paths.iter().enumerate() {
         let content = format!("Windows path test file {} content", i);
         if let Some(parent) = std::path::Path::new(path_str).parent() {
@@ -82,16 +80,14 @@ fn cross_platform_case_sensitivity_handling() {
 #[test]
 fn cross_platform_special_characters_in_paths() {
     let repo = init_repo();
-    let special_paths = vec![
-        "file with spaces.txt",
+    let special_paths = ["file with spaces.txt",
         "file-with-dashes.txt",
         "file_with_underscores.txt",
         "file.with.dots.txt",
-        "file123.txt",
-    ];
+        "file123.txt"];
     let mut files_created = 0;
     let mut successfully_created = Vec::new();
-    for (_i, path_str) in special_paths.iter().enumerate() {
+    for path_str in special_paths.iter() {
         // Keep content small so it stays below the size filter threshold
         let content = "ok";
         match std::fs::write(repo.join(path_str), content) {
@@ -149,11 +145,9 @@ fn cross_platform_special_characters_in_paths() {
 #[test]
 fn cross_platform_long_file_names() {
     let repo = init_repo();
-    let long_paths = vec![
-        "long_file_name_".to_string() + &"a".repeat(100) + ".txt",
+    let long_paths = ["long_file_name_".to_string() + &"a".repeat(100) + ".txt",
         "nested/long_file_name_".to_string() + &"b".repeat(80) + ".txt",
-        "another/nested/path/".to_string() + &"c".repeat(60) + ".md",
-    ];
+        "another/nested/path/".to_string() + &"c".repeat(60) + ".md"];
     for (i, path_str) in long_paths.iter().enumerate() {
         let normalized_path = path_str.replace('\\', "/");
         let content = format!("Long file name test {} content", i);

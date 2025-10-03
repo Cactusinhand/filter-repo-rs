@@ -244,7 +244,7 @@ fn error_handling_permission_denied_simulation() {
 fn error_handling_corrupted_git_repository() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let repo_path = temp_dir.path();
-    run_git(&repo_path, &["init"]);
+    run_git(repo_path, &["init"]);
     let git_dir = repo_path.join(".git");
     let objects_dir = git_dir.join("objects");
     if objects_dir.exists() {

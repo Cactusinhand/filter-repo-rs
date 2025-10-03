@@ -285,8 +285,8 @@ fn binary_file_handling_edge_cases() {
     let binary_cases = vec![
         (vec![0u8; 100], "all_zeros.bin"),
         (vec![255u8; 100], "all_ones.bin"),
-        (vec![0u8, 1u8, 2u8, 3u8].repeat(25), "sequential.bin"),
-        (vec![0xFF, 0xFE, 0xFD].repeat(34), "decreasing.bin"),
+        ([0u8, 1u8, 2u8, 3u8].repeat(25), "sequential.bin"),
+        ([0xFF, 0xFE, 0xFD].repeat(34), "decreasing.bin"),
         (
             (0..100).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
             "cyclic.bin",
@@ -338,8 +338,7 @@ fn commit_message_edge_cases() {
 
     // Create commits with edge case messages
     let long_message = "A".repeat(1000);
-    let edge_case_messages = vec![
-        "",            // Empty message
+    let edge_case_messages = ["",            // Empty message
         " ",           // Single space
         "\n",          // Single newline
         "   \n   ",    // Whitespace only
@@ -349,8 +348,7 @@ fn commit_message_edge_cases() {
         "Message with [brackets] {braces} (parentheses)",
         "Message with &lt;HTML&gt; entities",
         "Message with café naïve résumé",
-        "Message with 🚀 emoji and 💡 symbols",
-    ];
+        "Message with 🚀 emoji and 💡 symbols"];
 
     for (i, message) in edge_case_messages.iter().enumerate() {
         write_file(&repo, &format!("file{}.txt", i), &format!("Content {}", i));

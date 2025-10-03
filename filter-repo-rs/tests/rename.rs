@@ -81,7 +81,7 @@ fn branch_prefix_rename_preserves_head_to_mapped_target() {
         0
     );
     write_file(&repo, "feat.txt", "feat");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "feat commit"]).0, 0);
     let (_c0, headref, _e0) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(headref.trim(), "refs/heads/features/foo");
@@ -135,21 +135,21 @@ fn multi_branch_prefix_rename_maps_all_and_preserves_others() {
         0
     );
     write_file(&repo, "f-foo.txt", "foo");
-    run_git(&repo, &["add", "."]).0;
-    run_git(&repo, &["commit", "-q", "-m", "feat foo"]).0;
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "feat foo"]);
     assert_eq!(run_git(&repo, &["checkout", "-q", &def_short]).0, 0);
     assert_eq!(
         run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0,
         0
     );
     write_file(&repo, "f-bar.txt", "bar");
-    run_git(&repo, &["add", "."]).0;
-    run_git(&repo, &["commit", "-q", "-m", "feat bar"]).0;
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "feat bar"]);
     assert_eq!(run_git(&repo, &["checkout", "-q", &def_short]).0, 0);
     assert_eq!(run_git(&repo, &["checkout", "-q", "-b", "misc/baz"]).0, 0);
     write_file(&repo, "baz.txt", "baz");
-    run_git(&repo, &["add", "."]).0;
-    run_git(&repo, &["commit", "-q", "-m", "misc baz"]).0;
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "misc baz"]);
 
     run_tool_expect_success(&repo, |o| {
         o.branch_rename = Some((b"features/".to_vec(), b"topics/".to_vec()));
@@ -187,16 +187,16 @@ fn multi_branch_prefix_rename_maps_head_from_deleted_branch() {
         0
     );
     write_file(&repo, "f-foo.txt", "foo");
-    run_git(&repo, &["add", "."]).0;
-    run_git(&repo, &["commit", "-q", "-m", "feat foo"]).0;
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "feat foo"]);
     assert_eq!(run_git(&repo, &["checkout", "-q", &def_short]).0, 0);
     assert_eq!(
         run_git(&repo, &["checkout", "-q", "-b", "features/bar"]).0,
         0
     );
     write_file(&repo, "f-bar.txt", "bar");
-    run_git(&repo, &["add", "."]).0;
-    run_git(&repo, &["commit", "-q", "-m", "feat bar"]).0;
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "feat bar"]);
 
     let (_c_h, head_before, _e_h) = run_git(&repo, &["symbolic-ref", "HEAD"]);
     assert_eq!(head_before.trim(), "refs/heads/features/bar");

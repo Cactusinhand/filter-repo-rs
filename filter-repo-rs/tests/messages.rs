@@ -5,7 +5,7 @@ use common::*;
 fn replace_message_edits_commit_and_tag_messages() {
     let repo = init_repo();
     write_file(&repo, "src/a.txt", "x");
-    run_git(&repo, &["add", "."]).0;
+    run_git(&repo, &["add", "."]);
     assert_eq!(
         run_git(&repo, &["commit", "-q", "-m", "commit with FOO token"]).0,
         0

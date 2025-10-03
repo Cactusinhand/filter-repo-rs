@@ -548,7 +548,7 @@ mod tests {
 
         let is_bare = is_bare_repository(temp_repo.path())?;
 
-        assert_eq!(is_bare, false);
+        assert!(!is_bare);
 
         Ok(())
     }
@@ -559,7 +559,7 @@ mod tests {
 
         let is_bare = is_bare_repository(temp_repo.path())?;
 
-        assert_eq!(is_bare, true);
+        assert!(is_bare);
 
         Ok(())
     }
