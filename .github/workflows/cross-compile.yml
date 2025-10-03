@@ -83,11 +83,11 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: |
-          $host = (rustc -vV | Select-String '^host:\s*(.+)$').Matches[0].Groups[1].Value
+          $hostTriple = (rustc -vV | Select-String '^host:\s*(.+)$').Matches[0].Groups[1].Value
           cargo build --release -p filter-repo-rs
           New-Item -ItemType Directory -Force -Path releases | Out-Null
           $src = "target\release\filter-repo-rs.exe"
-          $dest = "releases\filter-repo-rs.exe-$host"
+          $dest = "releases\filter-repo-rs.exe-$hostTriple"
           Copy-Item $src $dest -Force
           Compress-Archive -Path $dest -DestinationPath "$dest.zip" -Force
 
@@ -125,4 +125,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
