@@ -2,7 +2,7 @@ name: Release Binaries
 
 on:
   push:
-    tags: [ 'v*' ]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -114,7 +114,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          find artifacts -name "*.tar.gz" -o -name "*.zip" -print0 | xargs -0 -I {} cp {} release-assets/
+          # Copy both .tar.gz and .zip from all artifacts; fix find precedence so both patterns are included
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -print0 | xargs -0 -I {} cp {} release-assets/
           ls -la release-assets || true
 
       - name: Publish Release
