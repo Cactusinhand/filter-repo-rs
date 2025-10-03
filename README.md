@@ -206,9 +206,72 @@ filter-repo-rs is a Rust prototype implementation of [git-filter-repo](https://g
 
 ## Build
 
+### 单平台构建
+
 ```sh
 cargo build -p filter-repo-rs --release
 ```
+
+### 多平台交叉编译
+
+我们提供了多种方式进行多平台编译：
+
+#### 方法一：使用构建脚本（推荐）
+
+**Linux/macOS:**
+```sh
+# 构建所有平台
+./scripts/build-cross.sh
+
+# 构建特定平台
+./scripts/build-cross.sh x86_64-unknown-linux-gnu
+./scripts/build-cross.sh x86_64-apple-darwin aarch64-apple-darwin
+```
+
+**Windows:**
+```cmd
+REM 构建所有平台
+scripts\build-cross.bat
+
+REM 构建特定平台
+scripts\build-cross.bat x86_64-pc-windows-msvc
+```
+
+#### 方法二：手动交叉编译
+
+首先安装 cross 工具：
+```sh
+cargo install cross --git https://github.com/cross-rs/cross
+```
+
+然后构建特定目标：
+```sh
+# Linux
+cross build --target x86_64-unknown-linux-gnu --release -p filter-repo-rs
+cross build --target aarch64-unknown-linux-gnu --release -p filter-repo-rs
+
+# macOS (需要在 macOS 上运行或配置相应工具链)
+cargo build --target x86_64-apple-darwin --release -p filter-repo-rs
+cargo build --target aarch64-apple-darwin --release -p filter-repo-rs
+
+# Windows
+cross build --target x86_64-pc-windows-msvc --release -p filter-repo-rs
+```
+
+#### 支持的目标平台
+
+| 平台 | 架构 | 目标标识符 | 说明 |
+|------|------|------------|------|
+| Linux | x86_64 | `x86_64-unknown-linux-gnu` | 标准 Linux (glibc) |
+| Linux | ARM64 | `aarch64-unknown-linux-gnu` | ARM64 Linux (glibc) |
+| Linux | x86_64 | `x86_64-unknown-linux-musl` | 静态链接 Linux |
+| Linux | ARM64 | `aarch64-unknown-linux-musl` | 静态链接 ARM64 Linux |
+| macOS | x86_64 | `x86_64-apple-darwin` | Intel Mac |
+| macOS | ARM64 | `aarch64-apple-darwin` | Apple Silicon Mac |
+| Windows | x86_64 | `x86_64-pc-windows-msvc` | Windows (MSVC) |
+| Windows | ARM64 | `aarch64-pc-windows-msvc` | Windows ARM64 |
+
+构建产物将保存在 `target/releases/` 目录中。
 
 ## Testing
 

@@ -1,0 +1,128 @@
+name: Release Binaries
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux:
+    name: Build (linux host)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and package
+        shell: bash
+        run: |
+          set -e
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          cargo build --release -p filter-repo-rs
+          mkdir -p releases
+          src=target/release/filter-repo-rs
+          dest="releases/filter-repo-rs-${host}"
+          cp "$src" "$dest"
+          tar -czf "${dest}.tar.gz" -C releases "$(basename "$dest")"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: releases/*.tar.gz
+          retention-days: 30
+
+  build-macos:
+    name: Build (macOS host)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and package
+        shell: bash
+        run: |
+          set -e
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          cargo build --release -p filter-repo-rs
+          mkdir -p releases
+          src=target/release/filter-repo-rs
+          dest="releases/filter-repo-rs-${host}"
+          cp "$src" "$dest"
+          tar -czf "${dest}.tar.gz" -C releases "$(basename "$dest")"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: releases/*.tar.gz
+          retention-days: 30
+
+  build-windows:
+    name: Build (windows host)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and package
+        shell: pwsh
+        run: |
+          $host = (rustc -vV | Select-String '^host:\s*(.+)$').Matches[0].Groups[1].Value
+          cargo build --release -p filter-repo-rs
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+          $src = "target\release\filter-repo-rs.exe"
+          $dest = "releases\filter-repo-rs.exe-$host"
+          Copy-Item $src $dest -Force
+          Compress-Archive -Path $dest -DestinationPath "$dest.zip" -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: releases\*.zip
+          retention-days: 30
+
+  create-release:
+    name: Create Release
+    needs: [build-linux, build-macos, build-windows]
+    if: ${{ always() && (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -name "*.tar.gz" -o -name "*.zip" -print0 | xargs -0 -I {} cp {} release-assets/
+          ls -la release-assets || true
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/*
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

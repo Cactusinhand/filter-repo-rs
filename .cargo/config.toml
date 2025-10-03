@@ -1,0 +1,34 @@
+# Cross-compilation configuration for Cargo
+
+[build]
+# Default target can be overridden via env
+# target = "x86_64-unknown-linux-gnu"
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dist]
+inherits = "release"
+lto = "fat"
+opt-level = "z"
+
+[env]
+# Static CRT for MSVC
+RUSTFLAGS_x86_64_pc_windows_msvc = "-C target-feature=+crt-static"
+RUSTFLAGS_aarch64_pc_windows_msvc = "-C target-feature=+crt-static"
