@@ -220,7 +220,7 @@ pub fn git_commands_for_repo(repo: &Path, invocations: &[GitInvocation]) -> Vec<
                 return Some(inv.args.clone());
             }
 
-            if inv.args.get(0).map(|s| s == "-C").unwrap_or(false)
+            if inv.args.first().map(|s| s == "-C").unwrap_or(false)
                 && inv
                     .args
                     .get(1)

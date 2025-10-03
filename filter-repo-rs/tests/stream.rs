@@ -65,9 +65,9 @@ fn inline_replace_text_and_report_modified() {
     let repo = init_repo();
     let stream_path = repo.join("fe-inline.stream");
     let payload = "token=SECRET-INLINE-123\n";
-    let payload_len = payload.as_bytes().len();
+    let payload_len = payload.len();
     let msg = "inline commit\n";
-    let msg_len = msg.as_bytes().len();
+    let msg_len = msg.len();
     let mut s = String::new();
     let (_hc, headref, _he) = run_git(&repo, &["symbolic-ref", "-q", "HEAD"]);
     let commit_ref = headref.trim();
@@ -77,7 +77,7 @@ fn inline_replace_text_and_report_modified() {
     s.push_str(&format!("data {}\n{}", msg_len, msg));
     s.push_str("M 100644 inline secret.txt\n");
     s.push_str(&format!("data {}\n{}", payload_len, payload));
-    s.push_str("\n");
+    s.push('\n');
     s.push_str("done\n");
     std::fs::write(&stream_path, s).unwrap();
 
