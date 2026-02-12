@@ -1089,6 +1089,34 @@ fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// Stream-based git command runner for memory-efficient processing.
+///
+/// This function can replace run_git_capture when processing large outputs
+/// to avoid loading the entire output into memory.
+///
+/// Example usage for blob path mapping:
+/// ```ignore
+/// let output = run_git_capture_stream(repo, &["rev-list", "--objects", "--all"])?;
+/// for line in output.lines() {
+///     // process each line without loading entire output
+/// }
+/// ```
+#[allow(dead_code)]
+fn run_git_capture_stream<R: BufRead>(repo: &Path, args: &[&str]) -> io::Result<impl BufRead> {
+    let mut cmd = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+    let stdout = cmd
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "failed to capture git stdout"))?;
+    // NOTE: Caller should wait on cmd to ensure success
+    Ok(BufReader::new(stdout))
+}
+
 fn parent_directory(path: &str) -> Option<String> {
     let pb = Path::new(path);
     pb.parent().map(|p| {
