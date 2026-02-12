@@ -23,10 +23,12 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
             )
         })?;
     if !remotes.status.success() {
+        eprintln!("WARNING: --sensitive: git remote command failed, skipping ref fetch");
         return Ok(());
     }
     let r = String::from_utf8_lossy(&remotes.stdout);
     if !r.lines().any(|l| l.trim() == "origin") {
+        eprintln!("WARNING: --sensitive: no 'origin' remote found, skipping ref fetch");
         return Ok(());
     }
     // Fetch all refs to ensure sensitive-history coverage
