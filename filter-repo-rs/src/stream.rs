@@ -274,13 +274,17 @@ impl BlobSizeTracker {
         let _sha_out = it.next();
         let kind = it.next().unwrap_or(b"");
         if kind != b"blob" {
+            // Non-blob objects are not counted towards size limits
             return Ok(0);
         }
         let size_bytes = it.next().unwrap_or(b"0");
         let size = std::str::from_utf8(size_bytes)
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
-            .unwrap_or(0);
+            .unwrap_or_else(|| {
+                eprintln!("WARNING: failed to parse blob size for {:?}", sha);
+                0
+            });
         Ok(size)
     }
 
