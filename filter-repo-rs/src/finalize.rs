@@ -4,6 +4,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+use crate::error::{FilterRepoError, Result};
 use crate::gitutil;
 use crate::migrate;
 use crate::opts::Options;
@@ -84,7 +85,7 @@ pub fn finalize(
     allow_flush_tag_resets: bool,
     report: Option<ReportData>,
     _blob_sizes: &BlobSizeTracker,
-) -> io::Result<()> {
+) -> Result<()> {
     // Emit buffered lightweight tag resets if any remain (ideally flushed before 'done')
     if allow_flush_tag_resets {
         let mut buffered = buffered_tag_resets;
@@ -118,14 +119,18 @@ pub fn finalize(
     }
     let fe_status = fe.wait()?;
     if !fe_status.success() {
-        eprintln!("fast-export failed: {}", fe_status);
-        std::process::exit(fe_status.code().unwrap_or(1));
+        return Err(FilterRepoError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("fast-export failed: {}", fe_status),
+        )));
     }
     if let Some(child) = fi {
         let fi_status = child.wait()?;
         if !fi_status.success() {
-            eprintln!("fast-import failed: {}", fi_status);
-            std::process::exit(fi_status.code().unwrap_or(1));
+            return Err(FilterRepoError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("fast-import failed: {}", fi_status),
+            )));
         }
     }
 
