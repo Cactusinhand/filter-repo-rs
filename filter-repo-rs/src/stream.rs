@@ -31,6 +31,16 @@ enum StripShaLookup {
     OnDisk(TempSortedFile),
 }
 
+/// Loads and sorts SHA entries from a file.
+///
+/// NOTE: This implementation first loads all entries into memory, sorts them,
+/// then decides whether to keep in memory or write to disk. For extremely large
+/// SHA lists, this causes a memory spike.
+///
+/// OPTIMIZATION: Consider implementing external merge sort or chunked sorting
+/// to reduce peak memory usage. The threshold STRIP_SHA_ON_DISK_THRESHOLD could
+/// be lowered to trigger on-disk storage earlier, trading disk I/O for memory.
+
 impl StripShaLookup {
     fn empty() -> Self {
         StripShaLookup::Empty
