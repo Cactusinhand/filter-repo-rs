@@ -172,6 +172,7 @@ pub struct Options {
     pub max_blob_size: Option<usize>,
     pub strip_blobs_with_ids: Option<PathBuf>,
     pub write_report: bool,
+    pub write_report_json: bool,
     pub cleanup: CleanupMode,
     pub reencode: bool,
     pub reencode_requested: Option<bool>,
@@ -219,6 +220,7 @@ impl Default for Options {
             max_blob_size: None,
             strip_blobs_with_ids: None,
             write_report: false,
+            write_report_json: false,
             cleanup: CleanupMode::None,
             reencode: true,
             reencode_requested: None,
@@ -634,6 +636,9 @@ pub fn parse_args() -> Options {
             }
             "--write-report" => {
                 opts.write_report = true;
+            }
+            "--write-report-json" => {
+                opts.write_report_json = true;
             }
             "--cleanup" => {
                 if let Some(next) = it.clone().next() {
@@ -1206,6 +1211,12 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--write-report".to_string(),
                     description: vec!["Write .git/filter-repo/report.txt summary".to_string()],
+                },
+                HelpOption {
+                    name: "--write-report-json".to_string(),
+                    description: vec![
+                        "Write .git/filter-repo/report.json (machine-readable)".to_string()
+                    ],
                 },
                 HelpOption {
                     name: "--cleanup".to_string(),

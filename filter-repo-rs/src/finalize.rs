@@ -9,14 +9,18 @@ use crate::gitutil;
 use crate::migrate;
 use crate::opts::Options;
 use crate::stream::BlobSizeTracker;
+use serde::Serialize;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ReportData {
     pub stripped_by_size: usize,
     pub stripped_by_sha: usize,
     pub modified_blobs: usize,
-    pub samples_size: Vec<Vec<u8>>,     // paths
-    pub samples_sha: Vec<Vec<u8>>,      // paths
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub samples_size: Vec<Vec<u8>>, // paths
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub samples_sha: Vec<Vec<u8>>, // paths
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub samples_modified: Vec<Vec<u8>>, // paths
 }
 
@@ -363,37 +367,65 @@ pub fn finalize(
     }
 
     // Optional reporting (use only stream-collected data; no rescans)
-    if opts.write_report {
-        let mut f = File::create(debug_dir.join("report.txt"))?;
-        if let Some(r) = report {
-            let size_samples = r.samples_size;
-            let size_count = std::cmp::max(r.stripped_by_size, size_samples.len());
-            writeln!(f, "Blobs stripped by size: {}", size_count)?;
-            writeln!(f, "Blobs stripped by SHA: {}", r.stripped_by_sha)?;
-            writeln!(f, "Blobs modified by replace-text: {}", r.modified_blobs)?;
-            if !size_samples.is_empty() {
-                writeln!(f, "\nSample paths (size):")?;
-                for p in size_samples {
-                    f.write_all(&p)?;
-                    f.write_all(b"\n")?;
+    if opts.write_report || opts.write_report_json {
+        // Write text report
+        if opts.write_report {
+            let mut f = File::create(debug_dir.join("report.txt"))?;
+            if let Some(ref r) = report {
+                let size_samples = &r.samples_size;
+                let size_count = std::cmp::max(r.stripped_by_size, size_samples.len());
+                writeln!(f, "Blobs stripped by size: {}", size_count)?;
+                writeln!(f, "Blobs stripped by SHA: {}", r.stripped_by_sha)?;
+                writeln!(f, "Blobs modified by replace-text: {}", r.modified_blobs)?;
+                if !size_samples.is_empty() {
+                    writeln!(f, "\nSample paths (size):")?;
+                    for p in size_samples {
+                        f.write_all(p)?;
+                        f.write_all(b"\n")?;
+                    }
                 }
-            }
-            if !r.samples_sha.is_empty() {
-                writeln!(f, "\nSample paths (sha):")?;
-                for p in r.samples_sha {
-                    f.write_all(&p)?;
-                    f.write_all(b"\n")?;
+                if !r.samples_sha.is_empty() {
+                    writeln!(f, "\nSample paths (sha):")?;
+                    for p in &r.samples_sha {
+                        f.write_all(p)?;
+                        f.write_all(b"\n")?;
+                    }
                 }
-            }
-            if !r.samples_modified.is_empty() {
-                writeln!(f, "\nSample paths (modified):")?;
-                for p in r.samples_modified {
-                    f.write_all(&p)?;
-                    f.write_all(b"\n")?;
+                if !r.samples_modified.is_empty() {
+                    writeln!(f, "\nSample paths (modified):")?;
+                    for p in &r.samples_modified {
+                        f.write_all(p)?;
+                        f.write_all(b"\n")?;
+                    }
                 }
+            } else {
+                writeln!(f, "No report data collected.")?;
             }
-        } else {
-            writeln!(f, "No report data collected.")?;
+        }
+        // Write JSON report
+        if opts.write_report_json {
+            let json_path = debug_dir.join("report.json");
+            let mut f = File::create(json_path)?;
+            if let Some(ref r) = report {
+                let json = serde_json::to_string_pretty(r).map_err(|e| {
+                    FilterRepoError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("JSON serialization failed: {e}"),
+                    ))
+                })?;
+                f.write_all(json.as_bytes())?;
+            } else {
+                let empty = serde_json::to_string_pretty(&serde_json::json!({
+                    "error": "No report data collected"
+                }))
+                .map_err(|e| {
+                    FilterRepoError::Io(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("JSON serialization failed: {e}"),
+                    ))
+                })?;
+                f.write_all(empty.as_bytes())?;
+            }
         }
     }
 
