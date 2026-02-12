@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::ChildStdout;
 
+use crate::limits::parse_data_size_header;
 use crate::message::{msg_regex, MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
@@ -69,12 +70,7 @@ pub fn process_tag_block(first_line: &[u8], mut ctx: TagProcessContext<'_>) -> i
         }
         if l.starts_with(b"data ") {
             // Read payload
-            let size_bytes = &l[b"data ".len()..];
-            let n = std::str::from_utf8(size_bytes)
-                .ok()
-                .map(|s| s.trim())
-                .and_then(|s| s.parse::<usize>().ok())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
+            let n = parse_data_size_header(&l)?;
             let mut payload = vec![0u8; n];
             ctx.fe_out.read_exact(&mut payload)?;
             if let Some(f) = ctx.orig_file.as_mut() {

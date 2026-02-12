@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 use std::process::ChildStdout;
 
 use crate::filechange;
+use crate::limits::parse_data_size_header;
 use crate::message::{msg_regex, MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
 
@@ -371,12 +372,7 @@ pub fn handle_commit_data(
     if !header_line.starts_with(b"data ") {
         return Ok(());
     }
-    let size_bytes = &header_line[b"data ".len()..];
-    let n = std::str::from_utf8(size_bytes)
-        .ok()
-        .map(|s| s.trim())
-        .and_then(|s| s.parse::<usize>().ok())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
+    let n = parse_data_size_header(header_line)?;
     let mut payload = vec![0u8; n];
     fe_out.read_exact(&mut payload)?;
     if let Some(f) = orig_file {

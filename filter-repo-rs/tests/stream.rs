@@ -133,3 +133,57 @@ fn fe_stream_override_requires_debug_mode() {
         "gating error should mention FRRS_DEBUG"
     );
 }
+
+#[test]
+fn tag_data_block_rejects_oversized_header_without_panicking() {
+    let repo = init_repo();
+    let stream_path = repo.join("oversized-tag.stream");
+    let stream = format!("tag v1\nfrom :1\ndata {}\n", usize::MAX);
+    std::fs::write(&stream_path, stream).expect("write oversized tag stream");
+
+    let err = run_tool(&repo, |o| {
+        o.debug_mode = true;
+        o.dry_run = true;
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    })
+    .expect_err("oversized tag data should return an error");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("exceeds maximum allowed size"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn commit_message_data_rejects_oversized_header_without_panicking() {
+    let repo = init_repo();
+    let (_code, headref, _stderr) = run_git(&repo, &["symbolic-ref", "-q", "HEAD"]);
+    let commit_ref = headref.trim();
+    let stream_path = repo.join("oversized-commit.stream");
+    let stream = format!(
+        "commit {}\nmark :1\ncommitter Tester <tester@example.com> 0 +0000\ndata {}\n",
+        commit_ref,
+        usize::MAX
+    );
+    std::fs::write(&stream_path, stream).expect("write oversized commit stream");
+
+    let err = run_tool(&repo, |o| {
+        o.debug_mode = true;
+        o.dry_run = true;
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    })
+    .expect_err("oversized commit data should return an error");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("exceeds maximum allowed size"),
+        "unexpected error: {msg}"
+    );
+}

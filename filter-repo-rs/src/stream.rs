@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result as FilterRepoResult;
 use crate::gitutil::git_dir;
+use crate::limits::parse_data_size_header;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use crate::message::msg_regex::RegexReplacer as MsgRegexReplacer;
 use crate::message::{MessageReplacer, ShortHashMapper};
@@ -19,9 +20,6 @@ const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
 const SHA_BIN_LEN: usize = 20;
 const STRIP_SHA_ON_DISK_THRESHOLD: usize = 100_000;
-/// Maximum allowed blob size to prevent memory exhaustion attacks.
-/// Blobs larger than this will be rejected as invalid input.
-const MAX_BLOB_SIZE: usize = 500 * 1024 * 1024; // 500 MB
 
 type ShaBytes = [u8; SHA_BIN_LEN];
 
@@ -596,25 +594,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         // If swallowing a skipped annotated tag block, consume its lines and payload
         if skipping_tag_block {
             if line.starts_with(b"data ") {
-                let size_bytes = &line[b"data ".len()..];
-                let n = std::str::from_utf8(size_bytes)
-                    .ok()
-                    .map(|s| s.trim())
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "invalid data header")
-                    })?;
-                // Prevent memory exhaustion attacks by limiting blob size
-                if n > MAX_BLOB_SIZE {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "blob size {} exceeds maximum allowed size {}",
-                            n, MAX_BLOB_SIZE
-                        ),
-                    )
-                    .into());
-                }
+                let n = parse_data_size_header(&line)?;
                 let mut payload = vec![0u8; n];
                 fe_out.read_exact(&mut payload)?;
                 // Mirror original payload to debug file (when enabled)
@@ -820,25 +800,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             if line.starts_with(b"data ") {
                 if let Some((pos, path_bytes)) = pending_inline.take() {
                     // Parse size and read payload
-                    let size_bytes = &line[b"data ".len()..];
-                    let n = std::str::from_utf8(size_bytes)
-                        .ok()
-                        .map(|s| s.trim())
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .ok_or_else(|| {
-                            io::Error::new(io::ErrorKind::InvalidData, "invalid data header")
-                        })?;
-                    // Prevent memory exhaustion attacks by limiting blob size
-                    if n > MAX_BLOB_SIZE {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!(
-                                "blob size {} exceeds maximum allowed size {}",
-                                n, MAX_BLOB_SIZE
-                            ),
-                        )
-                        .into());
-                    }
+                    let n = parse_data_size_header(&line)?;
                     let mut payload = vec![0u8; n];
                     fe_out.read_exact(&mut payload)?;
                     // Mirror original payload to debug file (when enabled)
@@ -1102,23 +1064,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
 
         // Generic data blocks (e.g., blob): forward exact payload bytes
         if line.starts_with(b"data ") {
-            let size_bytes = &line[b"data ".len()..];
-            let n = std::str::from_utf8(size_bytes)
-                .ok()
-                .map(|s| s.trim())
-                .and_then(|s| s.parse::<usize>().ok())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid data header"))?;
-            // Prevent memory exhaustion attacks by limiting blob size
-            if n > MAX_BLOB_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "blob size {} exceeds maximum allowed size {}",
-                        n, MAX_BLOB_SIZE
-                    ),
-                )
-                .into());
-            }
+            let n = parse_data_size_header(&line)?;
             let mut payload = vec![0u8; n];
             fe_out.read_exact(&mut payload)?;
             // Always mirror to original (when enabled)

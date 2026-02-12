@@ -109,6 +109,26 @@ fn sensitive_mode_keeps_origin_remote() {
 }
 
 #[test]
+fn nonsensitive_origin_cleanup_failure_does_not_fail_run() {
+    let repo = init_repo();
+    assert_eq!(run_git(&repo, &["remote", "add", "origin", "."]).0, 0);
+    std::fs::create_dir(repo.join(".git").join("config.lock"))
+        .expect("create directory to block git config.lock file creation");
+
+    let result = run_tool(&repo, |_o| {});
+    assert!(
+        result.is_ok(),
+        "origin cleanup failure should not fail full rewrite: {result:?}"
+    );
+
+    let (_code, remotes, _stderr) = run_git(&repo, &["remote"]);
+    assert!(
+        remotes.contains("origin"),
+        "origin should still exist when cleanup fails"
+    );
+}
+
+#[test]
 fn sensitive_mode_validation_rejects_stream_override() {
     use std::path::PathBuf;
 

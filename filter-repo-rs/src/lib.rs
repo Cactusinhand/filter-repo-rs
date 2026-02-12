@@ -6,6 +6,7 @@ mod filechange;
 mod finalize;
 pub mod git_config;
 pub mod gitutil;
+mod limits;
 mod message;
 mod migrate;
 pub mod opts;
