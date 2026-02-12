@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
+use std::thread;
+use std::time::Duration;
 
 use filter_repo_rs as fr;
 use filter_repo_rs::FilterRepoError;
@@ -76,15 +78,48 @@ pub fn cli_command() -> Command {
 }
 
 pub fn run_git(dir: &Path, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .expect("run git");
+    const MAX_ATTEMPTS: u32 = 60;
+    const MAX_BACKOFF_MS: u64 = 250;
+    let mut last_err: Option<std::io::Error> = None;
+    let mut out_opt: Option<Output> = None;
+    for attempt in 1..=MAX_ATTEMPTS {
+        match Command::new("git").current_dir(dir).args(args).output() {
+            Ok(out) => {
+                out_opt = Some(out);
+                break;
+            }
+            Err(e) if is_transient_spawn_error(&e) && attempt < MAX_ATTEMPTS => {
+                last_err = Some(e);
+                let backoff_ms = (20u64 * attempt as u64).min(MAX_BACKOFF_MS);
+                thread::sleep(Duration::from_millis(backoff_ms));
+            }
+            Err(e) => panic!("run git failed: {e}"),
+        }
+    }
+    let out = out_opt.unwrap_or_else(|| {
+        let e = last_err
+            .map(|err| err.to_string())
+            .unwrap_or_else(|| "unknown error".to_string());
+        panic!("run git failed after retries: {e}");
+    });
     let code = out.status.code().unwrap_or(-1);
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     (code, stdout, stderr)
+}
+
+fn is_transient_spawn_error(err: &std::io::Error) -> bool {
+    if matches!(
+        err.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+    ) {
+        return true;
+    }
+    matches!(
+        err.raw_os_error(),
+        // POSIX EAGAIN / Darwin EWOULDBLOCK
+        Some(11) | Some(35)
+    )
 }
 
 pub fn write_file(dir: &Path, rel: &str, contents: &str) {
@@ -332,4 +367,23 @@ pub fn docs_example_config_path() -> PathBuf {
     path.push("examples");
     path.push("filter-repo-rs.toml");
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_transient_spawn_error;
+    use std::io;
+
+    #[test]
+    fn transient_spawn_errors_are_detected() {
+        assert!(is_transient_spawn_error(&io::Error::from(
+            io::ErrorKind::WouldBlock
+        )));
+        assert!(is_transient_spawn_error(&io::Error::from(
+            io::ErrorKind::Interrupted
+        )));
+        assert!(!is_transient_spawn_error(&io::Error::from(
+            io::ErrorKind::NotFound
+        )));
+    }
 }
