@@ -7,12 +7,9 @@ on:
   pull_request:
 
 jobs:
-  test:
-    name: cargo test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  quality:
+    name: fmt + clippy (ubuntu)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -29,7 +26,56 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --workspace --all-targets
 
-      - name: Run tests
-        run: cargo test --workspace --all-targets
+  test-linux-full:
+    name: full regression (ubuntu)
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run unit + binary tests
+        run: cargo test --workspace --lib --bins -- --test-threads=1
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: Run integration suites one-by-one (stable mode)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in filter-repo-rs/tests/*.rs; do
+            suite="$(basename "$test_file" .rs)"
+            echo "Running integration suite: $suite"
+            cargo test -p filter-repo-rs --test "$suite" -- --test-threads=1
+          done
+        env:
+          CARGO_TERM_COLOR: always
+
+  test-cross-smoke:
+    name: smoke tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: quality
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run core smoke tests
+        run: cargo test --workspace --lib --bins
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: Run CLI integration smoke tests
+        run: cargo test -p filter-repo-rs --test cli --test stream --test sensitive
         env:
           CARGO_TERM_COLOR: always
