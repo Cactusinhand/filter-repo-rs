@@ -239,6 +239,7 @@ Inspired by [git-filter-repo](https://github.com/newren/git-filter-repo) by [Eli
 - [GitHub](https://github.com/Cactusinhand/filter-repo-rs)
 - [Issues](https://github.com/Cactusinhand/filter-repo-rs/issues)
 - [Discussions](https://github.com/Cactusinhand/filter-repo-rs/discussions)
+- [Testing Policy](TESTING.md)
 
 ---
 

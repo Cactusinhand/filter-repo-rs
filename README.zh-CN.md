@@ -239,6 +239,7 @@ git clone /path/to/backup.bundle restored-repo
 - [GitHub](https://github.com/Cactusinhand/filter-repo-rs)
 - [Issues](https://github.com/Cactusinhand/filter-repo-rs/issues)
 - [Discussions](https://github.com/Cactusinhand/filter-repo-rs/discussions)
+- [测试策略](TESTING.md)
 
 ---
 
