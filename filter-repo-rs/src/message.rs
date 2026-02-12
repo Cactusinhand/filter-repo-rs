@@ -35,6 +35,13 @@ impl MessageReplacer {
         Ok(Self { pairs })
     }
 
+    /// Apply all replacement rules to the given data.
+    ///
+    /// NOTE: This implementation applies rules sequentially, which results in
+    /// O(n*m) complexity where n is data size and m is rule count.
+    /// For better performance with many literal rules, consider using
+    /// Aho-Corasick automaton (via aho-corasick crate) to match all
+    /// patterns in a single pass.
     pub fn apply(&self, mut data: Vec<u8>) -> Vec<u8> {
         for (from, to) in &self.pairs {
             data = replace_all_bytes(&data, from, to);
