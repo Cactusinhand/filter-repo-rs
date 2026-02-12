@@ -63,7 +63,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     println!("Backup bundle saved to {}", bundle_path.display());
                 }
             }
-            crate::migrate::fetch_all_refs_if_needed(opts);
+            crate::migrate::fetch_all_refs_if_needed(opts)?;
             crate::migrate::migrate_origin_to_heads(opts)?;
             stream::run(opts)
         }

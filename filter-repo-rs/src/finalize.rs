@@ -479,7 +479,7 @@ pub fn finalize(
         );
     }
     // Post-run remote cleanup (non-sensitive parity): remove origin
-    migrate::remove_origin_remote_if_applicable(opts);
+    migrate::remove_origin_remote_if_applicable(opts)?;
     Ok(())
 }
 

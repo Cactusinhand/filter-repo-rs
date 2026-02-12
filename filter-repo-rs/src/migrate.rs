@@ -6,30 +6,32 @@ use crate::gitutil;
 use crate::opts::Options;
 
 #[allow(dead_code)]
-pub fn fetch_all_refs_if_needed(opts: &Options) {
+pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
     if !opts.sensitive || opts.no_fetch || opts.dry_run {
-        return;
+        return Ok(());
     }
     // Check that origin exists
     let remotes = Command::new("git")
         .arg("-C")
         .arg(&opts.source)
         .arg("remote")
-        .output();
-    if let Ok(out) = remotes {
-        if !out.status.success() {
-            return;
-        }
-        let r = String::from_utf8_lossy(&out.stdout);
-        if !r.lines().any(|l| l.trim() == "origin") {
-            return;
-        }
-    } else {
-        return;
+        .output()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to run git remote: {e}"),
+            )
+        })?;
+    if !remotes.status.success() {
+        return Ok(());
+    }
+    let r = String::from_utf8_lossy(&remotes.stdout);
+    if !r.lines().any(|l| l.trim() == "origin") {
+        return Ok(());
     }
     // Fetch all refs to ensure sensitive-history coverage
     eprintln!("NOTICE: Fetching all refs from origin to ensure full sensitive-history coverage");
-    let _ = Command::new("git")
+    let status = Command::new("git")
         .arg("-C")
         .arg(&opts.source)
         .arg("fetch")
@@ -40,7 +42,20 @@ pub fn fetch_all_refs_if_needed(opts: &Options) {
         .arg("")
         .arg("origin")
         .arg("+refs/*:refs/*")
-        .status();
+        .status()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to run git fetch: {e}"),
+            )
+        })?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "git fetch command failed with non-zero exit status",
+        ));
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -89,36 +104,59 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
         .spawn()?;
     if let Some(stdin) = child.stdin.as_mut() {
         for (r, h) in to_create.iter() {
-            let _ = writeln!(stdin, "create {} {}", r, h);
+            writeln!(stdin, "create {} {}", r, h).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to write to git update-ref stdin: {e}"),
+                )
+            })?;
         }
         for (r, h) in to_delete.iter() {
-            let _ = writeln!(stdin, "delete {} {}", r, h);
+            writeln!(stdin, "delete {} {}", r, h).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to write to git update-ref stdin: {e}"),
+                )
+            })?;
         }
     }
-    let _ = child.wait();
+    let status = child.wait().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to wait for git update-ref: {e}"),
+        )
+    })?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "git update-ref command failed with non-zero exit status",
+        ));
+    }
     Ok(())
 }
 
-pub fn remove_origin_remote_if_applicable(opts: &Options) {
+pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
     if opts.sensitive || opts.partial || opts.dry_run {
-        return;
+        return Ok(());
     }
     // Check that origin exists
     let remotes = Command::new("git")
         .arg("-C")
         .arg(&opts.target)
         .arg("remote")
-        .output();
-    if let Ok(out) = remotes {
-        if !out.status.success() {
-            return;
-        }
-        let r = String::from_utf8_lossy(&out.stdout);
-        if !r.lines().any(|l| l.trim() == "origin") {
-            return;
-        }
-    } else {
-        return;
+        .output()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to run git remote: {e}"),
+            )
+        })?;
+    if !remotes.status.success() {
+        return Ok(());
+    }
+    let r = String::from_utf8_lossy(&remotes.stdout);
+    if !r.lines().any(|l| l.trim() == "origin") {
+        return Ok(());
     }
     // Print URL for context if available
     let url = GitConfig::get_string_config(&opts.target, "remote.origin.url")
@@ -130,11 +168,24 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) {
     } else {
         eprintln!("NOTICE: Removing 'origin' remote (was: {})", url);
     }
-    let _ = Command::new("git")
+    let status = Command::new("git")
         .arg("-C")
         .arg(&opts.target)
         .arg("remote")
         .arg("rm")
         .arg("origin")
-        .status();
+        .status()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to run git remote rm: {e}"),
+            )
+        })?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "git remote rm command failed with non-zero exit status",
+        ));
+    }
+    Ok(())
 }
