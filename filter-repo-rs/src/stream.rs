@@ -251,7 +251,12 @@ impl BlobSizeTracker {
 
     fn query_size_via_batch(&mut self, sha: &[u8]) -> io::Result<usize> {
         self.ensure_batch()?;
-        let batch = self.batch.as_mut().expect("batch initialized");
+        let batch = self.batch.as_mut().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "batch process not initialized before query",
+            )
+        })?;
         // Write request (sha + newline)
         batch.stdin.write_all(sha)?;
         batch.stdin.write_all(b"\n")?;
@@ -435,18 +440,30 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
 
     let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
-    let mut fe = fe_cmd.spawn().expect("failed to spawn git fast-export");
+    let mut fe = fe_cmd.spawn().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to spawn git fast-export: {e}"),
+        )
+    })?;
     let mut fi = if opts.dry_run {
         None
     } else {
         Some(
             crate::pipes::build_fast_import_cmd(opts)
                 .spawn()
-                .expect("failed to spawn git fast-import"),
+                .map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to spawn git fast-import: {e}"),
+                    )
+                })?,
         )
     };
 
-    let mut fe_out = BufReader::new(fe.stdout.take().expect("no stdout from fast-export"));
+    let mut fe_out = BufReader::new(fe.stdout.take().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "git fast-export produced no stdout")
+    })?);
     let mut fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
     {
         child.stdin.take().map(BufWriter::new)
