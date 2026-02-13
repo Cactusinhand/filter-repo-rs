@@ -8,7 +8,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 
 use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
@@ -173,14 +173,17 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     }
 
     // Now map blob OIDs to paths efficiently using the collected blob sizes
-    eprintln!("[*] Mapping blob paths...");
+    eprintln!("[*] Mapping blob paths (streaming)...");
     let blob_oids: HashSet<String> = unpacked_size.keys().cloned().collect();
 
-    // Use a simpler approach: git rev-list --objects --all and filter for needed OIDs
+    // Use streaming approach to avoid loading all objects into memory
     let mut blob_path_map: HashMap<String, String> = HashMap::new();
-    let output = run_git_capture(repo, &["rev-list", "--objects", "--all"])?;
+    let (mut reader, mut child) =
+        run_git_capture_stream(repo, &["rev-list", "--objects", "--all"])?;
 
-    for line in output.lines() {
+    let mut line_buf = String::new();
+    while reader.read_line(&mut line_buf)? > 0 {
+        let line = line_buf.trim_end();
         let mut parts = line.splitn(2, ' ');
         if let (Some(oid), Some(path)) = (parts.next(), parts.next()) {
             if blob_oids.contains(oid) && !path.is_empty() {
@@ -190,6 +193,16 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
                 }
             }
         }
+        line_buf.clear();
+    }
+
+    // Wait for git command to complete
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("git rev-list --objects --all failed: {}", status),
+        ));
     }
 
     eprintln!("[*] Found {} blob-to-path mappings", blob_path_map.len());
@@ -1094,15 +1107,12 @@ fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
 /// This function can replace run_git_capture when processing large outputs
 /// to avoid loading the entire output into memory.
 ///
-/// Example usage for blob path mapping:
-/// ```ignore
-/// let output = run_git_capture_stream(repo, &["rev-list", "--objects", "--all"])?;
-/// for line in output.lines() {
-///     // process each line without loading entire output
-/// }
-/// ```
-#[allow(dead_code)]
-fn run_git_capture_stream<R: BufRead>(repo: &Path, args: &[&str]) -> io::Result<impl BufRead> {
+/// Returns a tuple of (BufReader, Child) so caller can wait on the child
+/// to ensure the command succeeded.
+fn run_git_capture_stream(
+    repo: &Path,
+    args: &[&str],
+) -> io::Result<(BufReader<ChildStdout>, Child)> {
     let mut cmd = Command::new("git")
         .current_dir(repo)
         .args(args)
@@ -1113,8 +1123,7 @@ fn run_git_capture_stream<R: BufRead>(repo: &Path, args: &[&str]) -> io::Result<
         .stdout
         .take()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "failed to capture git stdout"))?;
-    // NOTE: Caller should wait on cmd to ensure success
-    Ok(BufReader::new(stdout))
+    Ok((BufReader::new(stdout), cmd))
 }
 
 fn parent_directory(path: &str) -> Option<String> {
