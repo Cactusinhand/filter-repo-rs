@@ -7,6 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use regex::bytes::Regex;
 use serde::Deserialize;
 
+use crate::error::FilterRepoError;
 use crate::gitutil::{self, GitCapabilities};
 use crate::pathutil::{normalize_cli_glob_str, normalize_cli_path_str};
 
@@ -324,7 +325,7 @@ mod tests {
     }
 }
 
-pub fn parse_args() -> Options {
+pub fn parse_args() -> Result<Options, FilterRepoError> {
     use std::env;
     let mut args: Vec<String> = env::args().skip(1).collect();
     let mut config_override = env::var("FILTER_REPO_RS_CONFIG").ok().map(PathBuf::from);
@@ -333,16 +334,18 @@ pub fn parse_args() -> Options {
     while idx < args.len() {
         if args[idx] == "--config" {
             if idx + 1 >= args.len() {
-                eprintln!("error: --config requires a file path");
-                std::process::exit(2);
+                return Err(FilterRepoError::invalid_options(
+                    "--config requires a file path",
+                ));
             }
             config_override = Some(PathBuf::from(args.remove(idx + 1)));
             args.remove(idx);
             continue;
         } else if let Some(path) = args[idx].strip_prefix("--config=") {
             if path.is_empty() {
-                eprintln!("error: --config= requires a file path");
-                std::process::exit(2);
+                return Err(FilterRepoError::invalid_options(
+                    "--config= requires a file path",
+                ));
             }
             config_override = Some(PathBuf::from(path));
             args.remove(idx);
@@ -813,7 +816,7 @@ pub fn parse_args() -> Options {
         opts.cleanup = CleanupMode::Standard;
     }
 
-    opts
+    Ok(opts)
 }
 
 enum ConfigError {
