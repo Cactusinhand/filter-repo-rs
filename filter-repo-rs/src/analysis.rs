@@ -578,9 +578,11 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
 }
 
 fn gather_max_parents(repo: &Path) -> io::Result<usize> {
-    let output = run_git_capture(repo, &["rev-list", "--parents", "--all"])?;
+    let (mut reader, mut child) =
+        run_git_capture_stream(repo, &["rev-list", "--parents", "--all"])?;
     let mut max_parents: usize = 0;
-    for line in output.lines() {
+    let mut line = String::new();
+    while reader.read_line(&mut line)? > 0 {
         let count = line.split_whitespace().count();
         if count > 0 {
             let parents = count - 1; // first is commit itself
@@ -588,7 +590,17 @@ fn gather_max_parents(repo: &Path) -> io::Result<usize> {
                 max_parents = parents;
             }
         }
+        line.clear();
     }
+
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("git rev-list --parents --all failed: {}", status),
+        ));
+    }
+
     Ok(max_parents)
 }
 
