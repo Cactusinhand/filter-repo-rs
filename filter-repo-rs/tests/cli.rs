@@ -447,3 +447,49 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
         stderr_new
     );
 }
+
+#[test]
+fn cli_returns_exit_code_2_for_parse_errors() {
+    let output = cli_command()
+        .arg("--definitely-not-a-real-flag")
+        .output()
+        .expect("run filter-repo-rs with invalid flag");
+
+    assert_eq!(
+        Some(2),
+        output.status.code(),
+        "parse errors should exit with 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unknown argument"),
+        "parse error should mention unknown argument: {}",
+        stderr
+    );
+}
+
+#[test]
+fn cli_returns_exit_code_1_for_runtime_failures() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let output = cli_command()
+        .current_dir(temp.path())
+        .output()
+        .expect("run filter-repo-rs in non-git directory");
+
+    assert_eq!(
+        Some(1),
+        output.status.code(),
+        "runtime failures should exit with 1"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not a git repository") || stderr.contains("fresh clone"),
+        "runtime error should explain preflight failure: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Caused by:"),
+        "runtime error path should include chained cause output: {}",
+        stderr
+    );
+}

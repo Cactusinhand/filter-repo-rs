@@ -191,3 +191,213 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn git_status(repo: &std::path::Path, args: &[&str]) -> std::process::ExitStatus {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .status()
+            .expect("git command should execute")
+    }
+
+    fn git_output(repo: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git command should execute");
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    }
+
+    fn init_repo_with_commit() -> TempDir {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        assert!(git_status(dir.path(), &["init"]).success());
+        assert!(git_status(dir.path(), &["config", "user.name", "Migrate Test"]).success());
+        assert!(git_status(dir.path(), &["config", "user.email", "migrate@test"]).success());
+        std::fs::write(dir.path().join("README.md"), "seed\n").expect("write README");
+        assert!(git_status(dir.path(), &["add", "README.md"]).success());
+        assert!(git_status(dir.path(), &["commit", "-m", "seed"]).success());
+        dir
+    }
+
+    #[test]
+    fn fetch_all_refs_returns_early_when_disabled() {
+        let repo = init_repo_with_commit();
+
+        let plain = Options {
+            source: repo.path().to_path_buf(),
+            sensitive: false,
+            ..Options::default()
+        };
+        assert!(fetch_all_refs_if_needed(&plain).is_ok());
+
+        let no_fetch = Options {
+            source: repo.path().to_path_buf(),
+            sensitive: true,
+            no_fetch: true,
+            ..Options::default()
+        };
+        assert!(fetch_all_refs_if_needed(&no_fetch).is_ok());
+
+        let dry = Options {
+            source: repo.path().to_path_buf(),
+            sensitive: true,
+            dry_run: true,
+            ..Options::default()
+        };
+        assert!(fetch_all_refs_if_needed(&dry).is_ok());
+    }
+
+    #[test]
+    fn fetch_all_refs_skips_when_origin_missing() {
+        let repo = init_repo_with_commit();
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            sensitive: true,
+            ..Options::default()
+        };
+
+        assert!(
+            fetch_all_refs_if_needed(&opts).is_ok(),
+            "missing origin should be treated as non-fatal"
+        );
+    }
+
+    #[test]
+    fn fetch_all_refs_returns_error_when_fetch_fails() {
+        let repo = init_repo_with_commit();
+        assert!(git_status(
+            repo.path(),
+            &["remote", "add", "origin", "/path/that/does/not/exist"]
+        )
+        .success());
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            sensitive: true,
+            ..Options::default()
+        };
+
+        let err = fetch_all_refs_if_needed(&opts).expect_err("fetch should fail");
+        assert!(
+            err.to_string().contains("non-zero exit status"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn migrate_origin_to_heads_moves_remote_tracking_refs() {
+        let repo = init_repo_with_commit();
+        let (_code, head, _err) = git_output(repo.path(), &["rev-parse", "HEAD"]);
+        let head = head.trim();
+        assert!(git_status(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/feature", head]
+        )
+        .success());
+        assert!(git_status(
+            repo.path(),
+            &["update-ref", "refs/remotes/origin/HEAD", head]
+        )
+        .success());
+
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            ..Options::default()
+        };
+        migrate_origin_to_heads(&opts).expect("migration should succeed");
+
+        let (feature_code, _, _) = git_output(repo.path(), &["show-ref", "refs/heads/feature"]);
+        assert_eq!(feature_code, 0, "expected refs/heads/feature to be created");
+
+        let (remote_code, _, _) =
+            git_output(repo.path(), &["show-ref", "refs/remotes/origin/feature"]);
+        assert_ne!(remote_code, 0, "remote-tracking ref should be removed");
+        let (head_code, _, _) = git_output(repo.path(), &["show-ref", "refs/remotes/origin/HEAD"]);
+        assert_ne!(head_code, 0, "origin/HEAD should be removed");
+    }
+
+    #[test]
+    fn migrate_origin_to_heads_returns_ok_when_source_is_not_git_repo() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let opts = Options {
+            source: dir.path().to_path_buf(),
+            ..Options::default()
+        };
+        assert!(migrate_origin_to_heads(&opts).is_ok());
+    }
+
+    #[test]
+    fn remove_origin_remote_respects_guard_flags() {
+        let repo = init_repo_with_commit();
+        assert!(git_status(repo.path(), &["remote", "add", "origin", "."]).success());
+
+        let sensitive = Options {
+            target: repo.path().to_path_buf(),
+            sensitive: true,
+            ..Options::default()
+        };
+        remove_origin_remote_if_applicable(&sensitive).expect("sensitive mode should skip");
+        let (_, remotes, _) = git_output(repo.path(), &["remote"]);
+        assert!(remotes.lines().any(|line| line.trim() == "origin"));
+
+        let partial = Options {
+            target: repo.path().to_path_buf(),
+            partial: true,
+            ..Options::default()
+        };
+        remove_origin_remote_if_applicable(&partial).expect("partial mode should skip");
+
+        let dry = Options {
+            target: repo.path().to_path_buf(),
+            dry_run: true,
+            ..Options::default()
+        };
+        remove_origin_remote_if_applicable(&dry).expect("dry-run should skip");
+    }
+
+    #[test]
+    fn remove_origin_remote_removes_existing_origin() {
+        let repo = init_repo_with_commit();
+        assert!(git_status(repo.path(), &["remote", "add", "origin", "."]).success());
+
+        let opts = Options {
+            target: repo.path().to_path_buf(),
+            ..Options::default()
+        };
+        remove_origin_remote_if_applicable(&opts).expect("remove origin should succeed");
+        let (_, remotes, _) = git_output(repo.path(), &["remote"]);
+        assert!(
+            !remotes.lines().any(|line| line.trim() == "origin"),
+            "origin should be removed"
+        );
+    }
+
+    #[test]
+    fn remove_origin_remote_returns_error_on_rm_failure() {
+        let repo = init_repo_with_commit();
+        assert!(git_status(repo.path(), &["remote", "add", "origin", "."]).success());
+        std::fs::create_dir(repo.path().join(".git").join("config.lock"))
+            .expect("create directory to block git config lockfile");
+
+        let opts = Options {
+            target: repo.path().to_path_buf(),
+            ..Options::default()
+        };
+        let err = remove_origin_remote_if_applicable(&opts).expect_err("rm failure should error");
+        assert!(
+            err.to_string().contains("non-zero exit status"),
+            "unexpected error: {err}"
+        );
+    }
+}

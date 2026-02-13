@@ -630,3 +630,323 @@ fn resolve_reset_target(
     );
     Ok(None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    struct BrokenPipeWriter;
+
+    impl Write for BrokenPipeWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "simulated broken pipe",
+            ))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) -> std::process::ExitStatus {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .status()
+            .expect("git command should execute")
+    }
+
+    fn git_output(repo: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git command should execute");
+        String::from_utf8_lossy(&out.stdout).to_string()
+    }
+
+    fn init_repo() -> TempDir {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        assert!(run_git(dir.path(), &["init"]).success());
+        assert!(run_git(dir.path(), &["config", "user.name", "Finalize Test"]).success());
+        assert!(run_git(dir.path(), &["config", "user.email", "finalize@test"]).success());
+        std::fs::write(dir.path().join("README.md"), "seed\n").expect("write README");
+        assert!(run_git(dir.path(), &["add", "README.md"]).success());
+        assert!(run_git(dir.path(), &["commit", "-m", "seed"]).success());
+        dir
+    }
+
+    #[test]
+    fn flush_lightweight_tag_resets_deduplicates_and_skips_annotated_tags() {
+        let mut buffered = vec![
+            (b"refs/tags/v1".to_vec(), b"from :1\n".to_vec()),
+            (b"refs/tags/v1".to_vec(), b"from :2\n".to_vec()),
+            (b"refs/tags/v2".to_vec(), b"from :3\n".to_vec()),
+            (b"refs/tags/v3".to_vec(), b"from :4\n".to_vec()),
+        ];
+        let annotated = BTreeSet::from([b"refs/tags/v2".to_vec()]);
+        let mut out = Vec::new();
+        let mut import_broken = false;
+
+        flush_lightweight_tag_resets(
+            &mut buffered,
+            &annotated,
+            &mut out,
+            None,
+            &mut import_broken,
+        )
+        .expect("flush should succeed");
+
+        assert!(buffered.is_empty(), "buffer should be consumed");
+        let text = String::from_utf8(out).expect("output should be utf8");
+        assert!(text.contains("reset refs/tags/v1\nfrom :1\n"));
+        assert!(
+            !text.contains("from :2\n"),
+            "duplicate reset should be suppressed"
+        );
+        assert!(
+            !text.contains("refs/tags/v2"),
+            "annotated tag should be skipped"
+        );
+        assert!(text.contains("reset refs/tags/v3\nfrom :4\n"));
+        assert!(!import_broken);
+    }
+
+    #[test]
+    fn flush_lightweight_tag_resets_marks_import_broken_on_broken_pipe() {
+        let mut buffered = vec![(b"refs/tags/v1".to_vec(), b"from :1\n".to_vec())];
+        let annotated = BTreeSet::new();
+        let mut out = Vec::new();
+        let mut pipe = BrokenPipeWriter;
+        let mut import_broken = false;
+
+        flush_lightweight_tag_resets(
+            &mut buffered,
+            &annotated,
+            &mut out,
+            Some(&mut pipe),
+            &mut import_broken,
+        )
+        .expect("broken pipe should not fail flush");
+
+        assert!(import_broken, "broken pipe should be tracked");
+    }
+
+    #[test]
+    fn resolve_reset_target_handles_mark_hex_and_empty_inputs() {
+        let repo = init_repo();
+        let opts = Options {
+            target: repo.path().to_path_buf(),
+            ..Options::default()
+        };
+        let mark_map =
+            HashMap::from([(7_u32, b"1234567890abcdef1234567890abcdef12345678".to_vec())]);
+
+        let empty = resolve_reset_target(b"", &mark_map, &opts).expect("empty should resolve");
+        assert!(empty.is_none());
+
+        let by_mark = resolve_reset_target(b":7", &mark_map, &opts).expect("mark should resolve");
+        assert_eq!(
+            by_mark,
+            Some(b"1234567890abcdef1234567890abcdef12345678".to_vec())
+        );
+
+        let missing_mark =
+            resolve_reset_target(b":999", &mark_map, &opts).expect("missing mark should resolve");
+        assert!(missing_mark.is_none());
+
+        let by_hex = resolve_reset_target(
+            b"ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD",
+            &mark_map,
+            &opts,
+        )
+        .expect("hex target should resolve");
+        assert_eq!(
+            by_hex,
+            Some(b"abcdefabcdefabcdefabcdefabcdefabcdefabcd".to_vec())
+        );
+    }
+
+    #[test]
+    fn resolve_reset_target_resolves_refspec_with_rev_parse() {
+        let repo = init_repo();
+        let opts = Options {
+            target: repo.path().to_path_buf(),
+            ..Options::default()
+        };
+        let mark_map = HashMap::new();
+
+        let head = git_output(repo.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_string();
+        let resolved = resolve_reset_target(b"HEAD", &mark_map, &opts)
+            .expect("HEAD should resolve")
+            .expect("HEAD should produce oid");
+        assert_eq!(String::from_utf8_lossy(&resolved), head);
+
+        let missing = resolve_reset_target(b"refs/heads/does-not-exist", &mark_map, &opts)
+            .expect("missing ref should return None");
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn run_repo_cleanup_tolerates_non_repo_and_repo_paths() {
+        let non_repo = tempfile::tempdir().expect("create tempdir");
+        run_repo_cleanup(non_repo.path(), false);
+        run_repo_cleanup(non_repo.path(), true);
+
+        let repo = init_repo();
+        run_repo_cleanup(repo.path(), false);
+        run_repo_cleanup(repo.path(), true);
+    }
+
+    #[test]
+    fn finalize_writes_maps_and_reports_in_dry_run_mode() {
+        let repo = init_repo();
+        let debug_dir = tempfile::tempdir().expect("create debug dir");
+
+        let old1 = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_vec();
+        let old2 = b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_vec();
+        let new1 = b"1111111111111111111111111111111111111111".to_vec();
+        std::fs::write(
+            debug_dir.path().join("target-marks"),
+            format!(":1 {}\n", String::from_utf8_lossy(&new1)),
+        )
+        .expect("write target marks");
+
+        let mut opts = Options::default();
+        opts.source = repo.path().to_path_buf();
+        opts.target = repo.path().to_path_buf();
+        opts.dry_run = true;
+        opts.quiet = true;
+        opts.write_report = true;
+        opts.write_report_json = true;
+        let blob_sizes = BlobSizeTracker::new(&opts);
+
+        let report = ReportData {
+            stripped_by_size: 2,
+            stripped_by_sha: 1,
+            modified_blobs: 3,
+            samples_size: vec![b"path/size.bin".to_vec()],
+            samples_sha: vec![b"path/sha.bin".to_vec()],
+            samples_modified: vec![b"path/modified.bin".to_vec()],
+        };
+
+        let mut fe = Command::new("git")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn git --version");
+        let mut filtered = Vec::<u8>::new();
+        finalize(
+            &opts,
+            debug_dir.path(),
+            BTreeSet::from([(b"refs/heads/old".to_vec(), b"refs/heads/new".to_vec())]),
+            vec![(old1.clone(), Some(1)), (old2.clone(), None)],
+            vec![(b"refs/tags/v1".to_vec(), b"from :1\n".to_vec())],
+            BTreeSet::new(),
+            BTreeSet::new(),
+            Vec::new(),
+            &mut filtered,
+            Some(Box::new(Vec::<u8>::new())),
+            &mut fe,
+            None,
+            false,
+            true,
+            Some(report),
+            &blob_sizes,
+        )
+        .expect("finalize should succeed");
+
+        let commit_map =
+            std::fs::read_to_string(debug_dir.path().join("commit-map")).expect("read commit-map");
+        assert!(commit_map.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(commit_map.contains("1111111111111111111111111111111111111111"));
+        assert!(commit_map.contains("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        assert!(commit_map.contains("0000000000000000000000000000000000000000"));
+
+        let ref_map =
+            std::fs::read_to_string(debug_dir.path().join("ref-map")).expect("read ref-map");
+        assert!(ref_map.contains("refs/heads/old refs/heads/new"));
+
+        let report_txt =
+            std::fs::read_to_string(debug_dir.path().join("report.txt")).expect("read report.txt");
+        assert!(report_txt.contains("Blobs stripped by size: 2"));
+        assert!(report_txt.contains("Sample paths (modified):"));
+
+        let report_json = std::fs::read_to_string(debug_dir.path().join("report.json"))
+            .expect("read report.json");
+        assert!(report_json.contains("\"stripped_by_size\": 2"));
+        assert!(report_json.contains("\"samples_modified\""));
+
+        let filtered_out = String::from_utf8(filtered).expect("filtered bytes should be utf8");
+        assert!(filtered_out.contains("reset refs/tags/v1\nfrom :1\n"));
+    }
+
+    #[test]
+    fn finalize_falls_back_to_filtered_stream_when_commit_pairs_missing() {
+        let repo = init_repo();
+        let debug_dir = tempfile::tempdir().expect("create debug dir");
+
+        let old = "cccccccccccccccccccccccccccccccccccccccc";
+        let new_id = "2222222222222222222222222222222222222222";
+        std::fs::write(
+            debug_dir.path().join("target-marks"),
+            format!(":7 {new_id}\n"),
+        )
+        .expect("write target marks");
+
+        let filtered_stream =
+            format!("commit refs/heads/main\nmark :7\noriginal-oid {old}\ndata 5\nhello\n\n");
+        std::fs::write(
+            debug_dir.path().join("fast-export.filtered"),
+            filtered_stream.as_bytes(),
+        )
+        .expect("write filtered stream");
+
+        let mut opts = Options::default();
+        opts.source = repo.path().to_path_buf();
+        opts.target = repo.path().to_path_buf();
+        opts.dry_run = true;
+        opts.quiet = true;
+        let blob_sizes = BlobSizeTracker::new(&opts);
+
+        let mut fe = Command::new("git")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("spawn git --version");
+        let mut filtered_out = Vec::<u8>::new();
+        finalize(
+            &opts,
+            debug_dir.path(),
+            BTreeSet::new(),
+            Vec::new(),
+            Vec::new(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+            Vec::new(),
+            &mut filtered_out,
+            None,
+            &mut fe,
+            None,
+            false,
+            false,
+            None,
+            &blob_sizes,
+        )
+        .expect("finalize should succeed");
+
+        let commit_map =
+            std::fs::read_to_string(debug_dir.path().join("commit-map")).expect("read commit-map");
+        assert!(
+            commit_map.contains(&format!("{old} {new_id}")),
+            "fallback parser should build commit map from filtered stream: {commit_map}"
+        );
+    }
+}

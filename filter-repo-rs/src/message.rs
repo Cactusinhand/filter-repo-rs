@@ -503,3 +503,187 @@ pub mod msg_regex {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_file(path: &std::path::Path, content: &[u8]) {
+        std::fs::write(path, content).expect("write test file");
+    }
+
+    fn hex40(ch: u8) -> Vec<u8> {
+        vec![ch; 40]
+    }
+
+    #[test]
+    fn message_replacer_parses_rules_and_applies_defaults() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let path = dir.path().join("rules.txt");
+        write_file(&path, b"# comment\nFOO==>BAR\nBAZ\n==>IGNORED\n\n");
+
+        let replacer = MessageReplacer::from_file(&path).expect("parse rules");
+        assert_eq!(replacer.pairs.len(), 2);
+        assert_eq!(replacer.pairs[0], (b"FOO".to_vec(), b"BAR".to_vec()));
+        assert_eq!(
+            replacer.pairs[1],
+            (b"BAZ".to_vec(), b"***REMOVED***".to_vec())
+        );
+
+        let out = replacer.apply(b"FOO + BAZ".to_vec());
+        assert_eq!(out, b"BAR + ***REMOVED***".to_vec());
+    }
+
+    #[test]
+    fn replace_all_bytes_handles_empty_and_multiple_matches() {
+        assert_eq!(replace_all_bytes(b"abcdef", b"", b"X"), b"abcdef".to_vec());
+        assert_eq!(
+            replace_all_bytes(b"foo foo foo", b"foo", b"bar"),
+            b"bar bar bar".to_vec()
+        );
+    }
+
+    #[test]
+    fn short_hash_mapper_from_debug_dir_handles_missing_or_empty_map() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        assert!(ShortHashMapper::from_debug_dir(dir.path())
+            .expect("missing map should not fail")
+            .is_none());
+
+        write_file(&dir.path().join("commit-map"), b"\n");
+        assert!(ShortHashMapper::from_debug_dir(dir.path())
+            .expect("empty map should not fail")
+            .is_none());
+    }
+
+    #[test]
+    fn short_hash_mapper_rewrites_full_and_unique_short_hashes() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let old_a = hex40(b'a');
+        let new_b = hex40(b'b');
+        let old_c = hex40(b'c');
+        let map = format!(
+            "{} {}\n{} {}\n",
+            String::from_utf8_lossy(&old_a),
+            String::from_utf8_lossy(&new_b),
+            String::from_utf8_lossy(&old_c),
+            String::from_utf8_lossy(NULL_OID),
+        );
+        write_file(&dir.path().join("commit-map"), map.as_bytes());
+        let mapper = ShortHashMapper::from_debug_dir(dir.path())
+            .expect("load map")
+            .expect("mapper should exist");
+
+        let input = format!(
+            "full={} short={} removed={}",
+            String::from_utf8_lossy(&old_a),
+            String::from_utf8_lossy(&old_a[..7]),
+            String::from_utf8_lossy(&old_c[..7]),
+        );
+        let out = mapper.rewrite(input.into_bytes());
+        let out = String::from_utf8(out).expect("utf8 output");
+        let new_b_full = String::from_utf8_lossy(&new_b);
+        let new_b_short = String::from_utf8_lossy(&new_b[..7]);
+        let old_c_short = String::from_utf8_lossy(&old_c[..7]);
+        assert!(out.contains(new_b_full.as_ref()));
+        assert!(out.contains(new_b_short.as_ref()));
+        assert!(
+            out.contains(old_c_short.as_ref()),
+            "null target should remain unchanged"
+        );
+    }
+
+    #[test]
+    fn short_hash_mapper_keeps_ambiguous_prefix_and_updates_cache() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let old1 = b"1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_vec();
+        let old2 = b"1111111bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_vec();
+        let new1 = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_vec();
+        let new2 = b"cccccccccccccccccccccccccccccccccccccccc".to_vec();
+        let map = format!(
+            "{} {}\n{} {}\n",
+            String::from_utf8_lossy(&old1),
+            String::from_utf8_lossy(&new1),
+            String::from_utf8_lossy(&old2),
+            String::from_utf8_lossy(&new2),
+        );
+        write_file(&dir.path().join("commit-map"), map.as_bytes());
+        let mut mapper = ShortHashMapper::from_debug_dir(dir.path())
+            .expect("load mapper")
+            .expect("mapper should exist");
+
+        let ambiguous = mapper.rewrite(b"1111111".to_vec());
+        assert_eq!(ambiguous, b"1111111".to_vec());
+
+        let old_unique = b"2222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_vec();
+        let first_new = b"dddddddddddddddddddddddddddddddddddddddd".to_vec();
+        let second_new = b"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_vec();
+        mapper.update_mapping(&old_unique, &first_new);
+        let first = mapper.rewrite(b"2222222".to_vec());
+        assert_eq!(first, b"ddddddd".to_vec());
+
+        mapper.update_mapping(&old_unique, &second_new);
+        let second = mapper.rewrite(b"2222222".to_vec());
+        assert_eq!(second, b"eeeeeee".to_vec());
+    }
+
+    #[test]
+    fn blob_regex_parses_rules_and_expands_templates() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let rules_path = dir.path().join("blob-rules.txt");
+        write_file(
+            &rules_path,
+            b"regex:(foo)(bar)==>$2-$1\n\
+glob:sec*et==>REDACTED\n\
+glob:cash$==>$100\n",
+        );
+
+        let replacer = blob_regex::RegexReplacer::from_file(&rules_path)
+            .expect("parse blob regex rules")
+            .expect("rules should exist");
+        let out = replacer.apply_regex(b"foobar secret cash$".to_vec());
+        assert_eq!(out, b"bar-foo REDACTED $100".to_vec());
+    }
+
+    #[test]
+    fn blob_regex_ignores_non_regex_lines_and_reports_invalid_input() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let no_rules = dir.path().join("no-rules.txt");
+        write_file(&no_rules, b"FOO==>BAR\n");
+        assert!(blob_regex::RegexReplacer::from_file(&no_rules)
+            .expect("parse should succeed")
+            .is_none());
+
+        let bad_utf8 = dir.path().join("bad-utf8.txt");
+        write_file(&bad_utf8, b"regex:\xFF==>x\n");
+        let err = blob_regex::RegexReplacer::from_file(&bad_utf8).expect_err("invalid utf8");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn msg_regex_expands_captures_literal_dollar_and_trailing_dollar() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let rules = dir.path().join("msg-rules.txt");
+        write_file(
+            &rules,
+            b"regex:(ID)-(\\d+)==>$1:$2:$$:$x\nregex:foo==>bar$\n",
+        );
+
+        let replacer = msg_regex::RegexReplacer::from_file(&rules)
+            .expect("parse msg regex rules")
+            .expect("rules should exist");
+        let out = replacer.apply_regex(b"ID-42 and foo".to_vec());
+        assert_eq!(out, b"ID:42:$:$x and bar$".to_vec());
+    }
+
+    #[test]
+    fn msg_regex_returns_none_without_regex_rules() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let rules = dir.path().join("plain-rules.txt");
+        write_file(&rules, b"glob:foo==>bar\nFOO==>BAR\n");
+
+        assert!(msg_regex::RegexReplacer::from_file(&rules)
+            .expect("parse should succeed")
+            .is_none());
+    }
+}

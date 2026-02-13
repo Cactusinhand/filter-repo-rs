@@ -96,3 +96,109 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
 
     Ok(Some(bundle_path))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn run_git(repo: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .status()
+            .expect("git command should run");
+        assert!(status.success(), "git command failed: {:?}", args);
+    }
+
+    fn init_repo_with_commit() -> TempDir {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        run_git(dir.path(), &["init"]);
+        run_git(dir.path(), &["config", "user.name", "Backup Test"]);
+        run_git(dir.path(), &["config", "user.email", "backup@test"]);
+        std::fs::write(dir.path().join("README.md"), "seed\n").expect("write file");
+        run_git(dir.path(), &["add", "README.md"]);
+        run_git(dir.path(), &["commit", "-m", "seed"]);
+        dir
+    }
+
+    #[test]
+    fn create_backup_returns_none_for_dry_run() {
+        let repo = init_repo_with_commit();
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            dry_run: true,
+            ..Options::default()
+        };
+
+        let result = create_backup(&opts).expect("dry-run backup should succeed");
+        assert!(result.is_none(), "dry-run should not create bundle");
+    }
+
+    #[test]
+    fn create_backup_errors_when_refs_are_empty() {
+        let repo = init_repo_with_commit();
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            refs: Vec::new(),
+            ..Options::default()
+        };
+
+        let err = create_backup(&opts).expect_err("empty refs should fail");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("no refs specified"));
+    }
+
+    #[test]
+    fn create_backup_errors_for_non_git_source() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let opts = Options {
+            source: dir.path().to_path_buf(),
+            ..Options::default()
+        };
+
+        let err = create_backup(&opts).expect_err("non-git source should fail");
+        assert!(
+            err.to_string().contains("failed to resolve git dir"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn create_backup_errors_when_git_bundle_fails() {
+        let repo = init_repo_with_commit();
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            refs: vec!["refs/heads/does-not-exist".to_string()],
+            ..Options::default()
+        };
+
+        let err = create_backup(&opts).expect_err("invalid refs should fail backup");
+        assert!(
+            err.to_string().contains("git bundle create failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn create_backup_supports_absolute_directory_override() {
+        let repo = init_repo_with_commit();
+        let out_dir = tempfile::tempdir().expect("create output dir");
+        let target_dir = out_dir.path().join("bundles");
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            backup_path: Some(target_dir.clone()),
+            ..Options::default()
+        };
+
+        let bundle = create_backup(&opts)
+            .expect("backup should succeed")
+            .expect("bundle path should be returned");
+        assert!(
+            bundle.starts_with(&target_dir),
+            "bundle path should be under override directory"
+        );
+        assert!(bundle.exists(), "bundle should exist: {:?}", bundle);
+    }
+}
