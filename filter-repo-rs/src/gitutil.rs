@@ -3,6 +3,51 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Default timeout for git commands (5 minutes).
+pub const DEFAULT_GIT_TIMEOUT_SECS: u64 = 300;
+
+/// Run a git command with timeout.
+///
+/// Returns error if command times out or fails.
+/// The timeout prevents indefinite hangs on problematic repositories.
+pub fn run_git_with_timeout(
+    repo: Option<&Path>,
+    args: &[&str],
+    timeout_secs: u64,
+) -> io::Result<std::process::Output> {
+    let mut cmd = Command::new("git");
+    if let Some(r) = repo {
+        cmd.arg("-C").arg(r);
+    }
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    let output = std::process::Command::new("timeout")
+        .arg(format!("{}", timeout_secs))
+        .arg(cmd.get_program())
+        .args(cmd.get_args())
+        .output()
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to run timeout command: {e}"),
+            )
+        })?;
+
+    // Check if timeout killed the process (exit code 124)
+    if output.status.code() == Some(124) {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "git {} timed out after {} seconds",
+                args.join(" "),
+                timeout_secs
+            ),
+        ));
+    }
+
+    Ok(output)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCapabilities {
     pub fast_export_anonymize_map: bool,
