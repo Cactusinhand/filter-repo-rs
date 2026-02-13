@@ -500,9 +500,9 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
 }
 
 fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result<()> {
-    // Use a more efficient batch processing approach
-    // Process commits in batches of 5000 to balance memory and performance
-    const BATCH_SIZE: usize = 5000;
+    // Use streaming approach: process all commits in a single git log command
+    // This is more efficient than batched --skip approach which is O(n²)
+    eprintln!("[*] Gathering commit history (streaming)...");
 
     // Get total commit count first
     let rev_list_output = run_git_capture(repo, &["rev-list", "--all", "--count"])?;
@@ -511,60 +511,66 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
         .parse::<usize>()
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Could not parse commit count"))?;
 
-    let mut processed = 0;
-    while processed < total_commits {
-        let batch_start = processed;
-        let batch_end = std::cmp::min(processed + BATCH_SIZE, total_commits);
+    // Stream commit data in a single pass
+    let (mut reader, mut child) = run_git_capture_stream(
+        repo,
+        &[
+            "log",
+            "--all",
+            "--pretty=format:%H %P",
+            "--name-status",
+            "--no-renames",
+        ],
+    )?;
 
-        // Get a batch of commits using skip and max-count
-        let batch_output = run_git_capture(
-            repo,
-            &[
-                "rev-list",
-                "--all",
-                "--skip",
-                &batch_start.to_string(),
-                "--max-count",
-                &(batch_end - batch_start).to_string(),
-            ],
-        )?;
+    let mut line_buf = String::new();
+    let mut processed: usize = 0;
+    let mut commit_data: Vec<String> = Vec::new();
 
-        let commits: Vec<&str> = batch_output.split_whitespace().collect();
+    while reader.read_line(&mut line_buf)? > 0 {
+        let line = line_buf.trim_end();
+        if line.is_empty() {
+            // End of commit block, process accumulated data
+            if !commit_data.is_empty() {
+                process_commit_block(&commit_data, stats)?;
+                commit_data.clear();
+                processed += 1;
 
-        // Process this batch using a single git log command
-        if !commits.is_empty() {
-            let commit_range = format!("{}..{}", commits[0], commits[commits.len() - 1]);
-            let log_output = run_git_capture(
-                repo,
-                &[
-                    "log",
-                    "--pretty=format:%H %P",
-                    "--name-status",
-                    "--no-renames",
-                    &commit_range,
-                ],
-            )?;
-
-            // Parse the batch output
-            parse_batch_log_output(&log_output, stats, repo)?;
-            processed += commits.len();
-
-            // Update progress bar after each batch
-            let progress = ((processed as f64 / total_commits as f64) * 100.0) as u32;
-            let bar_length = 30;
-            let filled = progress as usize * bar_length / 100;
-            let bar: String = (0..bar_length)
-                .map(|i| if i < filled { '=' } else { ' ' })
-                .collect();
-            print!(
-                "\r[*] Processing commits [{}] {}% ({}/{})",
-                bar, progress, processed, total_commits
-            );
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
+                // Progress indicator every 1000 commits
+                if processed % 1000 == 0 {
+                    let progress = ((processed as f64 / total_commits as f64) * 100.0) as u32;
+                    let bar_length = 30;
+                    let filled = progress as usize * bar_length / 100;
+                    let bar: String = (0..bar_length)
+                        .map(|i| if i < filled { '=' } else { ' ' })
+                        .collect();
+                    print!(
+                        "\r[*] Processing commits [{}] {}% ({}/{})",
+                        bar, progress, processed, total_commits
+                    );
+                    use std::io::Write;
+                    std::io::stdout().flush().unwrap();
+                }
+            }
         } else {
-            break;
+            commit_data.push(line.to_string());
         }
+        line_buf.clear();
+    }
+
+    // Process last commit if exists
+    if !commit_data.is_empty() {
+        process_commit_block(&commit_data, stats)?;
+        processed += 1;
+    }
+
+    // Wait for git command to complete
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("git log --all failed: {}", status),
+        ));
     }
 
     // Clear progress line and show final result
@@ -574,6 +580,54 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
         "[*] Commit processing completed. Total: {}",
         stats.num_commits
     );
+    Ok(())
+}
+
+/// Process a single commit block from git log output
+fn process_commit_block(commit_data: &[String], stats: &mut StatsCollection) -> io::Result<()> {
+    if commit_data.is_empty() {
+        return Ok(());
+    }
+
+    // First line contains commit hash and parent hashes
+    let first_line = &commit_data[0];
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    if parts.is_empty() {
+        return Ok(());
+    }
+
+    let commit = parts[0].to_string();
+    let parents: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+    // Remaining lines are file changes (from --name-status)
+    let mut file_changes = Vec::new();
+    for line in commit_data.iter().skip(1) {
+        if line.is_empty() {
+            continue;
+        }
+        // Format: STATUS\tOLD_PATH\tNEW_PATH or STATUS\tPATH
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        let status = parts[0];
+        let path = if parts.len() > 1 { parts[1] } else { parts[0] };
+
+        // Create placeholder that won't interfere with real hashes
+        let placeholder_id = format!("placeholder_{}", path.len());
+
+        file_changes.push((
+            vec!["100644".to_string()],
+            vec![placeholder_id],
+            status.to_string(),
+            vec![path.to_string()],
+        ));
+    }
+
+    analyze_commit(stats, commit, parents, file_changes);
+    stats.num_commits += 1;
+
     Ok(())
 }
 
