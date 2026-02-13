@@ -54,7 +54,11 @@ fn given_commit_and_tag_messages_when_replace_message_then_tokens_are_rewritten(
     write_file(&repo, "src/lib.rs", "pub fn f() {}\n");
     stage_and_commit(&repo, "commit with FOO token");
     assert_eq!(
-        run_git(&repo, &["tag", "-a", "-m", "tag includes FOO token", "v1.0"]).0,
+        run_git(
+            &repo,
+            &["tag", "-a", "-m", "tag includes FOO token", "v1.0"]
+        )
+        .0,
         0
     );
 
@@ -89,8 +93,16 @@ fn given_mixed_blob_sizes_when_max_blob_size_is_set_then_large_blobs_are_removed
     });
 
     let tree = list_tree(&repo);
-    assert!(tree.contains("small.txt"), "expected small file kept: {}", tree);
-    assert!(!tree.contains("large.bin"), "expected large file removed: {}", tree);
+    assert!(
+        tree.contains("small.txt"),
+        "expected small file kept: {}",
+        tree
+    );
+    assert!(
+        !tree.contains("large.bin"),
+        "expected large file removed: {}",
+        tree
+    );
 }
 
 #[test]
@@ -106,7 +118,11 @@ fn given_subdirectory_filter_when_run_then_selected_subdir_becomes_repository_ro
     });
 
     let tree = list_tree(&repo);
-    assert!(tree.contains("app.js"), "expected frontend file at root: {}", tree);
+    assert!(
+        tree.contains("app.js"),
+        "expected frontend file at root: {}",
+        tree
+    );
     assert!(
         !tree.contains("frontend/app.js"),
         "expected original frontend prefix removed: {}",
@@ -151,7 +167,11 @@ fn given_invert_paths_when_run_then_matching_paths_are_removed() {
     });
 
     let tree = list_tree(&repo);
-    assert!(tree.contains("keep/ok.txt"), "expected keep file present: {}", tree);
+    assert!(
+        tree.contains("keep/ok.txt"),
+        "expected keep file present: {}",
+        tree
+    );
     assert!(
         !tree.contains("docs/secret.md"),
         "expected docs path removed: {}",
@@ -203,7 +223,11 @@ fn given_backup_enabled_when_run_then_bundle_artifact_is_created() {
         o.no_data = true;
     });
     let backup_dir = repo.join(".git").join("filter-repo");
-    assert!(backup_dir.exists(), "backup dir should exist: {:?}", backup_dir);
+    assert!(
+        backup_dir.exists(),
+        "backup dir should exist: {:?}",
+        backup_dir
+    );
     let has_bundle = fs::read_dir(&backup_dir)
         .expect("read backup dir")
         .filter_map(Result::ok)
