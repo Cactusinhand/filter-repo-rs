@@ -19,7 +19,10 @@ use crate::opts::Options;
 const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
 const SHA_BIN_LEN: usize = 20;
-const STRIP_SHA_ON_DISK_THRESHOLD: usize = 100_000;
+/// Threshold for deciding whether to keep SHA lookup in memory or on disk.
+/// When number of SHAs exceeds this, use disk-based sorted file.
+/// Default: 50,000 entries (~1MB raw data, ~3-5MB with sorting overhead)
+const STRIP_SHA_ON_DISK_THRESHOLD: usize = 50_000;
 
 type ShaBytes = [u8; SHA_BIN_LEN];
 
