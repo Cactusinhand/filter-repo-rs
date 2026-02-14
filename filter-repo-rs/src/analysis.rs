@@ -484,6 +484,7 @@ fn gather_worktree_snapshot_simplified(
 
 // History-wide metrics via single rev-list | diff-tree pipeline
 fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashMap<String, u64>)> {
+    let start_time = Instant::now();
     let output = run_git_capture(
         repo,
         &[
@@ -532,6 +533,12 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
 
         // Update progress bar every 1000 items
         if idx % 1000 == 0 && total_lines > 0 {
+            let elapsed = start_time.elapsed();
+            let rate = if elapsed.as_secs_f64() > 0.0 {
+                processed_objects as f64 / elapsed.as_secs_f64()
+            } else {
+                0.0
+            };
             let progress = ((processed_objects as f64 / total_lines as f64) * 100.0) as u32;
             let bar_length = 30;
             let filled = progress as usize * bar_length / 100;
@@ -539,8 +546,13 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
                 .map(|i| if i < filled { '=' } else { ' ' })
                 .collect();
             print!(
-                "\r[*] Processing objects [{}] {}% ({}/{})",
-                bar, progress, processed_objects, total_lines
+                "\r[*] Processing objects [{}] {}% {}/{} {} ({:.0}/s)",
+                bar,
+                progress,
+                processed_objects,
+                total_lines,
+                format_elapsed(elapsed),
+                rate as u64
             );
             use std::io::Write;
             std::io::stdout().flush().unwrap();
@@ -549,11 +561,21 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
 
     // Show final progress at 100%
     if total_lines > 0 {
+        let elapsed = start_time.elapsed();
+        let rate = if elapsed.as_secs_f64() > 0.0 {
+            processed_objects as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
         let bar_length = 30;
         let bar: String = (0..bar_length).map(|_| '=').collect();
         println!(
-            "\r[*] Processing objects [{}] 100% ({}/{})",
-            bar, processed_objects, total_lines
+            "\r[*] Processing objects [{}] 100% {}/{} {} ({}/s)",
+            bar,
+            processed_objects,
+            total_lines,
+            format_elapsed(elapsed),
+            rate as u64
         );
         use std::io::Write;
         std::io::stdout().flush().unwrap();
@@ -1364,6 +1386,17 @@ fn format_count<T: Into<u64>>(value: T) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+fn format_elapsed(duration: std::time::Duration) -> String {
+    let secs = duration.as_secs();
+    if secs < 60 {
+        format!("{:.1}s", secs as f64 + duration.subsec_nanos() as f64 / 1e9)
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    }
 }
 
 fn format_size_gib(bytes: u64) -> String {
