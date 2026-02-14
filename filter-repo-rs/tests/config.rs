@@ -103,15 +103,16 @@ fn cli_arguments_override_repo_config() {
         .nth(2)
         .expect("ls-tree to report blob oid")
         .to_string();
+    let blob4_oid_short = &blob4_oid[..8];
     assert!(
-        stdout_baseline.contains("Top 4 blobs by size"),
+        stdout_baseline.contains("Top 4 files by size"),
         "config-defined top should appear in baseline output: {}",
         stdout_baseline
     );
     assert!(
-        stdout_baseline.contains(&blob4_oid),
-        "analysis output should include full blob oid {}: {}",
-        blob4_oid,
+        stdout_baseline.contains(blob4_oid_short),
+        "analysis output should include truncated blob oid {}: {}",
+        blob4_oid_short,
         stdout_baseline
     );
 
@@ -129,12 +130,12 @@ fn cli_arguments_override_repo_config() {
     );
     let stdout_override = String::from_utf8_lossy(&override_out.stdout);
     assert!(
-        stdout_override.contains("Top 2 blobs by size"),
+        stdout_override.contains("Top 2 files by size"),
         "CLI --analyze-top should override config top: {}",
         stdout_override
     );
     assert!(
-        !stdout_override.contains("Top 4 blobs by size"),
+        !stdout_override.contains("Top 4 files by size"),
         "override output should no longer mention config top value"
     );
 }
