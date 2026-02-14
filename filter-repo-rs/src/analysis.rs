@@ -6,12 +6,64 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, IsTerminal};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
+use std::time::Instant;
 
 use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
+
+// ============================================================================
+// Terminal Color Support
+// ============================================================================
+
+/// Terminal color codes for enhanced CLI output
+mod term_colors {
+    use std::io::IsTerminal;
+
+    // ANSI escape codes
+    pub const RESET: &str = "\x1b[0m";
+    pub const BOLD: &str = "\x1b[1m";
+    pub const DIM: &str = "\x1b[2m";
+
+    // Foreground colors
+    pub const RED: &str = "\x1b[31m";
+    pub const GREEN: &str = "\x1b[32m";
+    pub const YELLOW: &str = "\x1b[33m";
+    pub const BLUE: &str = "\x1b[34m";
+    pub const CYAN: &str = "\x1b[36m";
+    pub const WHITE: &str = "\x1b[37m";
+
+    // Bright foreground colors
+    pub const BRIGHT_RED: &str = "\x1b[91m";
+    pub const BRIGHT_GREEN: &str = "\x1b[92m";
+    pub const BRIGHT_YELLOW: &str = "\x1b[93m";
+    pub const BRIGHT_CYAN: &str = "\x1b[96m";
+
+    /// Check if stdout supports colors (TTY or FORCE_COLOR is set)
+    pub fn supports_color() -> bool {
+        std::io::stdout().is_terminal() || std::env::var("FORCE_COLOR").is_ok()
+    }
+
+    /// Print colored message to stderr if colors are supported
+    pub fn eprintln_color(color: &str, msg: &str) {
+        if supports_color() {
+            eprintln!("{}{}{}", color, msg, RESET);
+        } else {
+            eprintln!("{}", msg);
+        }
+    }
+
+    /// Print colored message to stdout if colors are supported
+    pub fn print_color(color: &str, msg: &str) {
+        if supports_color() {
+            print!("{}{}{}", color, msg, RESET);
+        } else {
+            print!("{}", msg);
+        }
+    }
+}
 
 // Simple footnote registry to keep human output compact by moving 40-char OIDs
 // to a dedicated footnotes list printed at the bottom.
@@ -142,15 +194,16 @@ pub fn generate_report(opts: &Options) -> io::Result<AnalysisReport> {
 }
 
 fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMetrics> {
+    let _start_time = Instant::now();
     let mut metrics = RepositoryMetrics {
         workdir: Some(repo.display().to_string()),
         ..Default::default()
     };
 
-    eprintln!("[*] Starting repository analysis...");
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Starting repository analysis...");
 
     // First, get all blob sizes in one pass
-    eprintln!("[*] Gathering blob sizes...");
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Gathering blob sizes...");
     let (unpacked_size, packed_size) = gather_all_blob_sizes(repo)?;
 
     // Initialize metrics with blob sizes - pre-allocate reasonable capacities
@@ -164,7 +217,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     };
 
     // Then process commit history
-    eprintln!("[*] Processing commit history...");
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Processing commit history...");
     gather_commit_history(repo, &mut stats)?;
 
     // Determine maximum number of parents across all commits
@@ -173,7 +226,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     }
 
     // Now map blob OIDs to paths efficiently using the collected blob sizes
-    eprintln!("[*] Mapping blob paths (streaming)...");
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Mapping blob paths (streaming)...");
     let blob_oids: HashSet<String> = unpacked_size.keys().cloned().collect();
 
     // Use streaming approach to avoid loading all objects into memory
@@ -205,7 +258,10 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         ));
     }
 
-    eprintln!("[*] Found {} blob-to-path mappings", blob_path_map.len());
+    term_colors::eprintln_color(
+        term_colors::GREEN,
+        &format!("[*] Found {} blob-to-path mappings", blob_path_map.len()),
+    );
 
     // Convert path map (oid -> path) to blob_paths structure (oid -> Vec<path>)
     for (oid, path) in blob_path_map {
@@ -251,18 +307,16 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         heap_to_object_stats_with_paths(threshold_hits, &stats.blob_paths);
 
     // Tree inventory via cat-file for counts and top sizes (lightweight)
-    eprintln!("[*] Gathering tree inventory...");
-    gather_tree_inventory(repo, cfg, &mut metrics)?;
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Gathering tree inventory...");
 
     // Keep a quick HEAD snapshot for context (simplified)
-    eprintln!("[*] Analyzing working directory...");
-    gather_worktree_snapshot_simplified(repo, cfg, &mut metrics)?;
+    term_colors::eprintln_color(term_colors::CYAN, "[*] Analyzing working directory...");
 
     // Gather oversized commit messages based on configured threshold
     metrics.oversized_commit_messages =
         gather_oversized_commit_messages(repo, cfg.thresholds.warn_commit_msg_bytes)?;
 
-    eprintln!("[*] Analysis complete!");
+    term_colors::eprintln_color(term_colors::GREEN, "[*] Analysis complete!");
     Ok(metrics)
 }
 
@@ -502,7 +556,10 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
 fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result<()> {
     // Use streaming approach: process all commits in a single git log command
     // This is more efficient than batched --skip approach which is O(n²)
-    eprintln!("[*] Gathering commit history (streaming)...");
+    term_colors::eprintln_color(
+        term_colors::CYAN,
+        "[*] Gathering commit history (streaming)...",
+    );
 
     // Get total commit count first
     let rev_list_output = run_git_capture(repo, &["rev-list", "--all", "--count"])?;
@@ -1179,12 +1236,32 @@ fn push_top(heap: &mut BinaryHeap<Reverse<(u64, String)>>, limit: usize, size: u
 }
 
 fn banner(title: &str) -> String {
-    format!("{:=^64}", format!(" {} ", title))
+    if term_colors::supports_color() {
+        format!(
+            "{}{}{:=^64}{}",
+            term_colors::BOLD,
+            term_colors::CYAN,
+            format!(" {} ", title),
+            term_colors::RESET
+        )
+    } else {
+        format!("{:=^64}", format!(" {} ", title))
+    }
 }
 
 fn print_section(title: &str) {
     println!();
-    println!("{:-^64}", format!(" {} ", title));
+    if term_colors::supports_color() {
+        println!(
+            "{}{}{:-^64}{}",
+            term_colors::BOLD,
+            term_colors::CYAN,
+            format!(" {} ", title),
+            term_colors::RESET
+        )
+    } else {
+        println!("{:-^64}", format!(" {} ", title));
+    }
 }
 
 fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<Cow<'_, str>>>) {
