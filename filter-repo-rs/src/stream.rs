@@ -8,7 +8,6 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crossbeam::channel;
 use rayon::prelude::*;
 
 use crate::error::Result as FilterRepoResult;
@@ -204,6 +203,7 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+#[allow(dead_code)]
 fn process_blob_batch_parallel(
     payloads: Vec<Vec<u8>>,
     content_replacer: &Option<MessageReplacer>,
@@ -216,22 +216,18 @@ fn process_blob_batch_parallel(
     payloads
         .into_par_iter()
         .map(|mut payload| {
-            let mut changed = false;
             if let Some(r) = content_replacer {
-                let tmp = r.apply(payload.clone());
-                changed = tmp != payload;
-                payload = tmp;
+                payload = r.apply(payload);
             }
             if let Some(rr) = content_regex_replacer {
-                let tmp = rr.apply_regex(payload.clone());
-                changed = changed || tmp != payload;
-                payload = tmp;
+                payload = rr.apply_regex(payload);
             }
             payload
         })
         .collect()
 }
 
+#[allow(dead_code)]
 fn process_blob_content(
     payload: Vec<u8>,
     content_replacer: &Option<MessageReplacer>,
