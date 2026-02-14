@@ -3,9 +3,15 @@ use std::collections::HashMap;
 use std::io::{self, BufRead};
 use std::path::Path;
 
+use aho_corasick::AhoCorasick;
+
+const AHO_CORASICK_THRESHOLD: usize = 3;
+
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer {
     pub pairs: Vec<(Vec<u8>, Vec<u8>)>,
+    ac: Option<AhoCorasick>,
+    replacements: Vec<String>,
 }
 
 impl MessageReplacer {
@@ -32,21 +38,42 @@ impl MessageReplacer {
                 }
             }
         }
-        Ok(Self { pairs })
+
+        if pairs.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let (ac, replacements) = if pairs.len() >= AHO_CORASICK_THRESHOLD {
+            let patterns: Vec<&[u8]> = pairs.iter().map(|(p, _)| p.as_slice()).collect();
+            let replacements: Vec<String> = pairs
+                .iter()
+                .map(|(_, r)| String::from_utf8_lossy(r).to_string())
+                .collect();
+            let ac = AhoCorasick::new(&patterns).ok();
+            (ac, replacements)
+        } else {
+            (None, Vec::new())
+        };
+
+        Ok(Self {
+            pairs,
+            ac,
+            replacements,
+        })
     }
 
-    /// Apply all replacement rules to the given data.
-    ///
-    /// NOTE: This implementation applies rules sequentially, which results in
-    /// O(n*m) complexity where n is data size and m is rule count.
-    /// For better performance with many literal rules, consider using
-    /// Aho-Corasick automaton (via aho-corasick crate) to match all
-    /// patterns in a single pass.
-    pub fn apply(&self, mut data: Vec<u8>) -> Vec<u8> {
-        for (from, to) in &self.pairs {
-            data = replace_all_bytes(&data, from, to);
+    pub fn apply(&self, data: Vec<u8>) -> Vec<u8> {
+        if let Some(ref ac) = self.ac {
+            let input = String::from_utf8_lossy(&data);
+            let result = ac.replace_all(&input, self.replacements.as_slice());
+            result.into_bytes()
+        } else {
+            let mut result = data;
+            for (from, to) in &self.pairs {
+                result = replace_all_bytes(&result, from, to);
+            }
+            result
         }
-        data
     }
 }
 

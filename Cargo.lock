@@ -172,6 +172,7 @@ dependencies = [
 name = "filter-repo-rs"
 version = "0.0.1"
 dependencies = [
+ "aho-corasick",
  "comfy-table",
  "crossbeam",
  "filetime",
