@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
-use std::io::{self, BufRead, BufReader, IsTerminal};
+use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Instant;
@@ -14,88 +14,24 @@ use std::time::Instant;
 use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
 
-// ============================================================================
-// Terminal Color Support
-// ============================================================================
-
-/// Terminal color codes for enhanced CLI output
 mod term_colors {
     use std::io::IsTerminal;
 
-    // ANSI escape codes
     pub const RESET: &str = "\x1b[0m";
     pub const BOLD: &str = "\x1b[1m";
-    pub const DIM: &str = "\x1b[2m";
-
-    // Foreground colors
-    pub const RED: &str = "\x1b[31m";
-    pub const GREEN: &str = "\x1b[32m";
-    pub const YELLOW: &str = "\x1b[33m";
-    pub const BLUE: &str = "\x1b[34m";
     pub const CYAN: &str = "\x1b[36m";
-    pub const WHITE: &str = "\x1b[37m";
+    pub const GREEN: &str = "\x1b[32m";
 
-    // Bright foreground colors
-    pub const BRIGHT_RED: &str = "\x1b[91m";
-    pub const BRIGHT_GREEN: &str = "\x1b[92m";
-    pub const BRIGHT_YELLOW: &str = "\x1b[93m";
-    pub const BRIGHT_CYAN: &str = "\x1b[96m";
-
-    /// Check if stdout supports colors (TTY or FORCE_COLOR is set)
     pub fn supports_color() -> bool {
         std::io::stdout().is_terminal() || std::env::var("FORCE_COLOR").is_ok()
     }
 
-    /// Print colored message to stderr if colors are supported
     pub fn eprintln_color(color: &str, msg: &str) {
         if supports_color() {
             eprintln!("{}{}{}", color, msg, RESET);
         } else {
             eprintln!("{}", msg);
         }
-    }
-
-    /// Print colored message to stdout if colors are supported
-    pub fn print_color(color: &str, msg: &str) {
-        if supports_color() {
-            print!("{}{}{}", color, msg, RESET);
-        } else {
-            print!("{}", msg);
-        }
-    }
-}
-
-// Simple footnote registry to keep human output compact by moving 40-char OIDs
-// to a dedicated footnotes list printed at the bottom.
-#[derive(Default)]
-struct FootnoteRegistry {
-    map: HashMap<String, usize>,
-    entries: Vec<(usize, String, Option<String>)>, // (index, oid, context)
-}
-
-impl FootnoteRegistry {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    // Register an OID with optional context (e.g., example path) and return "[n]" marker.
-    fn note(&mut self, oid: &str, context: Option<&str>) -> String {
-        if let Some(&idx) = self.map.get(oid) {
-            return format!("[{}]", idx);
-        }
-        let idx = self.entries.len() + 1;
-        self.map.insert(oid.to_string(), idx);
-        // Keep the first non-empty context we see
-        self.entries.push((
-            idx,
-            oid.to_string(),
-            context.filter(|s| !s.is_empty()).map(|s| s.to_string()),
-        ));
-        format!("[{}]", idx)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 }
 
@@ -359,56 +295,6 @@ fn gather_footprint(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<
     Ok(())
 }
 
-fn gather_tree_inventory(
-    repo: &Path,
-    cfg: &AnalyzeConfig,
-    metrics: &mut RepositoryMetrics,
-) -> io::Result<()> {
-    let mut largest_trees: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
-    let mut tree_count: u64 = 0;
-    let mut tree_total: u64 = 0;
-    let mut child = Command::new("git")
-        .current_dir(repo)
-        .arg("cat-file")
-        .arg("--batch-check")
-        .arg("--batch-all-objects")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to capture git cat-file stdout",
-        )
-    })?;
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = line?;
-        let mut parts = line.split_whitespace();
-        let oid = parts.next().unwrap_or("");
-        let typ = parts.next().unwrap_or("");
-        let size = parts.next().unwrap_or("0").parse::<u64>().unwrap_or(0);
-        if typ == "tree" {
-            tree_count += 1;
-            tree_total = tree_total.saturating_add(size);
-            push_top(&mut largest_trees, cfg.top, size, oid);
-        }
-    }
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "git cat-file --batch-check failed",
-        ));
-    }
-    if tree_count > 0 {
-        metrics.object_types.insert("tree".to_string(), tree_count);
-    }
-    metrics.tree_total_size_bytes = tree_total;
-    metrics.largest_trees = heap_to_vec(largest_trees);
-    Ok(())
-}
-
 fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
     let refs = gitutil::get_all_refs(repo)?;
     for name in refs.keys() {
@@ -424,61 +310,6 @@ fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
             metrics.refs_other += 1;
         }
     }
-    Ok(())
-}
-
-fn gather_worktree_snapshot_simplified(
-    repo: &Path,
-    _cfg: &AnalyzeConfig,
-    metrics: &mut RepositoryMetrics,
-) -> io::Result<()> {
-    let head = run_git_capture(repo, &["rev-parse", "--verify", "HEAD"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    if head.is_empty() {
-        return Ok(());
-    }
-
-    // Use git ls-tree with a simpler format to get basic stats
-    let output = run_git_capture(repo, &["ls-tree", "-r", "--full-tree", &head])?;
-    let mut directories: HashMap<String, usize> = HashMap::new();
-    let mut longest_path_len = 0;
-    let mut longest_path = String::new();
-
-    for line in output.lines() {
-        let mut parts = line.split_whitespace();
-        let _mode = parts.next().unwrap_or("");
-        let typ = parts.next().unwrap_or("");
-        let _oid = parts.next().unwrap_or("");
-        let path = parts.next().unwrap_or("");
-
-        if typ == "blob" {
-            let len = path.len();
-            if len > longest_path_len {
-                longest_path_len = len;
-                longest_path = path.to_string();
-            }
-        }
-
-        if let Some(dir) = parent_directory(path) {
-            *directories.entry(dir).or_insert(0) += 1;
-        } else {
-            *directories.entry(String::from(".")).or_insert(0) += 1;
-        }
-    }
-
-    // Update metrics with collected data
-    if !longest_path.is_empty() {
-        metrics.longest_path = Some(PathStat {
-            path: longest_path,
-            length: longest_path_len,
-        });
-    }
-
-    if let Some((path, entries)) = directories.into_iter().max_by_key(|(_, count)| *count) {
-        metrics.directory_hotspots = Some(DirectoryStat { path, entries });
-    }
-
     Ok(())
 }
 
@@ -941,7 +772,6 @@ fn evaluate_warnings(metrics: &RepositoryMetrics, thresholds: &AnalyzeThresholds
 }
 
 fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
-    let mut foot = FootnoteRegistry::new();
     println!("{}", banner("Repository analysis"));
     if let Some(path) = &report.metrics.workdir {
         println!("{}", path);
@@ -1081,8 +911,7 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
         .warnings
         .iter()
         .map(|warning| {
-            // Replace 40-char OIDs in certain messages with footnote markers.
-            let (msg, _maybe_ref) = humanize_warning_message(&warning.message, report, &mut foot);
+            let (msg, _maybe_ref) = humanize_warning_message(&warning.message, report);
             vec![
                 Cow::Owned(format!("{:?}", warning.level)),
                 Cow::Owned(msg),
@@ -1102,25 +931,10 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
         ],
         warning_rows,
     );
-
-    // Print footnotes at the end
-    if !foot.is_empty() {
-        print_section("Footnotes");
-        for (idx, oid, context) in foot.entries {
-            match context {
-                Some(ctx) => println!("  [{}] {} ({})", idx, oid, ctx),
-                None => println!("  [{}] {}", idx, oid),
-            }
-        }
-    }
 }
 
 // Attempt to replace OID in a known-warning message pattern with a footnote marker.
-fn humanize_warning_message(
-    message: &str,
-    report: &AnalysisReport,
-    _foot: &mut FootnoteRegistry,
-) -> (String, Option<String>) {
+fn humanize_warning_message(message: &str, report: &AnalysisReport) -> (String, Option<String>) {
     // Patterns handled:
     // - "Blob <40-hex> is ..."
     // - "Blob <40-hex> appears ..."
@@ -1207,17 +1021,6 @@ fn run_git_capture_stream(
     Ok((BufReader::new(stdout), cmd))
 }
 
-fn parent_directory(path: &str) -> Option<String> {
-    let pb = Path::new(path);
-    pb.parent().map(|p| {
-        if p.as_os_str().is_empty() {
-            String::from(".")
-        } else {
-            p.to_string_lossy().to_string()
-        }
-    })
-}
-
 fn to_mib(bytes: u64) -> f64 {
     bytes as f64 / 1024.0 / 1024.0
 }
@@ -1228,17 +1031,6 @@ fn to_gib(bytes: u64) -> f64 {
 
 fn to_io_error(err: serde_json::Error) -> io::Error {
     io::Error::new(io::ErrorKind::Other, err)
-}
-
-fn heap_to_vec(heap: BinaryHeap<Reverse<(u64, String)>>) -> Vec<ObjectStat> {
-    heap.into_sorted_vec()
-        .into_iter()
-        .map(|Reverse((size, oid))| ObjectStat {
-            oid,
-            size,
-            path: None,
-        })
-        .collect()
 }
 
 fn heap_to_object_stats_with_paths(
