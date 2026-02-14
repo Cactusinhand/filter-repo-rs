@@ -949,13 +949,13 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
             .iter()
             .enumerate()
             .map(|(idx, file)| {
-                let rf = foot.note(&file.largest_oid, Some(&file.path));
+                let truncated_oid = format!("{:.8}", file.largest_oid);
                 vec![
                     Cow::Owned(format!("{}", idx + 1)),
                     Cow::Owned(format!("{:.2} MiB", to_mib(file.size))),
                     Cow::Owned(file.path.clone()),
                     Cow::Owned(format!("{} ver", file.versions)),
-                    Cow::Owned(rf),
+                    Cow::Owned(truncated_oid),
                 ]
             })
             .collect();
@@ -981,11 +981,11 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
             .iter()
             .enumerate()
             .map(|(idx, tree)| {
-                let rf = foot.note(&tree.oid, None);
+                let truncated_oid = format!("{:.8}", tree.oid);
                 vec![
                     Cow::Owned(format!("{}", idx + 1)),
                     Cow::Owned(format!("{:.2} KiB", tree.size as f64 / 1024.0)),
-                    Cow::Owned(rf),
+                    Cow::Owned(truncated_oid),
                 ]
             })
             .collect();
@@ -1008,11 +1008,11 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
             .iter()
             .enumerate()
             .map(|(idx, msg)| {
-                let rf = foot.note(&msg.oid, None);
+                let truncated_oid = format!("{:.8}", msg.oid);
                 vec![
                     Cow::Owned(format!("{}", idx + 1)),
                     Cow::Owned(format_count(msg.length as u64)),
-                    Cow::Owned(rf),
+                    Cow::Owned(truncated_oid),
                 ]
             })
             .collect();
@@ -1097,7 +1097,7 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
 fn humanize_warning_message(
     message: &str,
     report: &AnalysisReport,
-    foot: &mut FootnoteRegistry,
+    _foot: &mut FootnoteRegistry,
 ) -> (String, Option<String>) {
     // Patterns handled:
     // - "Blob <40-hex> is ..."
@@ -1108,14 +1108,15 @@ fn humanize_warning_message(
     let second = parts.next().unwrap_or("");
     if first == "Blob" && is_hex_40(second) {
         let ctx = find_blob_context(&report.metrics, second);
-        let rf = foot.note(second, ctx.as_deref());
-        let rest = message[5 + 40..].to_string(); // len("Blob ") + 40
-        return (format!("Blob {}{}", rf, rest), Some(rf));
+        let truncated = format!("{:.8}", second);
+        return (
+            format!("Blob {} ({})", truncated, ctx.unwrap_or_default()),
+            Some(truncated),
+        );
     }
     if first == "Commit" && is_hex_40(second) {
-        let rf = foot.note(second, None);
-        let rest = message[7 + 40..].to_string(); // len("Commit ") + 40
-        return (format!("Commit {}{}", rf, rest), Some(rf));
+        let truncated = format!("{:.8}", second);
+        return (format!("Commit {}", truncated), Some(truncated));
     }
     (message.to_string(), None)
 }
