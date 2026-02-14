@@ -287,11 +287,10 @@ def run_tests(scenarios: List[str], tests: List[str], clean: bool):
                 tester.run_test(repo_path, "analyze", ["--analyze"], scenario)
 
             if "dryrun" in tests:
-                target = repo_path.parent / f"{repo_path.name}-filtered"
                 tester.run_test(
                     repo_path,
                     "dryrun",
-                    ["--source", str(repo_path), "--target", str(target), "--dry-run"],
+                    ["--dry-run", "--force"],
                     scenario,
                 )
 
