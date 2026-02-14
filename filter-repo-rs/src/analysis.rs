@@ -561,7 +561,6 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
     // Process last commit if exists
     if !commit_data.is_empty() {
         process_commit_block(&commit_data, stats)?;
-        processed += 1;
     }
 
     // Wait for git command to complete
@@ -685,83 +684,6 @@ fn gather_oversized_commit_messages(
         }
     }
     Ok(stats)
-}
-
-fn parse_batch_log_output(
-    output: &str,
-    stats: &mut StatsCollection,
-    _repo: &Path,
-) -> io::Result<()> {
-    let lines: Vec<&str> = output.lines().collect();
-    let mut i = 0;
-
-    while i < lines.len() {
-        let line = lines[i].trim();
-
-        // Skip empty lines
-        if line.is_empty() {
-            i += 1;
-            continue;
-        }
-
-        // Check if this is a commit line. We allow either a bare 40-hex hash
-        // or a hash followed by one or more parent hashes ("%H %P" output).
-        let is_commit_line = if line.len() >= 40 {
-            let (head, rest) = line.split_at(40);
-            head.chars().all(|c| c.is_ascii_hexdigit())
-                && (rest.is_empty() || rest.starts_with(' '))
-        } else {
-            false
-        };
-
-        if is_commit_line {
-            // Parse commit and optional parents from the line
-            let mut parts = line.split_whitespace();
-            let commit = parts.next().unwrap_or("").to_string();
-            let parents: Vec<String> = parts.map(|s| s.to_string()).collect();
-            i += 1;
-
-            // Collect file changes for this commit
-            let mut file_changes = Vec::new();
-
-            while i < lines.len() {
-                let change_line = lines[i].trim();
-
-                // Stop if we hit the next commit or empty line
-                if change_line.is_empty()
-                    || (change_line.len() == 40
-                        && change_line.chars().all(|c| c.is_ascii_hexdigit()))
-                {
-                    break;
-                }
-
-                // Parse file change: <status> <path>
-                let mut parts = change_line.split_whitespace();
-                if let (Some(status), Some(path)) = (parts.next(), parts.next()) {
-                    // Don't add placeholder hashes to stats - blob mapping will be done later
-                    // Just track file changes for commit processing
-                    let placeholder_id = format!("placeholder_{}", path.len());
-
-                    file_changes.push((
-                        vec!["100644".to_string()], // default mode
-                        vec![placeholder_id], // placeholder that won't interfere with real hashes
-                        status.to_string(),
-                        vec![path.to_string()],
-                    ));
-                }
-
-                i += 1;
-            }
-
-            // Analyze this commit
-            analyze_commit(stats, commit, parents, file_changes);
-            stats.num_commits += 1;
-        } else {
-            i += 1;
-        }
-    }
-
-    Ok(())
 }
 
 // Type alias to reduce complexity
