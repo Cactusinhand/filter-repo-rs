@@ -123,6 +123,14 @@ pub struct ObjectStat {
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
+pub struct FileStat {
+    pub path: String,
+    pub size: u64,
+    pub versions: usize,
+    pub largest_oid: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct DirectoryStat {
     pub path: String,
     pub entries: usize,
@@ -158,6 +166,7 @@ pub struct RepositoryMetrics {
     pub refs_remotes: usize,
     pub refs_other: usize,
     pub largest_blobs: Vec<ObjectStat>,
+    pub largest_files: Vec<FileStat>,
     pub largest_trees: Vec<ObjectStat>,
     pub blobs_over_threshold: Vec<ObjectStat>,
     pub directory_hotspots: Option<DirectoryStat>,
@@ -305,6 +314,10 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     metrics.largest_blobs = heap_to_object_stats_with_paths(largest_blobs, &stats.blob_paths);
     metrics.blobs_over_threshold =
         heap_to_object_stats_with_paths(threshold_hits, &stats.blob_paths);
+
+    // Group blobs by file path to find unique files
+    metrics.largest_files =
+        compute_largest_files(&stats.blob_paths, &unpacked_size, &packed_size, cfg.top);
 
     // Tree inventory via cat-file for counts and top sizes (lightweight)
     term_colors::eprintln_color(term_colors::CYAN, "[*] Gathering tree inventory...");
@@ -924,25 +937,24 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
 
     // (Checkout (HEAD) moved near Warnings for better layout)
 
-    if !report.metrics.largest_blobs.is_empty() {
+    // Show largest files (unique files, grouped by path) instead of individual blob versions
+    if !report.metrics.largest_files.is_empty() {
         println!(
-            "  Top {} blobs by size:",
-            format_count(report.metrics.largest_blobs.len() as u64)
+            "  Top {} files by size:",
+            format_count(report.metrics.largest_files.len() as u64)
         );
         let rows = report
             .metrics
-            .largest_blobs
+            .largest_files
             .iter()
             .enumerate()
-            .map(|(idx, blob)| {
-                let rf = foot.note(&blob.oid, blob.path.as_deref());
+            .map(|(idx, file)| {
+                let rf = foot.note(&file.largest_oid, Some(&file.path));
                 vec![
                     Cow::Owned(format!("{}", idx + 1)),
-                    Cow::Owned(format!("{:.2} MiB", to_mib(blob.size))),
-                    blob.path
-                        .as_deref()
-                        .map(Cow::Borrowed)
-                        .unwrap_or(Cow::Borrowed("")),
+                    Cow::Owned(format!("{:.2} MiB", to_mib(file.size))),
+                    Cow::Owned(file.path.clone()),
+                    Cow::Owned(format!("{} ver", file.versions)),
                     Cow::Owned(rf),
                 ]
             })
@@ -952,6 +964,7 @@ fn print_human(report: &AnalysisReport, _cfg: &AnalyzeConfig) {
                 ("#", CellAlignment::Right),
                 ("Size", CellAlignment::Right),
                 ("Path", CellAlignment::Left),
+                ("Vers", CellAlignment::Center),
                 ("OID", CellAlignment::Center),
             ],
             rows,
@@ -1218,6 +1231,49 @@ fn heap_to_object_stats_with_paths(
             ObjectStat { oid, size, path }
         })
         .collect()
+}
+
+fn compute_largest_files(
+    blob_paths: &HashMap<String, Vec<String>>,
+    unpacked_size: &HashMap<String, u64>,
+    packed_size: &HashMap<String, u64>,
+    top: usize,
+) -> Vec<FileStat> {
+    if top == 0 {
+        return Vec::new();
+    }
+
+    let mut file_map: HashMap<String, (u64, String, usize)> = HashMap::new();
+
+    for (oid, paths) in blob_paths {
+        let size = unpacked_size
+            .get(oid)
+            .copied()
+            .unwrap_or_else(|| packed_size.get(oid).copied().unwrap_or(0));
+
+        for path in paths {
+            let entry = file_map.entry(path.clone()).or_insert((0, oid.clone(), 0));
+            if size > entry.0 {
+                entry.0 = size;
+                entry.1 = oid.clone();
+            }
+            entry.2 += 1;
+        }
+    }
+
+    let mut files: Vec<FileStat> = file_map
+        .into_iter()
+        .map(|(path, (size, largest_oid, versions))| FileStat {
+            path,
+            size,
+            versions,
+            largest_oid,
+        })
+        .collect();
+
+    files.sort_by(|a, b| b.size.cmp(&a.size));
+    files.truncate(top);
+    files
 }
 
 fn push_top(heap: &mut BinaryHeap<Reverse<(u64, String)>>, limit: usize, size: u64, oid: &str) {
