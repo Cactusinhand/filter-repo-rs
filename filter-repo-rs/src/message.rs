@@ -1,11 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 
 use aho_corasick::AhoCorasick;
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
+
+const DEFAULT_STREAM_CHUNK_SIZE: usize = 64 * 1024;
+
+pub const STREAMING_THRESHOLD: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer {
@@ -74,6 +78,54 @@ impl MessageReplacer {
             }
             result
         }
+    }
+
+    pub fn needs_streaming(&self, data_len: usize) -> bool {
+        data_len > STREAMING_THRESHOLD
+    }
+
+    pub fn supports_streaming(&self) -> bool {
+        self.ac.is_some()
+    }
+
+    pub fn apply_streaming<R: Read, W: Write>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> io::Result<bool> {
+        let Some(ref ac) = self.ac else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "streaming not supported for simple byte replacement",
+            ));
+        };
+
+        let mut changed = false;
+        let mut buffer = vec![0u8; DEFAULT_STREAM_CHUNK_SIZE];
+        let mut leftover = Vec::new();
+
+        loop {
+            let n = reader.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+
+            let mut chunk = Vec::with_capacity(n + leftover.len());
+            chunk.extend_from_slice(&leftover);
+            chunk.extend_from_slice(&buffer[..n]);
+            leftover.clear();
+
+            let input = String::from_utf8_lossy(&chunk);
+            let result = ac.replace_all(&input, self.replacements.as_slice());
+            let result_bytes = result.into_bytes();
+
+            if result_bytes != chunk {
+                changed = true;
+            }
+            writer.write_all(&result_bytes)?;
+        }
+
+        Ok(changed)
     }
 }
 
@@ -243,6 +295,30 @@ pub fn replace_all_bytes(h: &[u8], n: &[u8], r: &[u8]) -> Vec<u8> {
     }
     out.extend_from_slice(&h[i..]);
     out
+}
+
+pub fn replace_all_bytes_streaming<'a>(
+    h: &'a [u8],
+    n: &[u8],
+    r: &[u8],
+    buf: &mut Vec<u8>,
+) -> Vec<u8> {
+    buf.clear();
+    if n.is_empty() {
+        return h.to_vec();
+    }
+    let mut i = 0;
+    while i + n.len() <= h.len() {
+        if &h[i..i + n.len()] == n {
+            buf.extend_from_slice(r);
+            i += n.len();
+        } else {
+            buf.push(h[i]);
+            i += 1;
+        }
+    }
+    buf.extend_from_slice(&h[i..]);
+    buf.clone()
 }
 
 // Regex support for blob replacements reuses the same replacement file syntax,

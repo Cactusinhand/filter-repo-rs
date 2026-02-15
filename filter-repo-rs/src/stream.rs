@@ -15,8 +15,9 @@ use crate::gitutil::git_dir;
 use crate::limits::parse_data_size_header;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use crate::message::msg_regex::RegexReplacer as MsgRegexReplacer;
-use crate::message::{MessageReplacer, ShortHashMapper};
+use crate::message::{MessageReplacer, ShortHashMapper, STREAMING_THRESHOLD};
 use crate::opts::Options;
+use std::io::Cursor;
 
 const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
@@ -1226,22 +1227,52 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         }
                     } else {
                         // Forward header/payload with replacements; track whether modified
-                        let mut new_payload = payload;
+
+                        let use_streaming = n > STREAMING_THRESHOLD
+                            && content_replacer
+                                .as_ref()
+                                .map(|r| r.supports_streaming())
+                                .unwrap_or(false);
+
+                        let mut new_payload;
                         let mut changed = false;
-                        if let Some(r) = &content_replacer {
-                            let tmp = r.apply(new_payload.clone());
-                            if !changed {
-                                changed = tmp != new_payload;
+
+                        if use_streaming && content_replacer.is_some() {
+                            // Streaming processing for large blobs with aho-corasick
+                            let mut cursor = Cursor::new(payload);
+                            let mut writer = Vec::new();
+                            content_replacer
+                                .as_ref()
+                                .unwrap()
+                                .apply_streaming(&mut cursor, &mut writer)?;
+                            new_payload = writer;
+                            changed = !new_payload.is_empty();
+
+                            // For regex, we still need in-memory processing (patterns may span chunks)
+                            if let Some(ref rr) = content_regex_replacer {
+                                let tmp = rr.apply_regex(new_payload.clone());
+                                changed = changed || tmp != new_payload;
+                                new_payload = tmp;
                             }
-                            new_payload = tmp;
-                        }
-                        if let Some(rr) = &content_regex_replacer {
-                            let tmp = rr.apply_regex(new_payload.clone());
-                            if !changed {
-                                changed = tmp != new_payload;
+                        } else {
+                            // In-memory processing
+                            new_payload = payload;
+                            if let Some(r) = &content_replacer {
+                                let tmp = r.apply(new_payload.clone());
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
+                                new_payload = tmp;
                             }
-                            new_payload = tmp;
+                            if let Some(rr) = &content_regex_replacer {
+                                let tmp = rr.apply_regex(new_payload.clone());
+                                if !changed {
+                                    changed = tmp != new_payload;
+                                }
+                                new_payload = tmp;
+                            }
                         }
+
                         let header = format!("data {}\n", new_payload.len());
                         filt_file.write_all(header.as_bytes())?;
                         if let Some(ref mut fi_in) = fi_in_opt {
