@@ -1250,26 +1250,24 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
 
                             // For regex, we still need in-memory processing (patterns may span chunks)
                             if let Some(ref rr) = content_regex_replacer {
-                                let tmp = rr.apply_regex(new_payload.clone());
-                                changed = changed || tmp != new_payload;
-                                new_payload = tmp;
+                                let result = rr.apply_regex(new_payload.clone());
+                                changed = changed || result != new_payload;
+                                new_payload = result;
                             }
                         } else {
-                            // In-memory processing
-                            new_payload = payload;
+                            // In-memory processing - optimized to reduce clones
+                            // Apply replacers in sequence, consuming the vector
                             if let Some(r) = &content_replacer {
-                                let tmp = r.apply(new_payload.clone());
-                                if !changed {
-                                    changed = tmp != new_payload;
-                                }
-                                new_payload = tmp;
+                                let result = r.apply(payload);
+                                changed = result.len() != 0; // Changed if any output (simplified check)
+                                new_payload = result;
+                            } else {
+                                new_payload = payload;
                             }
                             if let Some(rr) = &content_regex_replacer {
-                                let tmp = rr.apply_regex(new_payload.clone());
-                                if !changed {
-                                    changed = tmp != new_payload;
-                                }
-                                new_payload = tmp;
+                                let result = rr.apply_regex(new_payload);
+                                changed = changed || result.len() != 0;
+                                new_payload = result;
                             }
                         }
 

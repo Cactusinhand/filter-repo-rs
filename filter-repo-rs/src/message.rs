@@ -81,6 +81,20 @@ impl MessageReplacer {
         }
     }
 
+    pub fn apply_ref(&self, data: &[u8]) -> Vec<u8> {
+        if let Some(ref ac) = self.ac {
+            let input = String::from_utf8_lossy(data);
+            let result = ac.replace_all(&input, self.replacements.as_slice());
+            result.into_bytes()
+        } else {
+            let mut result = data.to_vec();
+            for (from, to) in &self.pairs {
+                result = replace_all_bytes(&result, from, to);
+            }
+            result
+        }
+    }
+
     pub fn needs_streaming(&self, data_len: usize) -> bool {
         data_len > STREAMING_THRESHOLD
     }
