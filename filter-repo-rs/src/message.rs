@@ -81,24 +81,6 @@ impl MessageReplacer {
         }
     }
 
-    pub fn apply_ref(&self, data: &[u8]) -> Vec<u8> {
-        if let Some(ref ac) = self.ac {
-            let input = String::from_utf8_lossy(data);
-            let result = ac.replace_all(&input, self.replacements.as_slice());
-            result.into_bytes()
-        } else {
-            let mut result = data.to_vec();
-            for (from, to) in &self.pairs {
-                result = replace_all_bytes(&result, from, to);
-            }
-            result
-        }
-    }
-
-    pub fn needs_streaming(&self, data_len: usize) -> bool {
-        data_len > STREAMING_THRESHOLD
-    }
-
     pub fn supports_streaming(&self) -> bool {
         self.ac.is_some()
     }
@@ -314,30 +296,6 @@ pub fn replace_all_bytes(h: &[u8], n: &[u8], r: &[u8]) -> Vec<u8> {
     }
     out.extend_from_slice(&h[i..]);
     out
-}
-
-pub fn replace_all_bytes_streaming<'a>(
-    h: &'a [u8],
-    n: &[u8],
-    r: &[u8],
-    buf: &mut Vec<u8>,
-) -> Vec<u8> {
-    buf.clear();
-    if n.is_empty() {
-        return h.to_vec();
-    }
-    let mut i = 0;
-    while i + n.len() <= h.len() {
-        if &h[i..i + n.len()] == n {
-            buf.extend_from_slice(r);
-            i += n.len();
-        } else {
-            buf.push(h[i]);
-            i += 1;
-        }
-    }
-    buf.extend_from_slice(&h[i..]);
-    buf.clone()
 }
 
 // Regex support for blob replacements reuses the same replacement file syntax,
