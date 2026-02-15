@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 
 use aho_corasick::AhoCorasick;
+use regex::bytes::RegexBuilder;
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
 
@@ -193,12 +194,16 @@ impl ShortHashMapper {
         if !has_any {
             return Ok(None);
         }
-        let regex = regex::bytes::Regex::new(r"(?i)\b[0-9a-f]{7,40}\b").map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("invalid short-hash regex: {e}"),
-            )
-        })?;
+        let regex = RegexBuilder::new(r"(?i)\b[0-9a-f]{7,40}\b")
+            .size_limit(10 << 20)
+            .dfa_size_limit(10 << 20)
+            .build()
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("invalid short-hash regex: {e}"),
+                )
+            })?;
         Ok(Some(Self {
             lookup,
             prefix_index,
@@ -325,7 +330,10 @@ pub fn replace_all_bytes_streaming<'a>(
 // where lines starting with "regex:" are treated as regex rules.
 pub mod blob_regex {
     use super::*;
-    use regex::bytes::{Captures, Regex};
+    use regex::bytes::{Captures, Regex, RegexBuilder};
+
+    const REGEX_SIZE_LIMIT: usize = 10 << 20;
+    const DFA_SIZE_LIMIT: usize = 10 << 20;
 
     #[derive(Clone, Debug, Default)]
     pub struct RegexReplacer {
@@ -355,12 +363,16 @@ pub mod blob_regex {
                             format!("invalid UTF-8 in regex rule: {e}"),
                         )
                     })?;
-                    let re = Regex::new(pat_str).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!("invalid regex pattern: {e}"),
-                        )
-                    })?;
+                    let re = RegexBuilder::new(pat_str)
+                        .size_limit(REGEX_SIZE_LIMIT)
+                        .dfa_size_limit(DFA_SIZE_LIMIT)
+                        .build()
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!("invalid regex pattern: {e}"),
+                            )
+                        })?;
                     let has_dollar = rep.contains(&b'$');
                     rules.push((re, rep, has_dollar));
                     continue;
@@ -394,12 +406,16 @@ pub mod blob_regex {
                             _ => rx.push(ch),
                         }
                     }
-                    let re = Regex::new(&rx).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!("invalid glob-derived regex: {e}"),
-                        )
-                    })?;
+                    let re = RegexBuilder::new(&rx)
+                        .size_limit(REGEX_SIZE_LIMIT)
+                        .dfa_size_limit(DFA_SIZE_LIMIT)
+                        .build()
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!("invalid glob-derived regex: {e}"),
+                            )
+                        })?;
                     // For glob-derived rules, treat '$' literally in replacement (no capture groups)
                     let has_dollar = false;
                     rules.push((re, rep, has_dollar));
@@ -489,7 +505,10 @@ pub mod blob_regex {
 // (?m) for multi-line when matching whole lines.
 pub mod msg_regex {
     use super::*;
-    use regex::bytes::{Captures, Regex};
+    use regex::bytes::{Captures, Regex, RegexBuilder};
+
+    const REGEX_SIZE_LIMIT: usize = 10 << 20;
+    const DFA_SIZE_LIMIT: usize = 10 << 20;
 
     #[derive(Clone, Debug, Default)]
     pub struct RegexReplacer {
@@ -519,12 +538,16 @@ pub mod msg_regex {
                             format!("invalid UTF-8 in regex rule: {e}"),
                         )
                     })?;
-                    let re = Regex::new(pat_str).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!("invalid regex pattern: {e}"),
-                        )
-                    })?;
+                    let re = RegexBuilder::new(pat_str)
+                        .size_limit(REGEX_SIZE_LIMIT)
+                        .dfa_size_limit(DFA_SIZE_LIMIT)
+                        .build()
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidInput,
+                                format!("invalid regex pattern: {e}"),
+                            )
+                        })?;
                     let has_dollar = rep.contains(&b'$');
                     rules.push((re, rep, has_dollar));
                 }
