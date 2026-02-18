@@ -16,8 +16,7 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
     }
 
     let git_dir = git_dir(&opts.source).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("failed to resolve git dir for {:?}: {e}", opts.source),
         )
     })?;
@@ -32,8 +31,7 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
     const FORMAT: &[FormatItem<'_>] =
         format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:9]");
     let formatted = datetime.format(FORMAT).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("failed to format backup timestamp: {e}"),
         )
     })?;
@@ -81,15 +79,13 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
         .args(opts.refs.iter())
         .status()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git bundle create: {e}"),
             )
         })?;
 
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("git bundle create failed with status {status}"),
         ));
     }

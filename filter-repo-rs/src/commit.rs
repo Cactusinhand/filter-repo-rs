@@ -94,7 +94,7 @@ pub enum ParentKind {
     Merge,
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 pub fn start_commit(
     line: &[u8],
     opts: &Options,
@@ -118,6 +118,7 @@ pub fn start_commit(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn process_commit_line(
     line: &[u8],
     opts: &Options,

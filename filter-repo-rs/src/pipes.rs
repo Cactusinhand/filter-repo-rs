@@ -76,14 +76,12 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
         if opts.git_caps.fast_export_reencode {
             cmd.arg("--reencode=yes");
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "error: git fast-export lacks --reencode; need git >= 2.23.0",
             ));
         }
     } else if matches!(opts.reencode_requested, Some(true)) {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "error: git fast-export lacks --reencode; need git >= 2.23.0",
         ));
     }
@@ -91,14 +89,12 @@ pub fn build_fast_export_cmd(opts: &Options) -> io::Result<Command> {
         if opts.git_caps.fast_export_mark_tags {
             cmd.arg("--mark-tags");
         } else if matches!(opts.mark_tags_requested, Some(true)) {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "error: git fast-export lacks --mark-tags; need git >= 2.24.0",
             ));
         }
     } else if matches!(opts.mark_tags_requested, Some(true)) {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "error: git fast-export lacks --mark-tags; need git >= 2.24.0",
         ));
     }

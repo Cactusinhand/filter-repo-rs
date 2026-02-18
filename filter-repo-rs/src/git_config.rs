@@ -116,7 +116,7 @@ impl GitConfig {
                 format!("failed to read git config '{}': {}", key, stderr_trimmed)
             };
 
-            return Err(io::Error::new(io::ErrorKind::Other, message));
+            return Err(io::Error::other(message));
         }
 
         let value = String::from_utf8_lossy(&output.stdout)
@@ -172,7 +172,7 @@ impl GitConfig {
                 format!("failed to read git config '{}': {}", key, stderr_trimmed)
             };
 
-            return Err(io::Error::new(io::ErrorKind::Other, message));
+            return Err(io::Error::other(message));
         }
 
         let value = String::from_utf8_lossy(&output.stdout).trim().to_string();

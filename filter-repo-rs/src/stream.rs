@@ -46,7 +46,6 @@ enum StripShaLookup {
 /// OPTIMIZATION: Consider implementing external merge sort or chunked sorting
 /// to reduce peak memory usage. The threshold STRIP_SHA_ON_DISK_THRESHOLD could
 /// be lowered to trigger on-disk storage earlier, trading disk I/O for memory.
-
 impl StripShaLookup {
     fn empty() -> Self {
         StripShaLookup::Empty
@@ -296,16 +295,15 @@ impl BlobSizeTracker {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = cmd.spawn().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to spawn git cat-file --batch-check: {e}"),
             )
         })?;
         let stdin = child.stdin.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "missing stdin for cat-file batch")
+            io::Error::other("missing stdin for cat-file batch")
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, "missing stdout for cat-file batch")
+            io::Error::other("missing stdout for cat-file batch")
         })?;
         self.batch = Some(BatchCat {
             child,
@@ -318,8 +316,7 @@ impl BlobSizeTracker {
     fn query_size_via_batch(&mut self, sha: &[u8]) -> io::Result<usize> {
         self.ensure_batch()?;
         let batch = self.batch.as_mut().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 "batch process not initialized before query",
             )
         })?;
@@ -367,14 +364,12 @@ impl BlobSizeTracker {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git cat-file batch: {e}"),
             )
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 "missing stdout from git cat-file batch",
             )
         })?;
@@ -425,8 +420,7 @@ impl BlobSizeTracker {
         let status = child.wait()?;
         if !status.success() {
             let msg = String::from_utf8_lossy(&stderr_buf);
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 format!("git cat-file batch failed: {msg}"),
             ));
         }
@@ -481,14 +475,12 @@ impl Drop for BatchCat {
 
 pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let target_git_dir = git_dir(&opts.target).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("Target {:?} is not a git repo: {e}", opts.target),
         )
     })?;
     let _ = git_dir(&opts.source).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("Source {:?} is not a git repo: {e}", opts.source),
         )
     })?;
@@ -511,8 +503,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
 
     let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
     let mut fe = fe_cmd.spawn().map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("failed to spawn git fast-export: {e}"),
         )
     })?;
@@ -523,8 +514,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             crate::pipes::build_fast_import_cmd(opts)
                 .spawn()
                 .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
+                    io::Error::other(
                         format!("failed to spawn git fast-import: {e}"),
                     )
                 })?,
@@ -532,7 +522,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
 
     let mut fe_out = BufReader::new(fe.stdout.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "git fast-export produced no stdout")
+        io::Error::other("git fast-export produced no stdout")
     })?);
     let mut fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
     {
@@ -549,8 +539,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
 
     let replacer = match &opts.replace_message_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to read --replace-message: {e}"),
             )
         })?),
@@ -558,8 +547,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
     let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
         Some(p) => MsgRegexReplacer::from_file(p).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to read --replace-message: {e}"),
             )
         })?,
@@ -568,8 +556,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
     let content_replacer = match &opts.replace_text_file {
         Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to read --replace-text: {e}"),
             )
         })?),
@@ -577,8 +564,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
     let content_regex_replacer: Option<BlobRegexReplacer> = match &opts.replace_text_file {
         Some(p) => BlobRegexReplacer::from_file(p).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to read --replace-text: {e}"),
             )
         })?,
@@ -623,8 +609,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
     let strip_sha_lookup = match &opts.strip_blobs_with_ids {
         Some(path) => StripShaLookup::from_path(path).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to load --strip-blobs-with-ids: {e}"),
             )
         })?,
@@ -1237,14 +1222,12 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         let mut new_payload;
                         let mut changed = false;
 
-                        if use_streaming && content_replacer.is_some() {
+                        if let Some(replacer) = content_replacer.as_ref().filter(|_| use_streaming)
+                        {
                             // Streaming processing for large blobs with aho-corasick
                             let mut cursor = Cursor::new(payload);
                             let mut writer = Vec::new();
-                            let replaced = content_replacer
-                                .as_ref()
-                                .unwrap()
-                                .apply_streaming(&mut cursor, &mut writer)?;
+                            let replaced = replacer.apply_streaming(&mut cursor, &mut writer)?;
                             new_payload = writer;
                             changed = replaced;
 

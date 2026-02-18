@@ -197,8 +197,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     // Wait for git command to complete
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("git rev-list --objects --all failed: {}", status),
         ));
     }
@@ -460,7 +459,7 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
                 processed += 1;
 
                 // Progress indicator every 1000 commits
-                if processed % 1000 == 0 {
+                if processed.is_multiple_of(1000) {
                     let progress = ((processed as f64 / total_commits as f64) * 100.0) as u32;
                     let bar_length = 30;
                     let filled = progress as usize * bar_length / 100;
@@ -489,8 +488,7 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
     // Wait for git command to complete
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("git log --all failed: {}", status),
         ));
     }
@@ -571,8 +569,7 @@ fn gather_max_parents(repo: &Path) -> io::Result<usize> {
 
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("git rev-list --parents --all failed: {}", status),
         ));
     }
@@ -989,8 +986,7 @@ fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
         .stderr(Stdio::inherit())
         .output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("git {:?} failed", args),
         ));
     }
@@ -1017,7 +1013,7 @@ fn run_git_capture_stream(
     let stdout = cmd
         .stdout
         .take()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "failed to capture git stdout"))?;
+        .ok_or_else(|| io::Error::other("failed to capture git stdout"))?;
     Ok((BufReader::new(stdout), cmd))
 }
 
@@ -1030,7 +1026,7 @@ fn to_gib(bytes: u64) -> f64 {
 }
 
 fn to_io_error(err: serde_json::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err)
+    io::Error::other(err)
 }
 
 fn heap_to_object_stats_with_paths(

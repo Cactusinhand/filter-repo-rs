@@ -55,7 +55,7 @@ impl From<FilterRepoError> for io::Error {
     fn from(err: FilterRepoError) -> Self {
         match err {
             FilterRepoError::Io(inner) => inner,
-            other => io::Error::new(io::ErrorKind::Other, other),
+            other => io::Error::other(other),
         }
     }
 }

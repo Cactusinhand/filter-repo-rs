@@ -196,8 +196,7 @@ impl ShortHashMapper {
             .dfa_size_limit(10 << 20)
             .build()
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     format!("invalid short-hash regex: {e}"),
                 )
             })?;

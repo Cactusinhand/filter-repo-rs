@@ -17,8 +17,7 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg("remote")
         .output()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git remote: {e}"),
             )
         })?;
@@ -46,14 +45,12 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg("+refs/*:refs/*")
         .status()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git fetch: {e}"),
             )
         })?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "git fetch command failed with non-zero exit status",
         ));
     }
@@ -107,30 +104,26 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
     if let Some(stdin) = child.stdin.as_mut() {
         for (r, h) in to_create.iter() {
             writeln!(stdin, "create {} {}", r, h).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     format!("failed to write to git update-ref stdin: {e}"),
                 )
             })?;
         }
         for (r, h) in to_delete.iter() {
             writeln!(stdin, "delete {} {}", r, h).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
+                io::Error::other(
                     format!("failed to write to git update-ref stdin: {e}"),
                 )
             })?;
         }
     }
     let status = child.wait().map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
+        io::Error::other(
             format!("failed to wait for git update-ref: {e}"),
         )
     })?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "git update-ref command failed with non-zero exit status",
         ));
     }
@@ -148,8 +141,7 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
         .arg("remote")
         .output()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git remote: {e}"),
             )
         })?;
@@ -178,14 +170,12 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
         .arg("origin")
         .status()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git remote rm: {e}"),
             )
         })?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             "git remote rm command failed with non-zero exit status",
         ));
     }

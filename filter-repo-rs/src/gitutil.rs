@@ -27,8 +27,7 @@ pub fn run_git_with_timeout(
         .args(cmd.get_args())
         .output()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run timeout command: {e}"),
             )
         })?;
@@ -101,8 +100,7 @@ fn capture_git_help(args: &[&str]) -> io::Result<String> {
         .output()?;
     let status_code = output.status.code();
     if !output.status.success() && status_code != Some(129) {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("'git {}' failed", args.join(" ")),
         ));
     }
@@ -135,8 +133,7 @@ pub fn git_dir(repo: &Path) -> io::Result<PathBuf> {
         .stderr(Stdio::inherit())
         .output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("'git -C {:?} rev-parse --git-dir' failed", repo),
         ));
     }
@@ -185,8 +182,7 @@ pub fn get_all_refs(repo_path: &Path) -> io::Result<HashMap<String, String>> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!("'git -C {:?} for-each-ref' failed", repo_path),
         ));
     }
@@ -229,8 +225,7 @@ pub fn is_bare_repository(repo_path: &Path) -> io::Result<bool> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!(
                 "'git -C {:?} rev-parse --is-bare-repository' failed",
                 repo_path

@@ -72,6 +72,7 @@ pub fn flush_lightweight_tag_resets(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn finalize(
     opts: &Options,
     debug_dir: &Path,
@@ -123,16 +124,14 @@ pub fn finalize(
     }
     let fe_status = fe.wait()?;
     if !fe_status.success() {
-        return Err(FilterRepoError::Io(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(FilterRepoError::Io(io::Error::other(
             format!("fast-export failed: {}", fe_status),
         )));
     }
     if let Some(child) = fi {
         let fi_status = child.wait()?;
         if !fi_status.success() {
-            return Err(FilterRepoError::Io(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(FilterRepoError::Io(io::Error::other(
                 format!("fast-import failed: {}", fi_status),
             )));
         }
@@ -227,8 +226,7 @@ pub fn finalize(
                 .stdin(Stdio::piped())
                 .spawn()
                 .map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
+                    io::Error::other(
                         format!("failed to run git update-ref: {e}"),
                     )
                 })?;
@@ -408,8 +406,7 @@ pub fn finalize(
             let mut f = File::create(json_path)?;
             if let Some(ref r) = report {
                 let json = serde_json::to_string_pretty(r).map_err(|e| {
-                    FilterRepoError::Io(io::Error::new(
-                        io::ErrorKind::Other,
+                    FilterRepoError::Io(io::Error::other(
                         format!("JSON serialization failed: {e}"),
                     ))
                 })?;
@@ -419,8 +416,7 @@ pub fn finalize(
                     "error": "No report data collected"
                 }))
                 .map_err(|e| {
-                    FilterRepoError::Io(io::Error::new(
-                        io::ErrorKind::Other,
+                    FilterRepoError::Io(io::Error::other(
                         format!("JSON serialization failed: {e}"),
                     ))
                 })?;
@@ -612,8 +608,7 @@ fn resolve_reset_target(
         .arg(&spec)
         .output()
         .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
+            io::Error::other(
                 format!("failed to run git rev-parse: {e}"),
             )
         })?;
