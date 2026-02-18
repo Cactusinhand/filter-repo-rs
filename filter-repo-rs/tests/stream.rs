@@ -110,6 +110,59 @@ fn inline_replace_text_and_report_modified() {
 }
 
 #[test]
+fn streaming_replace_text_without_match_reports_zero_modified_blobs() {
+    let repo = init_repo();
+    let stream_path = repo.join("fe-large-blob.stream");
+    let payload = vec![b'x'; 1_100_000];
+    let msg = b"streaming no-match\n";
+    let (_code, headref, _stderr) = run_git(&repo, &["symbolic-ref", "-q", "HEAD"]);
+    let commit_ref = headref.trim();
+
+    let mut stream = Vec::new();
+    stream.extend_from_slice(b"blob\nmark :1\n");
+    stream.extend_from_slice(format!("data {}\n", payload.len()).as_bytes());
+    stream.extend_from_slice(&payload);
+    stream.extend_from_slice(b"\n\n");
+    stream.extend_from_slice(format!("commit {}\n", commit_ref).as_bytes());
+    stream.extend_from_slice(b"mark :2\n");
+    stream.extend_from_slice(b"committer A U Thor <a.u.thor@example.com> 1737070001 +0000\n");
+    stream.extend_from_slice(format!("data {}\n", msg.len()).as_bytes());
+    stream.extend_from_slice(msg);
+    stream.extend_from_slice(b"M 100644 :1 large.bin\n\n");
+    stream.extend_from_slice(b"done\n");
+    std::fs::write(&stream_path, stream).expect("write large blob stream");
+
+    let repl = repo.join("repl-no-match.txt");
+    std::fs::write(
+        &repl,
+        "SECRET-1==>REDACTED\nSECRET-2==>REDACTED\nSECRET-3==>REDACTED\n",
+    )
+    .expect("write replacement rules");
+
+    run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
+        o.dry_run = true;
+        o.write_report = true;
+        o.replace_text_file = Some(repl.clone());
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    });
+
+    let report = repo.join(".git").join("filter-repo").join("report.txt");
+    let mut report_text = String::new();
+    std::fs::File::open(&report)
+        .expect("open report")
+        .read_to_string(&mut report_text)
+        .expect("read report");
+    assert!(
+        report_text.contains("Blobs modified by replace-text: 0"),
+        "unexpected modified blob count in report:\n{report_text}"
+    );
+}
+
+#[test]
 fn fe_stream_override_requires_debug_mode() {
     let repo = init_repo();
     let stream_path = repo.join("override.stream");

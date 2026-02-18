@@ -1241,32 +1241,35 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             // Streaming processing for large blobs with aho-corasick
                             let mut cursor = Cursor::new(payload);
                             let mut writer = Vec::new();
-                            content_replacer
+                            let replaced = content_replacer
                                 .as_ref()
                                 .unwrap()
                                 .apply_streaming(&mut cursor, &mut writer)?;
                             new_payload = writer;
-                            changed = !new_payload.is_empty();
+                            changed = replaced;
 
                             // For regex, we still need in-memory processing (patterns may span chunks)
                             if let Some(ref rr) = content_regex_replacer {
-                                let result = rr.apply_regex(new_payload.clone());
-                                changed = changed || result != new_payload;
+                                let before_regex = new_payload.clone();
+                                let result = rr.apply_regex(before_regex.clone());
+                                changed = changed || result != before_regex;
                                 new_payload = result;
                             }
                         } else {
                             // In-memory processing - optimized to reduce clones
                             // Apply replacers in sequence, consuming the vector
                             if let Some(r) = &content_replacer {
-                                let result = r.apply(payload);
-                                changed = result.len() != 0; // Changed if any output (simplified check)
+                                let before_replace = payload;
+                                let result = r.apply(before_replace.clone());
+                                changed = result != before_replace;
                                 new_payload = result;
                             } else {
                                 new_payload = payload;
                             }
                             if let Some(rr) = &content_regex_replacer {
-                                let result = rr.apply_regex(new_payload);
-                                changed = changed || result.len() != 0;
+                                let before_regex = new_payload.clone();
+                                let result = rr.apply_regex(before_regex.clone());
+                                changed = changed || result != before_regex;
                                 new_payload = result;
                             }
                         }
