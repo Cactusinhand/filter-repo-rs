@@ -8,15 +8,13 @@ use regex::bytes::RegexBuilder;
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
 
-const DEFAULT_STREAM_CHUNK_SIZE: usize = 64 * 1024;
-
 pub const STREAMING_THRESHOLD: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer {
     pub pairs: Vec<(Vec<u8>, Vec<u8>)>,
     ac: Option<AhoCorasick>,
-    replacements: Vec<String>,
+    replacements: Vec<Vec<u8>>,
 }
 
 impl MessageReplacer {
@@ -50,10 +48,7 @@ impl MessageReplacer {
 
         let (ac, replacements) = if pairs.len() >= AHO_CORASICK_THRESHOLD {
             let patterns: Vec<&[u8]> = pairs.iter().map(|(p, _)| p.as_slice()).collect();
-            let replacements: Vec<String> = pairs
-                .iter()
-                .map(|(_, r)| String::from_utf8_lossy(r).to_string())
-                .collect();
+            let replacements: Vec<Vec<u8>> = pairs.iter().map(|(_, r)| r.clone()).collect();
             let ac = AhoCorasick::new(&patterns).ok();
             (ac, replacements)
         } else {
@@ -69,9 +64,8 @@ impl MessageReplacer {
 
     pub fn apply(&self, data: Vec<u8>) -> Vec<u8> {
         if let Some(ref ac) = self.ac {
-            let input = String::from_utf8_lossy(&data);
-            let result = ac.replace_all(&input, self.replacements.as_slice());
-            result.into_bytes()
+            let (result, _changed) = self.apply_ac_replacements(ac, &data);
+            result
         } else {
             let mut result = data;
             for (from, to) in &self.pairs {
@@ -98,31 +92,38 @@ impl MessageReplacer {
         };
 
         let mut changed = false;
-        let mut buffer = vec![0u8; DEFAULT_STREAM_CHUNK_SIZE];
-        let mut leftover = Vec::new();
-
-        loop {
-            let n = reader.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-
-            let mut chunk = Vec::with_capacity(n + leftover.len());
-            chunk.extend_from_slice(&leftover);
-            chunk.extend_from_slice(&buffer[..n]);
-            leftover.clear();
-
-            let input = String::from_utf8_lossy(&chunk);
-            let result = ac.replace_all(&input, self.replacements.as_slice());
-            let result_bytes = result.into_bytes();
-
-            if result_bytes != chunk {
-                changed = true;
-            }
-            writer.write_all(&result_bytes)?;
-        }
+        ac.try_stream_replace_all_with(reader, writer, |mat, _matched, wtr| {
+            changed = true;
+            let idx = mat.pattern().as_usize();
+            wtr.write_all(
+                self.replacements
+                    .get(idx)
+                    .expect("replacement index should exist"),
+            )
+        })?;
 
         Ok(changed)
+    }
+
+    fn apply_ac_replacements(&self, ac: &AhoCorasick, data: &[u8]) -> (Vec<u8>, bool) {
+        if ac.find(data).is_none() {
+            return (data.to_vec(), false);
+        }
+
+        let mut out = Vec::with_capacity(data.len());
+        let mut last = 0usize;
+        for m in ac.find_iter(data) {
+            out.extend_from_slice(&data[last..m.start()]);
+            let idx = m.pattern().as_usize();
+            out.extend_from_slice(
+                self.replacements
+                    .get(idx)
+                    .expect("replacement index should exist"),
+            );
+            last = m.end();
+        }
+        out.extend_from_slice(&data[last..]);
+        (out, true)
     }
 }
 
@@ -638,6 +639,54 @@ mod tests {
         assert_eq!(
             replace_all_bytes(b"foo foo foo", b"foo", b"bar"),
             b"bar bar bar".to_vec()
+        );
+    }
+
+    #[test]
+    fn message_replacer_aho_corasick_preserves_non_utf8_bytes_without_match() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let path = dir.path().join("rules-ac.txt");
+        write_file(&path, b"foo==>bar\nbaz==>qux\nhello==>world\n");
+
+        let replacer = MessageReplacer::from_file(&path).expect("parse rules");
+        assert!(
+            replacer.supports_streaming(),
+            "3+ rules should enable aho-corasick path"
+        );
+
+        let input = vec![0xff, 0x00, 0xfe, b'A', 0x80, b'B', b'C'];
+        let out = replacer.apply(input.clone());
+        assert_eq!(out, input, "non-utf8 bytes should remain byte-identical");
+    }
+
+    #[test]
+    fn message_replacer_streaming_matches_across_chunk_boundary() {
+        const CHUNK_SIZE: usize = 64 * 1024;
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let path = dir.path().join("rules-streaming.txt");
+        write_file(&path, b"ABCDE==>Z\nunused1==>u\nunused2==>v\n");
+
+        let replacer = MessageReplacer::from_file(&path).expect("parse rules");
+        assert!(
+            replacer.supports_streaming(),
+            "3+ rules should enable aho-corasick path"
+        );
+
+        let mut input = vec![b'x'; CHUNK_SIZE - 2];
+        input.extend_from_slice(b"ABCDE-end");
+        let mut reader = std::io::Cursor::new(input);
+        let mut out = Vec::new();
+
+        let changed = replacer
+            .apply_streaming(&mut reader, &mut out)
+            .expect("streaming replacement should succeed");
+        assert!(changed, "cross-chunk replacement should mark content as changed");
+
+        let mut expected = vec![b'x'; CHUNK_SIZE - 2];
+        expected.extend_from_slice(b"Z-end");
+        assert_eq!(
+            out, expected,
+            "pattern split across read boundary should still be replaced"
         );
     }
 
