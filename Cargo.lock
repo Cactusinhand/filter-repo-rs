@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "filter-repo-rs"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "comfy-table",

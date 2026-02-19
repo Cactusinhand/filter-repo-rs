@@ -778,6 +778,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 print_help(opts.debug_mode);
                 std::process::exit(0);
             }
+            "-V" | "--version" => {
+                print_version();
+                std::process::exit(0);
+            }
             other => {
                 eprintln!("Unknown argument: {}", other);
                 print_help(opts.debug_mode);
@@ -1454,8 +1458,16 @@ fn get_misc_help_section() -> HelpSection {
                 name: "-h, --help".to_string(),
                 description: vec!["Show this help message".to_string()],
             },
+            HelpOption {
+                name: "-V, --version".to_string(),
+                description: vec!["Show version information".to_string()],
+            },
         ],
     }
+}
+
+pub fn print_version() {
+    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 }
 
 pub fn print_help(debug_mode: bool) {
