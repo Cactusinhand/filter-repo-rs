@@ -197,9 +197,10 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     // Wait for git command to complete
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::other(
-            format!("git rev-list --objects --all failed: {}", status),
-        ));
+        return Err(io::Error::other(format!(
+            "git rev-list --objects --all failed: {}",
+            status
+        )));
     }
 
     term_colors::eprintln_color(
@@ -488,9 +489,10 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
     // Wait for git command to complete
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::other(
-            format!("git log --all failed: {}", status),
-        ));
+        return Err(io::Error::other(format!(
+            "git log --all failed: {}",
+            status
+        )));
     }
 
     // Clear progress line and show final result
@@ -569,9 +571,10 @@ fn gather_max_parents(repo: &Path) -> io::Result<usize> {
 
     let status = child.wait()?;
     if !status.success() {
-        return Err(io::Error::other(
-            format!("git rev-list --parents --all failed: {}", status),
-        ));
+        return Err(io::Error::other(format!(
+            "git rev-list --parents --all failed: {}",
+            status
+        )));
     }
 
     Ok(max_parents)
@@ -986,9 +989,7 @@ fn run_git_capture(repo: &Path, args: &[&str]) -> io::Result<String> {
         .stderr(Stdio::inherit())
         .output()?;
     if !out.status.success() {
-        return Err(io::Error::other(
-            format!("git {:?} failed", args),
-        ));
+        return Err(io::Error::other(format!("git {:?} failed", args)));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }

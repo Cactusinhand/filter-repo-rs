@@ -1987,9 +1987,9 @@ fn check_remote_configuration_with_context(
             String::new()
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to get remote configuration: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to get remote configuration: {e}"
+            ))));
         }
     };
     let remote_trim = remotes.trim();
@@ -2017,9 +2017,9 @@ fn check_stash_presence_with_context(ctx: &SanityCheckContext) -> Result<(), San
             // If command fails with non-zero exit, no stash exists
             Ok(())
         }
-        Err(e) => Err(SanityCheckError::IoError(io::Error::other(
-            format!("Failed to check stash status: {e}"),
-        ))),
+        Err(e) => Err(SanityCheckError::IoError(io::Error::other(format!(
+            "Failed to check stash status: {e}"
+        )))),
     }
 }
 
@@ -2034,9 +2034,9 @@ fn check_working_tree_cleanliness_with_context(
         Ok(_) => false, // Command succeeded, no staged changes
         Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check staged changes: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check staged changes: {e}"
+            ))));
         }
     };
 
@@ -2045,9 +2045,9 @@ fn check_working_tree_cleanliness_with_context(
         Ok(_) => false, // Command succeeded, no unstaged changes
         Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check unstaged changes: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check unstaged changes: {e}"
+            ))));
         }
     };
 
@@ -2089,9 +2089,9 @@ fn check_untracked_files_with_context(ctx: &SanityCheckContext) -> Result<(), Sa
             // If ls-files fails, assume no untracked files
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check untracked files: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check untracked files: {e}"
+            ))));
         }
     }
 
@@ -2115,9 +2115,9 @@ fn check_worktree_count_with_context(ctx: &SanityCheckContext) -> Result<(), San
             // If worktree command fails, assume single worktree
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check worktree count: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check worktree count: {e}"
+            ))));
         }
     }
 
@@ -2466,9 +2466,9 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                 git_start.elapsed(),
                 &Err(e.clone()),
             );
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to count objects: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to count objects: {e}"
+            ))));
         }
     }
 
@@ -2528,9 +2528,9 @@ fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
         Ok(_) => false,
         Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check staged changes: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check staged changes: {e}"
+            ))));
         }
     };
 
@@ -2539,9 +2539,9 @@ fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
         Ok(_) => false,
         Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check unstaged changes: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check unstaged changes: {e}"
+            ))));
         }
     };
     if staged_dirty || unstaged_dirty {
@@ -2567,9 +2567,9 @@ fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
             // Treat as no untracked on benign failures
         }
         Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(
-                format!("Failed to check untracked files: {e}"),
-            )));
+            return Err(SanityCheckError::IoError(io::Error::other(format!(
+                "Failed to check untracked files: {e}"
+            ))));
         }
     }
 

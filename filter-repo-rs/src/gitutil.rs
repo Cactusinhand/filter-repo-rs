@@ -26,11 +26,7 @@ pub fn run_git_with_timeout(
         .arg(cmd.get_program())
         .args(cmd.get_args())
         .output()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run timeout command: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run timeout command: {e}")))?;
 
     // Check if timeout killed the process (exit code 124)
     if output.status.code() == Some(124) {
@@ -100,9 +96,7 @@ fn capture_git_help(args: &[&str]) -> io::Result<String> {
         .output()?;
     let status_code = output.status.code();
     if !output.status.success() && status_code != Some(129) {
-        return Err(io::Error::other(
-            format!("'git {}' failed", args.join(" ")),
-        ));
+        return Err(io::Error::other(format!("'git {}' failed", args.join(" "))));
     }
     let mut buf = output.stdout;
     if !output.stderr.is_empty() {
@@ -133,9 +127,10 @@ pub fn git_dir(repo: &Path) -> io::Result<PathBuf> {
         .stderr(Stdio::inherit())
         .output()?;
     if !out.status.success() {
-        return Err(io::Error::other(
-            format!("'git -C {:?} rev-parse --git-dir' failed", repo),
-        ));
+        return Err(io::Error::other(format!(
+            "'git -C {:?} rev-parse --git-dir' failed",
+            repo
+        )));
     }
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     let p = PathBuf::from(&s);
@@ -182,9 +177,10 @@ pub fn get_all_refs(repo_path: &Path) -> io::Result<HashMap<String, String>> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::other(
-            format!("'git -C {:?} for-each-ref' failed", repo_path),
-        ));
+        return Err(io::Error::other(format!(
+            "'git -C {:?} for-each-ref' failed",
+            repo_path
+        )));
     }
 
     let mut refs = HashMap::new();
@@ -225,12 +221,10 @@ pub fn is_bare_repository(repo_path: &Path) -> io::Result<bool> {
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::other(
-            format!(
-                "'git -C {:?} rev-parse --is-bare-repository' failed",
-                repo_path
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "'git -C {:?} rev-parse --is-bare-repository' failed",
+            repo_path
+        )));
     }
 
     let result = String::from_utf8_lossy(&output.stdout)

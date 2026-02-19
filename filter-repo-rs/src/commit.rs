@@ -680,22 +680,22 @@ impl MailmapRewriter {
             }
 
             if let Some(caps) = parser.captures(line) {
-                let new_name = caps
-                    .get(1)
-                    .and_then(|m| {
-                        let s = m.as_str().trim();
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(s.to_string())
-                        }
-                    });
+                let new_name = caps.get(1).and_then(|m| {
+                    let s = m.as_str().trim();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                });
 
                 let new_email = caps.get(2).map(|m| m.as_str().trim().to_string());
 
                 let old_email = if let Some(m) = caps.get(3) {
                     Some(m.as_str().trim())
-                } else { caps.get(5).map(|m| m.as_str().trim()) };
+                } else {
+                    caps.get(5).map(|m| m.as_str().trim())
+                };
 
                 if let Some(old_email_str) = old_email {
                     let escaped = regex::escape(old_email_str);

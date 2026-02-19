@@ -195,11 +195,7 @@ impl ShortHashMapper {
             .size_limit(10 << 20)
             .dfa_size_limit(10 << 20)
             .build()
-            .map_err(|e| {
-                io::Error::other(
-                    format!("invalid short-hash regex: {e}"),
-                )
-            })?;
+            .map_err(|e| io::Error::other(format!("invalid short-hash regex: {e}")))?;
         Ok(Some(Self {
             lookup,
             prefix_index,
@@ -679,7 +675,10 @@ mod tests {
         let changed = replacer
             .apply_streaming(&mut reader, &mut out)
             .expect("streaming replacement should succeed");
-        assert!(changed, "cross-chunk replacement should mark content as changed");
+        assert!(
+            changed,
+            "cross-chunk replacement should mark content as changed"
+        );
 
         let mut expected = vec![b'x'; CHUNK_SIZE - 2];
         expected.extend_from_slice(b"Z-end");

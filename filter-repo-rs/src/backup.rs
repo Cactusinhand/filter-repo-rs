@@ -16,9 +16,10 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
     }
 
     let git_dir = git_dir(&opts.source).map_err(|e| {
-        io::Error::other(
-            format!("failed to resolve git dir for {:?}: {e}", opts.source),
-        )
+        io::Error::other(format!(
+            "failed to resolve git dir for {:?}: {e}",
+            opts.source
+        ))
     })?;
 
     let timestamp = SystemTime::now()
@@ -30,11 +31,9 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
         .unwrap_or(OffsetDateTime::UNIX_EPOCH);
     const FORMAT: &[FormatItem<'_>] =
         format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:9]");
-    let formatted = datetime.format(FORMAT).map_err(|e| {
-        io::Error::other(
-            format!("failed to format backup timestamp: {e}"),
-        )
-    })?;
+    let formatted = datetime
+        .format(FORMAT)
+        .map_err(|e| io::Error::other(format!("failed to format backup timestamp: {e}")))?;
     let bundle_name = format!("backup-{formatted}.bundle");
 
     let bundle_path = match &opts.backup_path {
@@ -78,16 +77,12 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
         .arg(&bundle_path)
         .args(opts.refs.iter())
         .status()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run git bundle create: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run git bundle create: {e}")))?;
 
     if !status.success() {
-        return Err(io::Error::other(
-            format!("git bundle create failed with status {status}"),
-        ));
+        return Err(io::Error::other(format!(
+            "git bundle create failed with status {status}"
+        )));
     }
 
     Ok(Some(bundle_path))

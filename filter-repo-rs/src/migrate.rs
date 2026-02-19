@@ -16,11 +16,7 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg(&opts.source)
         .arg("remote")
         .output()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run git remote: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run git remote: {e}")))?;
     if !remotes.status.success() {
         eprintln!("WARNING: --sensitive: git remote command failed, skipping ref fetch");
         return Ok(());
@@ -44,11 +40,7 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg("origin")
         .arg("+refs/*:refs/*")
         .status()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run git fetch: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run git fetch: {e}")))?;
     if !status.success() {
         return Err(io::Error::other(
             "git fetch command failed with non-zero exit status",
@@ -104,24 +96,18 @@ pub fn migrate_origin_to_heads(opts: &Options) -> io::Result<()> {
     if let Some(stdin) = child.stdin.as_mut() {
         for (r, h) in to_create.iter() {
             writeln!(stdin, "create {} {}", r, h).map_err(|e| {
-                io::Error::other(
-                    format!("failed to write to git update-ref stdin: {e}"),
-                )
+                io::Error::other(format!("failed to write to git update-ref stdin: {e}"))
             })?;
         }
         for (r, h) in to_delete.iter() {
             writeln!(stdin, "delete {} {}", r, h).map_err(|e| {
-                io::Error::other(
-                    format!("failed to write to git update-ref stdin: {e}"),
-                )
+                io::Error::other(format!("failed to write to git update-ref stdin: {e}"))
             })?;
         }
     }
-    let status = child.wait().map_err(|e| {
-        io::Error::other(
-            format!("failed to wait for git update-ref: {e}"),
-        )
-    })?;
+    let status = child
+        .wait()
+        .map_err(|e| io::Error::other(format!("failed to wait for git update-ref: {e}")))?;
     if !status.success() {
         return Err(io::Error::other(
             "git update-ref command failed with non-zero exit status",
@@ -140,11 +126,7 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
         .arg(&opts.target)
         .arg("remote")
         .output()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run git remote: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run git remote: {e}")))?;
     if !remotes.status.success() {
         return Ok(());
     }
@@ -169,11 +151,7 @@ pub fn remove_origin_remote_if_applicable(opts: &Options) -> io::Result<()> {
         .arg("rm")
         .arg("origin")
         .status()
-        .map_err(|e| {
-            io::Error::other(
-                format!("failed to run git remote rm: {e}"),
-            )
-        })?;
+        .map_err(|e| io::Error::other(format!("failed to run git remote rm: {e}")))?;
     if !status.success() {
         return Err(io::Error::other(
             "git remote rm command failed with non-zero exit status",
