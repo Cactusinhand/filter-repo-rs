@@ -163,6 +163,11 @@ pub struct Options {
     pub reset: bool,
     pub replace_message_file: Option<PathBuf>,
     pub replace_text_file: Option<PathBuf>,
+    // Author/committer rewriting
+    pub mailmap_file: Option<PathBuf>,
+    pub author_rewrite_file: Option<PathBuf>,
+    pub committer_rewrite_file: Option<PathBuf>,
+    pub email_rewrite_file: Option<PathBuf>,
     pub paths: Vec<Vec<u8>>,
     pub invert_paths: bool,
     pub path_globs: Vec<Vec<u8>>,
@@ -211,6 +216,10 @@ impl Default for Options {
             reset: true,
             replace_message_file: None,
             replace_text_file: None,
+            mailmap_file: None,
+            author_rewrite_file: None,
+            committer_rewrite_file: None,
+            email_rewrite_file: None,
             paths: Vec::new(),
             invert_paths: false,
             path_globs: Vec::new(),
@@ -515,6 +524,22 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             "--replace-text" => {
                 let p = it.next().expect("--replace-text requires file");
                 opts.replace_text_file = Some(PathBuf::from(p));
+            }
+            "--mailmap" => {
+                let p = it.next().expect("--mailmap requires file");
+                opts.mailmap_file = Some(PathBuf::from(p));
+            }
+            "--author-rewrite" => {
+                let p = it.next().expect("--author-rewrite requires file");
+                opts.author_rewrite_file = Some(PathBuf::from(p));
+            }
+            "--committer-rewrite" => {
+                let p = it.next().expect("--committer-rewrite requires file");
+                opts.committer_rewrite_file = Some(PathBuf::from(p));
+            }
+            "--email-rewrite" => {
+                let p = it.next().expect("--email-rewrite requires file");
+                opts.email_rewrite_file = Some(PathBuf::from(p));
             }
             "--path" => {
                 let raw = it.next().expect("--path requires value");
@@ -1165,6 +1190,35 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--replace-message FILE".to_string(),
                     description: vec!["Literal replacements in commit/tag messages".to_string()],
+                },
+                HelpOption {
+                    name: "--mailmap FILE".to_string(),
+                    description: vec![
+                        "Use mailmap file to rewrite author/committer names and emails".to_string(),
+                        "Format: New Name <new@email> <old@email>".to_string(),
+                        "(see git-filter-repo and git-shortlog documentation)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--author-rewrite FILE".to_string(),
+                    description: vec![
+                        "Rewrite author name/email using rules file".to_string(),
+                        "Format: oldName==>newName (one per line)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--committer-rewrite FILE".to_string(),
+                    description: vec![
+                        "Rewrite committer name/email using rules file".to_string(),
+                        "Format: oldName==>newName (one per line)".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--email-rewrite FILE".to_string(),
+                    description: vec![
+                        "Rewrite email addresses using rules file".to_string(),
+                        "Format: oldEmail==>newEmail (one per line)".to_string(),
+                    ],
                 },
                 HelpOption {
                     name: "--tag-rename OLD:NEW".to_string(),

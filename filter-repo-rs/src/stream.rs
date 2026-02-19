@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rayon::prelude::*;
 
+use crate::commit::{AuthorRewriter, MailmapRewriter};
 use crate::error::Result as FilterRepoResult;
 use crate::gitutil::git_dir;
 use crate::limits::parse_data_size_header;
@@ -295,16 +296,16 @@ impl BlobSizeTracker {
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         let mut child = cmd.spawn().map_err(|e| {
-            io::Error::other(
-                format!("failed to spawn git cat-file --batch-check: {e}"),
-            )
+            io::Error::other(format!("failed to spawn git cat-file --batch-check: {e}"))
         })?;
-        let stdin = child.stdin.take().ok_or_else(|| {
-            io::Error::other("missing stdin for cat-file batch")
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            io::Error::other("missing stdout for cat-file batch")
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("missing stdin for cat-file batch"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("missing stdout for cat-file batch"))?;
         self.batch = Some(BatchCat {
             child,
             stdin: BufWriter::new(stdin),
@@ -315,11 +316,10 @@ impl BlobSizeTracker {
 
     fn query_size_via_batch(&mut self, sha: &[u8]) -> io::Result<usize> {
         self.ensure_batch()?;
-        let batch = self.batch.as_mut().ok_or_else(|| {
-            io::Error::other(
-                "batch process not initialized before query",
-            )
-        })?;
+        let batch = self
+            .batch
+            .as_mut()
+            .ok_or_else(|| io::Error::other("batch process not initialized before query"))?;
         // Write request (sha + newline)
         batch.stdin.write_all(sha)?;
         batch.stdin.write_all(b"\n")?;
@@ -363,16 +363,13 @@ impl BlobSizeTracker {
             .arg("--batch-check=%(objectname) %(objecttype) %(objectsize)")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| {
-            io::Error::other(
-                format!("failed to run git cat-file batch: {e}"),
-            )
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            io::Error::other(
-                "missing stdout from git cat-file batch",
-            )
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| io::Error::other(format!("failed to run git cat-file batch: {e}")))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("missing stdout from git cat-file batch"))?;
         let mut reader = BufReader::new(stdout);
         let mut line = Vec::with_capacity(128);
         loop {
@@ -420,9 +417,9 @@ impl BlobSizeTracker {
         let status = child.wait()?;
         if !status.success() {
             let msg = String::from_utf8_lossy(&stderr_buf);
-            return Err(io::Error::other(
-                format!("git cat-file batch failed: {msg}"),
-            ));
+            return Err(io::Error::other(format!(
+                "git cat-file batch failed: {msg}"
+            )));
         }
         self.prefetch_ok = true;
         Ok(())
@@ -475,14 +472,10 @@ impl Drop for BatchCat {
 
 pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let target_git_dir = git_dir(&opts.target).map_err(|e| {
-        io::Error::other(
-            format!("Target {:?} is not a git repo: {e}", opts.target),
-        )
+        io::Error::other(format!("Target {:?} is not a git repo: {e}", opts.target))
     })?;
     let _ = git_dir(&opts.source).map_err(|e| {
-        io::Error::other(
-            format!("Source {:?} is not a git repo: {e}", opts.source),
-        )
+        io::Error::other(format!("Source {:?} is not a git repo: {e}", opts.source))
     })?;
 
     let debug_dir = target_git_dir.join("filter-repo");
@@ -502,28 +495,24 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     };
 
     let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
-    let mut fe = fe_cmd.spawn().map_err(|e| {
-        io::Error::other(
-            format!("failed to spawn git fast-export: {e}"),
-        )
-    })?;
+    let mut fe = fe_cmd
+        .spawn()
+        .map_err(|e| io::Error::other(format!("failed to spawn git fast-export: {e}")))?;
     let mut fi = if opts.dry_run {
         None
     } else {
         Some(
             crate::pipes::build_fast_import_cmd(opts)
                 .spawn()
-                .map_err(|e| {
-                    io::Error::other(
-                        format!("failed to spawn git fast-import: {e}"),
-                    )
-                })?,
+                .map_err(|e| io::Error::other(format!("failed to spawn git fast-import: {e}")))?,
         )
     };
 
-    let mut fe_out = BufReader::new(fe.stdout.take().ok_or_else(|| {
-        io::Error::other("git fast-export produced no stdout")
-    })?);
+    let mut fe_out = BufReader::new(
+        fe.stdout
+            .take()
+            .ok_or_else(|| io::Error::other("git fast-export produced no stdout"))?,
+    );
     let mut fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
     {
         child.stdin.take().map(BufWriter::new)
@@ -538,36 +527,57 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         };
 
     let replacer = match &opts.replace_message_file {
-        Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
-            io::Error::other(
-                format!("failed to read --replace-message: {e}"),
-            )
-        })?),
+        Some(p) => Some(
+            MessageReplacer::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
+        ),
         None => None,
     };
     let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
-        Some(p) => MsgRegexReplacer::from_file(p).map_err(|e| {
-            io::Error::other(
-                format!("failed to read --replace-message: {e}"),
-            )
-        })?,
+        Some(p) => MsgRegexReplacer::from_file(p)
+            .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
         None => None,
     };
     let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
     let content_replacer = match &opts.replace_text_file {
-        Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
-            io::Error::other(
-                format!("failed to read --replace-text: {e}"),
-            )
-        })?),
+        Some(p) => Some(
+            MessageReplacer::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
+        ),
         None => None,
     };
     let content_regex_replacer: Option<BlobRegexReplacer> = match &opts.replace_text_file {
-        Some(p) => BlobRegexReplacer::from_file(p).map_err(|e| {
-            io::Error::other(
-                format!("failed to read --replace-text: {e}"),
-            )
-        })?,
+        Some(p) => BlobRegexReplacer::from_file(p)
+            .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
+        None => None,
+    };
+
+    let author_rewriter = match &opts.author_rewrite_file {
+        Some(p) => Some(
+            AuthorRewriter::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --author-rewrite: {e}")))?,
+        ),
+        None => None,
+    };
+    let committer_rewriter =
+        match &opts.committer_rewrite_file {
+            Some(p) => Some(AuthorRewriter::from_file(p).map_err(|e| {
+                io::Error::other(format!("failed to read --committer-rewrite: {e}"))
+            })?),
+            None => None,
+        };
+    let email_rewriter = match &opts.email_rewrite_file {
+        Some(p) => Some(
+            AuthorRewriter::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --email-rewrite: {e}")))?,
+        ),
+        None => None,
+    };
+    let mailmap_rewriter = match &opts.mailmap_file {
+        Some(p) => Some(
+            MailmapRewriter::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --mailmap: {e}")))?,
+        ),
         None => None,
     };
 
@@ -608,11 +618,8 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let mut oversize_marks: HashSet<u32> = HashSet::new();
     let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
     let strip_sha_lookup = match &opts.strip_blobs_with_ids {
-        Some(path) => StripShaLookup::from_path(path).map_err(|e| {
-            io::Error::other(
-                format!("failed to load --strip-blobs-with-ids: {e}"),
-            )
-        })?,
+        Some(path) => StripShaLookup::from_path(path)
+            .map_err(|e| io::Error::other(format!("failed to load --strip-blobs-with-ids: {e}")))?,
         None => StripShaLookup::empty(),
     };
     let mut last_blob_orig_sha: Option<Vec<u8>> = None;
@@ -1064,9 +1071,47 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     continue;
                 }
             }
+
+            let processed_line = if in_commit {
+                let is_author_line = line.starts_with(b"author ");
+                let is_committer_line = line.starts_with(b"committer ");
+
+                if is_author_line || is_committer_line {
+                    let mut rewritten = line.clone();
+
+                    if let Some(mailmap) = mailmap_rewriter.as_ref() {
+                        rewritten = crate::commit::rewrite_mailmap_line(&rewritten, Some(mailmap));
+                    } else {
+                        if let Some(email_rw) = email_rewriter.as_ref() {
+                            rewritten =
+                                crate::commit::rewrite_email_line(&rewritten, Some(email_rw));
+                        }
+                        if is_author_line {
+                            if let Some(author_rw) = author_rewriter.as_ref() {
+                                rewritten =
+                                    crate::commit::rewrite_author_line(&rewritten, Some(author_rw));
+                            }
+                        }
+                        if is_committer_line {
+                            if let Some(committer_rw) = committer_rewriter.as_ref() {
+                                rewritten = crate::commit::rewrite_author_line(
+                                    &rewritten,
+                                    Some(committer_rw),
+                                );
+                            }
+                        }
+                    }
+                    rewritten
+                } else {
+                    line.clone()
+                }
+            } else {
+                line.clone()
+            };
+
             let short_mapper = short_hash_mapper.as_ref();
             match crate::commit::process_commit_line(
-                &line,
+                &processed_line,
                 opts,
                 &mut fe_out,
                 orig_file_opt.as_mut().map(|w| w as &mut dyn Write),

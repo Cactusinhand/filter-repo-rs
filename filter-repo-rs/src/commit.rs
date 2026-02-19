@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, HashMap};
-use std::io::BufReader;
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::Path;
 use std::process::ChildStdout;
+
+use aho_corasick::AhoCorasick;
 
 use crate::filechange;
 use crate::limits::parse_data_size_header;
@@ -565,10 +568,298 @@ fn resolve_canonical_mark(mark: u32, alias_map: &HashMap<u32, u32>) -> u32 {
     current
 }
 
+pub struct AuthorRewriter {
+    patterns: Vec<String>,
+    replacements: Vec<String>,
+    ac: AhoCorasick,
+}
+
+impl AuthorRewriter {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        Self::from_reader(reader)
+    }
+
+    pub fn from_reader<R: BufRead>(reader: R) -> io::Result<Self> {
+        let mut patterns = Vec::new();
+        let mut replacements = Vec::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some((old, new)) = line.split_once("==>") {
+                let old = old.trim();
+                let new = new.trim();
+                if !old.is_empty() {
+                    patterns.push(old.to_string());
+                    replacements.push(new.to_string());
+                }
+            }
+        }
+
+        if patterns.is_empty() {
+            return Ok(Self {
+                patterns: vec![String::new()],
+                replacements: vec![String::new()],
+                ac: AhoCorasick::new(&[""]).unwrap(),
+            });
+        }
+
+        let ac = AhoCorasick::new(&patterns)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        Ok(Self {
+            patterns,
+            replacements,
+            ac,
+        })
+    }
+
+    pub fn rewrite(&self, text: &[u8]) -> Vec<u8> {
+        if self.patterns.is_empty() || (self.patterns.len() == 1 && self.patterns[0].is_empty()) {
+            return text.to_vec();
+        }
+        let text_str = match std::str::from_utf8(text) {
+            Ok(s) => s,
+            Err(_) => return text.to_vec(),
+        };
+        let result = self.ac.replace_all(text_str, &self.replacements);
+        result.into_bytes()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty() || (self.patterns.len() == 1 && self.patterns[0].is_empty())
+    }
+}
+
+impl Clone for AuthorRewriter {
+    fn clone(&self) -> Self {
+        Self {
+            patterns: self.patterns.clone(),
+            replacements: self.replacements.clone(),
+            ac: AhoCorasick::new(&self.patterns).unwrap(),
+        }
+    }
+}
+
+use regex::Regex as RegexStr;
+
+pub struct MailmapRewriter {
+    parser: RegexStr,
+    old_email_patterns: Vec<RegexStr>,
+    new_names: Vec<String>,
+    new_emails: Vec<String>,
+}
+
+impl MailmapRewriter {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        Self::from_reader(reader)
+    }
+
+    pub fn from_reader<R: BufRead>(reader: R) -> io::Result<Self> {
+        let parser =
+            RegexStr::new(r"^(?:([^<]*?)\s+)?<([^>]+)>\s+(?:<([^>]+)>|([^<]*?)\s+<([^>]+)>)")
+                .unwrap();
+
+        let mut old_email_patterns = Vec::new();
+        let mut new_names = Vec::new();
+        let mut new_emails = Vec::new();
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some(caps) = parser.captures(line) {
+                let new_name = caps
+                    .get(1)
+                    .map(|m| {
+                        let s = m.as_str().trim();
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s.to_string())
+                        }
+                    })
+                    .flatten();
+
+                let new_email = caps.get(2).map(|m| m.as_str().trim().to_string());
+
+                let old_email = if let Some(m) = caps.get(3) {
+                    Some(m.as_str().trim())
+                } else if let Some(m) = caps.get(5) {
+                    Some(m.as_str().trim())
+                } else {
+                    None
+                };
+
+                if let Some(old_email_str) = old_email {
+                    let escaped = regex::escape(old_email_str);
+                    if let Ok(re) = RegexStr::new(&format!("^{}$", escaped)) {
+                        old_email_patterns.push(re);
+                        new_names.push(new_name.unwrap_or_default());
+                        new_emails.push(new_email.unwrap_or_default());
+                    }
+                }
+            }
+        }
+
+        Ok(Self {
+            parser,
+            old_email_patterns,
+            new_names,
+            new_emails,
+        })
+    }
+
+    pub fn rewrite_line(&self, line: &[u8]) -> Vec<u8> {
+        let line_str = match std::str::from_utf8(line) {
+            Ok(s) => s,
+            Err(_) => return line.to_vec(),
+        };
+
+        let header_len = if line.starts_with(b"author ") {
+            b"author ".len()
+        } else if line.starts_with(b"committer ") {
+            b"committer ".len()
+        } else {
+            return line.to_vec();
+        };
+        let identity = &line_str[header_len..];
+
+        if let Some(email_start_rel) = identity.find('<') {
+            let email_start = email_start_rel + 1;
+            if let Some(close_pos_rel) = identity[email_start_rel..].find('>') {
+                let close_pos = email_start_rel + close_pos_rel;
+                let old_name = identity[..email_start_rel].trim_end();
+                let old_email = &identity[email_start..close_pos];
+                let suffix = &identity[close_pos + 1..];
+
+                for (i, pattern) in self.old_email_patterns.iter().enumerate() {
+                    if pattern.is_match(old_email) {
+                        let mut result = String::new();
+                        result.push_str(&line_str[..header_len]);
+
+                        let new_name = &self.new_names[i];
+                        let final_name = if new_name.is_empty() {
+                            old_name
+                        } else {
+                            new_name.as_str()
+                        };
+                        if !final_name.is_empty() {
+                            result.push_str(final_name);
+                            result.push(' ');
+                        }
+
+                        let new_email = &self.new_emails[i];
+                        let final_email = if new_email.is_empty() {
+                            old_email
+                        } else {
+                            new_email.as_str()
+                        };
+                        result.push('<');
+                        result.push_str(final_email);
+                        result.push('>');
+
+                        result.push_str(suffix);
+
+                        return result.into_bytes();
+                    }
+                }
+            }
+        }
+
+        line.to_vec()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.old_email_patterns.is_empty()
+    }
+}
+
+impl Clone for MailmapRewriter {
+    fn clone(&self) -> Self {
+        Self {
+            parser: RegexStr::new(self.parser.as_str()).unwrap(),
+            old_email_patterns: self
+                .old_email_patterns
+                .iter()
+                .map(|r| RegexStr::new(r.as_str()).unwrap())
+                .collect(),
+            new_names: self.new_names.clone(),
+            new_emails: self.new_emails.clone(),
+        }
+    }
+}
+
+pub fn rewrite_author_line(line: &[u8], rewriter: Option<&AuthorRewriter>) -> Vec<u8> {
+    if let Some(rw) = rewriter {
+        if rw.is_empty() {
+            return line.to_vec();
+        }
+        rw.rewrite(line)
+    } else {
+        line.to_vec()
+    }
+}
+
+pub fn rewrite_email_line(line: &[u8], rewriter: Option<&AuthorRewriter>) -> Vec<u8> {
+    if let Some(rw) = rewriter {
+        if rw.is_empty() {
+            return line.to_vec();
+        }
+
+        let line_str = match std::str::from_utf8(line) {
+            Ok(s) => s,
+            Err(_) => return line.to_vec(),
+        };
+
+        if let Some(start) = line_str.find('<') {
+            if let Some(end) = line_str[start..].find('>') {
+                let before = &line[..start];
+                let email = &line[start + 1..start + end];
+                let after = &line[start + end + 1..];
+
+                let rewritten_email = rw.rewrite(email);
+                let mut result =
+                    Vec::with_capacity(before.len() + rewritten_email.len() + after.len() + 3);
+                result.extend_from_slice(before);
+                result.push(b'<');
+                result.extend_from_slice(&rewritten_email);
+                result.push(b'>');
+                result.extend_from_slice(after);
+                return result;
+            }
+        }
+    }
+    line.to_vec()
+}
+
+pub fn rewrite_mailmap_line(line: &[u8], rewriter: Option<&MailmapRewriter>) -> Vec<u8> {
+    if let Some(rw) = rewriter {
+        if rw.is_empty() {
+            return line.to_vec();
+        }
+        rw.rewrite_line(line)
+    } else {
+        line.to_vec()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::{HashMap, HashSet};
+    use std::io::Cursor;
 
     #[test]
     fn finalize_promotes_first_remaining_merge_to_from() {
@@ -619,5 +910,31 @@ mod tests {
             b"from deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n"
         );
         assert_eq!(first_parent_mark, None);
+    }
+
+    #[test]
+    fn mailmap_rewrite_replaces_name_and_email_in_author_line() {
+        let rw = MailmapRewriter::from_reader(Cursor::new(
+            "New Name <new@example.com> <old@example.com>\n",
+        ))
+        .unwrap();
+        let line = b"author Old Name <old@example.com> 1700000000 +0800\n";
+        let rewritten = rw.rewrite_line(line);
+        assert_eq!(
+            rewritten,
+            b"author New Name <new@example.com> 1700000000 +0800\n"
+        );
+    }
+
+    #[test]
+    fn mailmap_rewrite_preserves_name_when_rule_has_only_new_email() {
+        let rw = MailmapRewriter::from_reader(Cursor::new("<new@example.com> <old@example.com>\n"))
+            .unwrap();
+        let line = b"author Old Name <old@example.com> 1700000000 +0800\n";
+        let rewritten = rw.rewrite_line(line);
+        assert_eq!(
+            rewritten,
+            b"author Old Name <new@example.com> 1700000000 +0800\n"
+        );
     }
 }
