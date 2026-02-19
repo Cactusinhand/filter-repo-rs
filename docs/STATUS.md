@@ -30,6 +30,14 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - Message Editing
   - `--replace-message FILE`: literal and regex (via `regex:` lines) byte-based replacements applied to commit and tag messages.
 
+- Author/Committer Identity Rewriting
+  - `--mailmap FILE`: rewrites author/committer identity lines using mailmap-style mappings.
+  - `--author-rewrite FILE`: rewrites author identity text with `old==>new` rules.
+  - `--committer-rewrite FILE`: rewrites committer identity text with `old==>new` rules.
+  - `--email-rewrite FILE`: rewrites only email portions inside identity lines with `old==>new` rules.
+  - Precedence: when `--mailmap` is provided, mailmap rewriting is applied and the explicit
+    author/committer/email rewrite files are ignored for identity lines.
+
 - Blob Filtering
   - `--replace-text FILE`: literal byte-based replacements applied to blob contents.
   - Regex and glob replacements in `--replace-text` are supported via `regex:` and `glob:` rules

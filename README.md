@@ -13,6 +13,7 @@
 | Need to extract subdirectory as new repo | `filter-repo-rs --subdirectory-filter frontend`         |
 | Bulk rename tags/branches                | `filter-repo-rs --tag-rename v1.:legacy/v1.`            |
 | Remove specific file from all history    | `filter-repo-rs --path docs/secret.md --invert-paths`   |
+| Normalize author/committer identities    | `filter-repo-rs --mailmap .mailmap`                     |
 | Analyze repo health                      | `filter-repo-rs --analyze`                              |
 
 ## Quick Examples
@@ -56,6 +57,25 @@ filter-repo-rs --to-subdirectory-filter packages/core
 # Bulk rename paths
 filter-repo-rs --path-rename old/:new/
 ```
+
+### Rewrite Author/Committer Identities
+
+```sh
+# Option A: Use .mailmap style rules
+# Format: New Name <new@email> <old@email>
+filter-repo-rs --mailmap .mailmap --write-report
+
+# Option B: Use explicit rewrite files
+# author.txt / committer.txt: oldName==>newName
+# email.txt: oldEmail==>newEmail
+filter-repo-rs --author-rewrite author.txt \
+  --committer-rewrite committer.txt \
+  --email-rewrite email.txt \
+  --write-report
+```
+
+Note: `--mailmap` takes precedence. If `--mailmap` is provided, `--author-rewrite`,
+`--committer-rewrite`, and `--email-rewrite` are ignored for identity lines.
 
 ## Safety First
 
@@ -128,7 +148,32 @@ filter-repo-rs --replace-message messages.txt --write-report
 </details>
 
 <details>
-<summary>3. Remove large files / slim repo</summary>
+<summary>3. Rewrite author/committer identity history</summary>
+
+```sh
+# .mailmap
+Jane Doe <jane@company.com> <jane@users.noreply.github.com>
+
+filter-repo-rs --mailmap .mailmap --write-report
+```
+
+```sh
+# author-rules.txt / committer-rules.txt
+old name==>new name
+
+# email-rules.txt
+old@email.com==>new@email.com
+
+filter-repo-rs --author-rewrite author-rules.txt \
+  --committer-rewrite committer-rules.txt \
+  --email-rewrite email-rules.txt \
+  --write-report
+```
+
+</details>
+
+<details>
+<summary>4. Remove large files / slim repo</summary>
 
 ```sh
 # By size threshold
@@ -141,7 +186,7 @@ filter-repo-rs --strip-blobs-with-ids big-oids.txt --write-report
 </details>
 
 <details>
-<summary>4. Rename tags/branches in bulk</summary>
+<summary>5. Rename tags/branches in bulk</summary>
 
 ```sh
 filter-repo-rs --tag-rename v1.:legacy/v1.
@@ -151,7 +196,7 @@ filter-repo-rs --branch-rename feature/:exp/
 </details>
 
 <details>
-<summary>5. Restructure directory layout</summary>
+<summary>6. Restructure directory layout</summary>
 
 ```sh
 # Extract subdirectory as new root
@@ -167,7 +212,7 @@ filter-repo-rs --path-rename old/:new/
 </details>
 
 <details>
-<summary>6. Remove specific files from history</summary>
+<summary>7. Remove specific files from history</summary>
 
 ```sh
 # Single file
@@ -183,7 +228,7 @@ filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths
 </details>
 
 <details>
-<summary>7. CI health checks</summary>
+<summary>8. CI health checks</summary>
 
 ```sh
 filter-repo-rs --analyze --analyze-json

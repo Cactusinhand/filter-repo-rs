@@ -13,6 +13,7 @@
 | 想把子目录拆成独立仓库  | `filter-repo-rs --subdirectory-filter frontend`         |
 | 批量改 tag/branch 前缀  | `filter-repo-rs --tag-rename v1.:legacy/v1.`            |
 | 删除历史中的某个文件    | `filter-repo-rs --path docs/secret.md --invert-paths`   |
+| 统一作者/提交者身份信息 | `filter-repo-rs --mailmap .mailmap`                     |
 | 分析仓库健康度          | `filter-repo-rs --analyze`                              |
 
 ## 快速示例
@@ -56,6 +57,25 @@ filter-repo-rs --to-subdirectory-filter packages/core
 # 批量重命名路径
 filter-repo-rs --path-rename old/:new/
 ```
+
+### 重写作者/提交者身份
+
+```sh
+# 方案 A: 使用 .mailmap 规则
+# 格式: New Name <new@email> <old@email>
+filter-repo-rs --mailmap .mailmap --write-report
+
+# 方案 B: 使用显式规则文件
+# author.txt / committer.txt: oldName==>newName
+# email.txt: oldEmail==>newEmail
+filter-repo-rs --author-rewrite author.txt \
+  --committer-rewrite committer.txt \
+  --email-rewrite email.txt \
+  --write-report
+```
+
+说明：`--mailmap` 优先级更高。若传入 `--mailmap`，则会忽略
+`--author-rewrite`、`--committer-rewrite`、`--email-rewrite`。
 
 ## 安全第一
 
@@ -128,7 +148,32 @@ filter-repo-rs --replace-message messages.txt --write-report
 </details>
 
 <details>
-<summary>3. 移除大文件 / 仓库瘦身</summary>
+<summary>3. 重写作者/提交者身份历史</summary>
+
+```sh
+# .mailmap
+Jane Doe <jane@company.com> <jane@users.noreply.github.com>
+
+filter-repo-rs --mailmap .mailmap --write-report
+```
+
+```sh
+# author-rules.txt / committer-rules.txt
+old name==>new name
+
+# email-rules.txt
+old@email.com==>new@email.com
+
+filter-repo-rs --author-rewrite author-rules.txt \
+  --committer-rewrite committer-rules.txt \
+  --email-rewrite email-rules.txt \
+  --write-report
+```
+
+</details>
+
+<details>
+<summary>4. 移除大文件 / 仓库瘦身</summary>
 
 ```sh
 # 按大小阈值
@@ -141,7 +186,7 @@ filter-repo-rs --strip-blobs-with-ids big-oids.txt --write-report
 </details>
 
 <details>
-<summary>4. 批量重命名 tag/branch</summary>
+<summary>5. 批量重命名 tag/branch</summary>
 
 ```sh
 filter-repo-rs --tag-rename v1.:legacy/v1.
@@ -151,7 +196,7 @@ filter-repo-rs --branch-rename feature/:exp/
 </details>
 
 <details>
-<summary>5. 重构目录结构</summary>
+<summary>6. 重构目录结构</summary>
 
 ```sh
 # 提取子目录为新根
@@ -167,7 +212,7 @@ filter-repo-rs --path-rename old/:new/
 </details>
 
 <details>
-<summary>6. 从历史中删除特定文件</summary>
+<summary>7. 从历史中删除特定文件</summary>
 
 ```sh
 # 单个文件
@@ -183,7 +228,7 @@ filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths
 </details>
 
 <details>
-<summary>7. CI 健康检查</summary>
+<summary>8. CI 健康检查</summary>
 
 ```sh
 filter-repo-rs --analyze --analyze-json
