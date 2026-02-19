@@ -117,6 +117,7 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use colored::*;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::error::Result as FilterRepoResult;
@@ -336,9 +337,12 @@ impl fmt::Display for SanityCheckError {
                     }
                 }
                 writeln!(f, "Expected a fresh clone (at most one entry per reflog).",)?;
+                let cmd1 = "git reflog expire --expire=now --all".cyan().bold();
+                let cmd2 = "git gc --prune=now".cyan().bold();
                 writeln!(
                     f,
-                    "Consider using a fresh clone, or run 'git reflog expire --expire=now --all' and 'git gc --prune=now'.",
+                    "Consider using a fresh clone, or run {} and {}.",
+                    cmd1, cmd2,
                 )?;
                 if !show_examples {
                     writeln!(f, "Set FRRS_DEBUG=1 to see example refs.")?;

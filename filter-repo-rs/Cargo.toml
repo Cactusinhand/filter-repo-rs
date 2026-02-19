@@ -17,6 +17,7 @@ unicode-normalization = "0.1"
 crossbeam = "0.8"
 rayon = "1.10"
 aho-corasick = "1.1"
+colored = "2"
 
 [lib]
 name = "filter_repo_rs"
