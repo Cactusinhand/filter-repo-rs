@@ -4,12 +4,14 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+use colored::*;
+use serde::Serialize;
+
 use crate::error::{FilterRepoError, Result};
 use crate::gitutil;
 use crate::migrate;
 use crate::opts::Options;
 use crate::stream::BlobSizeTracker;
-use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct Summary {
@@ -258,7 +260,11 @@ pub fn finalize(
             }
             let status = child.wait()?;
             if !status.success() {
-                eprintln!("warning: git update-ref operations failed: {}", status);
+                eprintln!(
+                    "warning: {} failed: {}",
+                    "git update-ref".cyan().bold(),
+                    status
+                );
             }
         }
     }
@@ -370,7 +376,11 @@ pub fn finalize(
         reset.arg("--hard");
         let status = reset.status()?;
         if !status.success() {
-            eprintln!("warning: 'git reset --hard' failed: {}", status);
+            eprintln!(
+                "warning: {} failed: {}",
+                "git reset --hard".cyan().bold(),
+                status
+            );
         }
     }
 
@@ -567,9 +577,17 @@ fn run_repo_cleanup(target: &Path, aggressive: bool) {
     reflog.arg("--all");
     match reflog.status() {
         Ok(status) if !status.success() => {
-            eprintln!("warning: git reflog expire failed: {}", status);
+            eprintln!(
+                "warning: {} failed: {}",
+                "git reflog expire".cyan().bold(),
+                status
+            );
         }
-        Err(e) => eprintln!("warning: failed to execute git reflog expire: {}", e),
+        Err(e) => eprintln!(
+            "warning: failed to execute {}: {}",
+            "git reflog expire".cyan().bold(),
+            e
+        ),
         _ => {}
     }
 
@@ -584,9 +602,13 @@ fn run_repo_cleanup(target: &Path, aggressive: bool) {
     }
     match gc.status() {
         Ok(status) if !status.success() => {
-            eprintln!("warning: git gc failed: {}", status);
+            eprintln!("warning: {} failed: {}", "git gc".cyan().bold(), status);
         }
-        Err(e) => eprintln!("warning: failed to execute git gc: {}", e),
+        Err(e) => eprintln!(
+            "warning: failed to execute {}: {}",
+            "git gc".cyan().bold(),
+            e
+        ),
         _ => {}
     }
 }

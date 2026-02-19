@@ -3,6 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use colored::*;
+
 /// Default timeout for git commands (5 minutes).
 pub const DEFAULT_GIT_TIMEOUT_SECS: u64 = 300;
 
@@ -96,7 +98,11 @@ fn capture_git_help(args: &[&str]) -> io::Result<String> {
         .output()?;
     let status_code = output.status.code();
     if !output.status.success() && status_code != Some(129) {
-        return Err(io::Error::other(format!("'git {}' failed", args.join(" "))));
+        return Err(io::Error::other(format!(
+            "{} {} failed",
+            "git".cyan().bold(),
+            args.join(" ")
+        )));
     }
     let mut buf = output.stdout;
     if !output.stderr.is_empty() {
@@ -128,7 +134,8 @@ pub fn git_dir(repo: &Path) -> io::Result<PathBuf> {
         .output()?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
-            "'git -C {:?} rev-parse --git-dir' failed",
+            "{} -C {:?} rev-parse --git-dir failed",
+            "git".cyan().bold(),
             repo
         )));
     }
@@ -178,7 +185,8 @@ pub fn get_all_refs(repo_path: &Path) -> io::Result<HashMap<String, String>> {
 
     if !output.status.success() {
         return Err(io::Error::other(format!(
-            "'git -C {:?} for-each-ref' failed",
+            "{} -C {:?} for-each-ref failed",
+            "git".cyan().bold(),
             repo_path
         )));
     }
@@ -222,7 +230,8 @@ pub fn is_bare_repository(repo_path: &Path) -> io::Result<bool> {
 
     if !output.status.success() {
         return Err(io::Error::other(format!(
-            "'git -C {:?} rev-parse --is-bare-repository' failed",
+            "{} -C {:?} rev-parse --is-bare-repository failed",
+            "git".cyan().bold(),
             repo_path
         )));
     }

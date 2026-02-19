@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use crate::git_config::GitConfig;
 use crate::gitutil;
 use crate::opts::Options;
+use colored::*;
 
 #[allow(dead_code)]
 pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
@@ -16,9 +17,18 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg(&opts.source)
         .arg("remote")
         .output()
-        .map_err(|e| io::Error::other(format!("failed to run git remote: {e}")))?;
+        .map_err(|e| {
+            io::Error::other(format!(
+                "failed to run {}: {}",
+                "git remote".cyan().bold(),
+                e
+            ))
+        })?;
     if !remotes.status.success() {
-        eprintln!("WARNING: --sensitive: git remote command failed, skipping ref fetch");
+        eprintln!(
+            "WARNING: --sensitive: {} command failed, skipping ref fetch",
+            "git remote".cyan().bold()
+        );
         return Ok(());
     }
     let r = String::from_utf8_lossy(&remotes.stdout);
@@ -40,11 +50,19 @@ pub fn fetch_all_refs_if_needed(opts: &Options) -> io::Result<()> {
         .arg("origin")
         .arg("+refs/*:refs/*")
         .status()
-        .map_err(|e| io::Error::other(format!("failed to run git fetch: {e}")))?;
+        .map_err(|e| {
+            io::Error::other(format!(
+                "failed to run {}: {}",
+                "git fetch".cyan().bold(),
+                e
+            ))
+        })?;
     if !status.success() {
-        return Err(io::Error::other(
-            "git fetch command failed with non-zero exit status",
-        ));
+        let cmd = "git fetch".cyan().bold();
+        return Err(io::Error::other(format!(
+            "{} command failed with non-zero exit status",
+            cmd
+        )));
     }
     Ok(())
 }

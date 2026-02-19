@@ -120,6 +120,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use colored::*;
 use unicode_normalization::UnicodeNormalization;
 
+fn highlight_flag(s: &str) -> ColoredString {
+    s.yellow().bold()
+}
+
+fn highlight_cmd(s: &str) -> ColoredString {
+    s.cyan().bold()
+}
+
 use crate::error::Result as FilterRepoResult;
 use crate::git_config::GitConfig;
 use crate::gitutil;
@@ -265,7 +273,7 @@ impl fmt::Display for SanityCheckError {
                     )?;
                 }
                 writeln!(f, "This indicates an improperly structured repository.")?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::ReferenceConflict {
                 conflict_type,
@@ -300,7 +308,11 @@ impl fmt::Display for SanityCheckError {
                             f,
                             "Rename conflicting references to have unique case-insensitive names."
                         )?;
-                        writeln!(f, "Example: 'git branch -m Main main-old' to resolve Main/main conflicts.")?;
+                        writeln!(
+                            f,
+                            "Example: {} to resolve Main/main conflicts.",
+                            highlight_cmd("git branch -m Main main-old")
+                        )?;
                     }
                     ConflictType::UnicodeNormalization => {
                         writeln!(
@@ -313,7 +325,7 @@ impl fmt::Display for SanityCheckError {
                         )?;
                     }
                 }
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::ReflogTooManyEntries {
                 problematic_reflogs,
@@ -347,7 +359,7 @@ impl fmt::Display for SanityCheckError {
                 if !show_examples {
                     writeln!(f, "Set FRRS_DEBUG=1 to see example refs.")?;
                 }
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::UnpushedChanges { unpushed_branches } => {
                 writeln!(f, "Unpushed changes detected:")?;
@@ -376,7 +388,7 @@ impl fmt::Display for SanityCheckError {
                     "All local branches should match their origin counterparts."
                 )?;
                 writeln!(f, "Push your changes or use a fresh clone.")?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::NotFreshlyPacked {
                 packs,
@@ -399,9 +411,10 @@ impl fmt::Display for SanityCheckError {
                 )?;
                 writeln!(
                     f,
-                    "Run 'git gc' to pack the repository or use a fresh clone."
+                    "Run {} to pack the repository or use a fresh clone.",
+                    highlight_cmd("git gc")
                 )?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::MultipleWorktrees { count } => {
                 writeln!(f, "Multiple worktrees found ({} total).", count)?;
@@ -410,16 +423,18 @@ impl fmt::Display for SanityCheckError {
                     "Repository filtering should be performed on a single worktree."
                 )?;
                 writeln!(f, "Remove additional worktrees or use the main worktree.")?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::StashedChanges => {
                 writeln!(f, "Stashed changes present.")?;
                 writeln!(f, "Repository should have a clean state before filtering.")?;
                 writeln!(
                     f,
-                    "Apply or drop stashed changes: 'git stash pop' or 'git stash drop'."
+                    "Apply or drop stashed changes: {} or {}.",
+                    highlight_cmd("git stash pop"),
+                    highlight_cmd("git stash drop")
                 )?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::WorkingTreeNotClean {
                 staged_dirty,
@@ -433,7 +448,7 @@ impl fmt::Display for SanityCheckError {
                     writeln!(f, "  - Unstaged changes detected")?;
                 }
                 writeln!(f, "Commit or stash your changes before filtering.")?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::UntrackedFiles { files } => {
                 writeln!(f, "Untracked files present:")?;
@@ -448,7 +463,7 @@ impl fmt::Display for SanityCheckError {
                     f,
                     "Add, commit, or remove untracked files before filtering."
                 )?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::InvalidRemotes { remotes } => {
                 writeln!(f, "Invalid remote configuration.")?;
@@ -457,7 +472,8 @@ impl fmt::Display for SanityCheckError {
                 if Self::detect_local_clone(remotes) {
                     writeln!(
                         f,
-                        "Note: when cloning local repositories, use 'git clone --no-local'"
+                        "Note: when cloning local repositories, use {}",
+                        highlight_cmd("git clone --no-local")
                     )?;
                     writeln!(f, "to avoid filesystem-specific issues.")?;
                 }
@@ -468,7 +484,7 @@ impl fmt::Display for SanityCheckError {
                     remotes.join(", ")
                 )?;
                 writeln!(f, "Use a repository with proper remote configuration.")?;
-                write!(f, "Use --force to bypass this check.")
+                write!(f, "Use {} to bypass this check.", highlight_flag("--force"))
             }
             SanityCheckError::AlreadyRan {
                 ran_file,
@@ -481,7 +497,8 @@ impl fmt::Display for SanityCheckError {
                 if !user_confirmed {
                     write!(
                         f,
-                        "Use --force to bypass this check or confirm continuation when prompted."
+                        "Use {} to bypass this check or confirm continuation when prompted.",
+                        highlight_flag("--force")
                     )
                 } else {
                     write!(f, "User declined to continue with existing state.")
@@ -500,7 +517,8 @@ impl fmt::Display for SanityCheckError {
                 writeln!(f, "Suggestion: {}", suggestion)?;
                 write!(
                     f,
-                    "Use --force to bypass this check if you understand the security implications."
+                    "Use {} to bypass this check if you understand the security implications.",
+                    highlight_flag("--force")
                 )
             }
             SanityCheckError::IoError(err) => {
