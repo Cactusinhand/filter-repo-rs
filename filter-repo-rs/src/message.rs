@@ -8,8 +8,10 @@ use regex::bytes::RegexBuilder;
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
 
+#[allow(dead_code)]
 pub const STREAMING_THRESHOLD: usize = 1024 * 1024;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer {
     pub pairs: Vec<(Vec<u8>, Vec<u8>)>,
@@ -63,22 +65,21 @@ impl MessageReplacer {
     }
 
     pub fn apply(&self, data: Vec<u8>) -> Vec<u8> {
-        if let Some(ref ac) = self.ac {
-            let (result, _changed) = self.apply_ac_replacements(ac, &data);
-            result
-        } else {
-            let mut result = data;
-            for (from, to) in &self.pairs {
-                result = replace_all_bytes(&result, from, to);
-            }
-            result
+        // Keep replace-text behavior deterministic and git-filter-repo-compatible:
+        // apply rules once, in file order.
+        let mut result = data;
+        for (from, to) in &self.pairs {
+            result = replace_all_bytes(&result, from, to);
         }
+        result
     }
 
+    #[allow(dead_code)]
     pub fn supports_streaming(&self) -> bool {
         self.ac.is_some()
     }
 
+    #[allow(dead_code)]
     pub fn apply_streaming<R: Read, W: Write>(
         &self,
         reader: &mut R,
@@ -105,6 +106,7 @@ impl MessageReplacer {
         Ok(changed)
     }
 
+    #[allow(dead_code)]
     fn apply_ac_replacements(&self, ac: &AhoCorasick, data: &[u8]) -> (Vec<u8>, bool) {
         if ac.find(data).is_none() {
             return (data.to_vec(), false);

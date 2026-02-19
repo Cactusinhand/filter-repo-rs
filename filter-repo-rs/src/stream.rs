@@ -16,9 +16,8 @@ use crate::gitutil::git_dir;
 use crate::limits::parse_data_size_header;
 use crate::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use crate::message::msg_regex::RegexReplacer as MsgRegexReplacer;
-use crate::message::{MessageReplacer, ShortHashMapper, STREAMING_THRESHOLD};
+use crate::message::{MessageReplacer, ShortHashMapper};
 use crate::opts::Options;
-use std::io::Cursor;
 
 const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
@@ -1258,48 +1257,25 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     } else {
                         // Forward header/payload with replacements; track whether modified
 
-                        let use_streaming = n > STREAMING_THRESHOLD
-                            && content_replacer
-                                .as_ref()
-                                .map(|r| r.supports_streaming())
-                                .unwrap_or(false);
-
                         let mut new_payload;
                         let mut changed = false;
 
-                        if let Some(replacer) = content_replacer.as_ref().filter(|_| use_streaming)
-                        {
-                            // Streaming processing for large blobs with aho-corasick
-                            let mut cursor = Cursor::new(payload);
-                            let mut writer = Vec::new();
-                            let replaced = replacer.apply_streaming(&mut cursor, &mut writer)?;
-                            new_payload = writer;
-                            changed = replaced;
-
-                            // For regex, we still need in-memory processing (patterns may span chunks)
-                            if let Some(ref rr) = content_regex_replacer {
-                                let before_regex = new_payload.clone();
-                                let result = rr.apply_regex(before_regex.clone());
-                                changed = changed || result != before_regex;
-                                new_payload = result;
-                            }
+                        // Use deterministic single-pass replacements in rule order.
+                        // This matches git-filter-repo semantics and avoids
+                        // non-terminating chained substitutions.
+                        if let Some(r) = &content_replacer {
+                            let before_replace = payload;
+                            let result = r.apply(before_replace.clone());
+                            changed = result != before_replace;
+                            new_payload = result;
                         } else {
-                            // In-memory processing - optimized to reduce clones
-                            // Apply replacers in sequence, consuming the vector
-                            if let Some(r) = &content_replacer {
-                                let before_replace = payload;
-                                let result = r.apply(before_replace.clone());
-                                changed = result != before_replace;
-                                new_payload = result;
-                            } else {
-                                new_payload = payload;
-                            }
-                            if let Some(rr) = &content_regex_replacer {
-                                let before_regex = new_payload.clone();
-                                let result = rr.apply_regex(before_regex.clone());
-                                changed = changed || result != before_regex;
-                                new_payload = result;
-                            }
+                            new_payload = payload;
+                        }
+                        if let Some(rr) = &content_regex_replacer {
+                            let before_regex = new_payload.clone();
+                            let result = rr.apply_regex(before_regex.clone());
+                            changed = changed || result != before_regex;
+                            new_payload = result;
                         }
 
                         let header = format!("data {}\n", new_payload.len());
