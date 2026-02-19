@@ -1454,20 +1454,43 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         import_broken,
         allow_flush_tag_resets,
         {
-            Some(crate::finalize::ReportData {
-                stripped_by_size: suppressed_shas_by_size
-                    .len()
-                    .max(suppressed_marks_by_size.len()),
-                stripped_by_sha: suppressed_shas_by_sha
-                    .len()
-                    .max(suppressed_marks_by_sha.len()),
-                modified_blobs: modified_marks.len() + inline_modified_paths.len(),
-                total_commits_processed: total_commits,
-                total_blobs_processed: total_blobs,
-                total_refs_rewritten,
-                samples_size,
-                samples_sha,
-                samples_modified,
+            use crate::finalize::{Metadata, ReportData, Samples, Statistics, Summary};
+            Some(ReportData {
+                summary: Summary {
+                    blobs_stripped_by_size: suppressed_shas_by_size
+                        .len()
+                        .max(suppressed_marks_by_size.len()),
+                    blobs_stripped_by_sha: suppressed_shas_by_sha
+                        .len()
+                        .max(suppressed_marks_by_sha.len()),
+                    blobs_modified: modified_marks.len() + inline_modified_paths.len(),
+                },
+                statistics: Statistics {
+                    commits_processed: total_commits,
+                    blobs_processed: total_blobs,
+                    refs_rewritten: total_refs_rewritten,
+                },
+                samples: Samples {
+                    by_size: samples_size
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                    by_sha: samples_sha
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                    modified: samples_modified
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                },
+                metadata: Metadata {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs().to_string())
+                        .unwrap_or_default(),
+                },
             })
         },
         &blob_size_tracker,

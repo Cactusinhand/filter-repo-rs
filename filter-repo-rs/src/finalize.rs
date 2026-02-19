@@ -12,24 +12,41 @@ use crate::stream::BlobSizeTracker;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+pub struct Summary {
+    pub blobs_stripped_by_size: usize,
+    pub blobs_stripped_by_sha: usize,
+    pub blobs_modified: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Statistics {
+    pub commits_processed: usize,
+    pub blobs_processed: usize,
+    pub refs_rewritten: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Samples {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_size: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub by_sha: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub modified: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Metadata {
+    pub version: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ReportData {
-    // Summary counts
-    pub stripped_by_size: usize,
-    pub stripped_by_sha: usize,
-    pub modified_blobs: usize,
-
-    // Statistics
-    pub total_commits_processed: usize,
-    pub total_blobs_processed: usize,
-    pub total_refs_rewritten: usize,
-
-    // Sample paths (limited to REPORT_SAMPLE_LIMIT)
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub samples_size: Vec<Vec<u8>>, // paths
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub samples_sha: Vec<Vec<u8>>, // paths
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub samples_modified: Vec<Vec<u8>>, // paths
+    pub summary: Summary,
+    pub statistics: Statistics,
+    pub samples: Samples,
+    pub metadata: Metadata,
 }
 
 // Flush buffered lightweight tag resets to outputs prior to sending 'done'.
@@ -377,33 +394,45 @@ pub fn finalize(
             let mut f = File::create(debug_dir.join("report.txt"))?;
             if let Some(ref r) = report {
                 writeln!(f, "=== Summary ===")?;
-                writeln!(f, "Blobs stripped by size: {}", r.stripped_by_size)?;
-                writeln!(f, "Blobs stripped by SHA: {}", r.stripped_by_sha)?;
-                writeln!(f, "Blobs modified by replace-text: {}", r.modified_blobs)?;
+                writeln!(
+                    f,
+                    "Blobs stripped by size: {}",
+                    r.summary.blobs_stripped_by_size
+                )?;
+                writeln!(
+                    f,
+                    "Blobs stripped by SHA: {}",
+                    r.summary.blobs_stripped_by_sha
+                )?;
+                writeln!(
+                    f,
+                    "Blobs modified by replace-text: {}",
+                    r.summary.blobs_modified
+                )?;
                 writeln!(f, "\n=== Statistics ===")?;
-                writeln!(f, "Total commits processed: {}", r.total_commits_processed)?;
-                writeln!(f, "Total blobs processed: {}", r.total_blobs_processed)?;
-                writeln!(f, "Total refs rewritten: {}", r.total_refs_rewritten)?;
-                let size_samples = &r.samples_size;
-                if !size_samples.is_empty() {
+                writeln!(
+                    f,
+                    "Total commits processed: {}",
+                    r.statistics.commits_processed
+                )?;
+                writeln!(f, "Total blobs processed: {}", r.statistics.blobs_processed)?;
+                writeln!(f, "Total refs rewritten: {}", r.statistics.refs_rewritten)?;
+                if !r.samples.by_size.is_empty() {
                     writeln!(f, "\n=== Sample paths (size) ===")?;
-                    for p in size_samples {
-                        f.write_all(p)?;
-                        f.write_all(b"\n")?;
+                    for p in &r.samples.by_size {
+                        writeln!(f, "{}", p)?;
                     }
                 }
-                if !r.samples_sha.is_empty() {
+                if !r.samples.by_sha.is_empty() {
                     writeln!(f, "\n=== Sample paths (sha) ===")?;
-                    for p in &r.samples_sha {
-                        f.write_all(p)?;
-                        f.write_all(b"\n")?;
+                    for p in &r.samples.by_sha {
+                        writeln!(f, "{}", p)?;
                     }
                 }
-                if !r.samples_modified.is_empty() {
+                if !r.samples.modified.is_empty() {
                     writeln!(f, "\n=== Sample paths (modified) ===")?;
-                    for p in &r.samples_modified {
-                        f.write_all(p)?;
-                        f.write_all(b"\n")?;
+                    for p in &r.samples.modified {
+                        writeln!(f, "{}", p)?;
                     }
                 }
             } else {
@@ -826,15 +855,25 @@ mod tests {
         let blob_sizes = BlobSizeTracker::new(&opts);
 
         let report = ReportData {
-            stripped_by_size: 2,
-            stripped_by_sha: 1,
-            modified_blobs: 3,
-            total_commits_processed: 10,
-            total_blobs_processed: 20,
-            total_refs_rewritten: 5,
-            samples_size: vec![b"path/size.bin".to_vec()],
-            samples_sha: vec![b"path/sha.bin".to_vec()],
-            samples_modified: vec![b"path/modified.bin".to_vec()],
+            summary: Summary {
+                blobs_stripped_by_size: 2,
+                blobs_stripped_by_sha: 1,
+                blobs_modified: 3,
+            },
+            statistics: Statistics {
+                commits_processed: 10,
+                blobs_processed: 20,
+                refs_rewritten: 5,
+            },
+            samples: Samples {
+                by_size: vec!["path/size.bin".to_string()],
+                by_sha: vec!["path/sha.bin".to_string()],
+                modified: vec!["path/modified.bin".to_string()],
+            },
+            metadata: Metadata {
+                version: "0.2.0".to_string(),
+                timestamp: "1234567890".to_string(),
+            },
         };
 
         let mut fe = Command::new("git")
@@ -882,8 +921,9 @@ mod tests {
 
         let report_json = std::fs::read_to_string(debug_dir.path().join("report.json"))
             .expect("read report.json");
-        assert!(report_json.contains("\"stripped_by_size\": 2"));
-        assert!(report_json.contains("\"samples_modified\""));
+        assert!(report_json.contains("\"blobs_stripped_by_size\": 2"));
+        assert!(report_json.contains("\"samples\""));
+        assert!(report_json.contains("\"modified\""));
 
         let filtered_out = String::from_utf8(filtered).expect("filtered bytes should be utf8");
         assert!(filtered_out.contains("reset refs/tags/v1\nfrom :1\n"));
