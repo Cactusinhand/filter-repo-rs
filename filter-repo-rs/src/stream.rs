@@ -630,6 +630,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let mut suppressed_shas_by_sha: HashSet<Vec<u8>> = HashSet::new();
     let mut modified_marks: HashSet<u32> = HashSet::new();
     let mut samples_size: Vec<Vec<u8>> = Vec::new();
+    // Statistics counters
+    let mut total_commits: usize = 0;
+    let mut total_blobs: usize = 0;
     let mut samples_sha: Vec<Vec<u8>> = Vec::new();
     let mut samples_modified: Vec<Vec<u8>> = Vec::new();
     let mut inline_modified_paths: HashSet<Vec<u8>> = HashSet::new();
@@ -696,6 +699,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             blob_buf.clear();
             blob_buf.push(line.clone());
             last_blob_mark = None;
+            total_blobs += 1;
             continue;
         }
         // Blob mark
@@ -778,6 +782,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             commit_mark = None;
             first_parent_mark = None;
             parent_lines.clear();
+            total_commits += 1;
             let hdr = crate::commit::rename_commit_header_ref(&line, opts, &mut ref_renames);
             commit_buf.extend_from_slice(&hdr);
             // Track final branch ref (post-rename) for HEAD updates
@@ -1446,6 +1451,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let fi_writer_for_finalize: Option<Box<dyn Write>> =
         fi_in_opt.take().map(|bw| Box::new(bw) as Box<dyn Write>);
 
+    // Capture ref count before moving ref_renames
+    let total_refs_rewritten = ref_renames.len();
+
     crate::finalize::finalize(
         opts,
         &debug_dir,
@@ -1462,21 +1470,17 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         import_broken,
         allow_flush_tag_resets,
         {
-            let mut size_cnt = suppressed_shas_by_size.len();
-            if size_cnt == 0 {
-                size_cnt = suppressed_marks_by_size.len();
-            }
-            if size_cnt == 0 {
-                size_cnt = samples_size.len();
-            }
-            let mut sha_cnt = suppressed_shas_by_sha.len();
-            if sha_cnt == 0 {
-                sha_cnt = suppressed_marks_by_sha.len();
-            }
             Some(crate::finalize::ReportData {
-                stripped_by_size: size_cnt,
-                stripped_by_sha: sha_cnt,
+                stripped_by_size: suppressed_shas_by_size
+                    .len()
+                    .max(suppressed_marks_by_size.len()),
+                stripped_by_sha: suppressed_shas_by_sha
+                    .len()
+                    .max(suppressed_marks_by_sha.len()),
                 modified_blobs: modified_marks.len() + inline_modified_paths.len(),
+                total_commits_processed: total_commits,
+                total_blobs_processed: total_blobs,
+                total_refs_rewritten,
                 samples_size,
                 samples_sha,
                 samples_modified,

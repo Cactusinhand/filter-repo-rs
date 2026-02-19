@@ -13,9 +13,17 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct ReportData {
+    // Summary counts
     pub stripped_by_size: usize,
     pub stripped_by_sha: usize,
     pub modified_blobs: usize,
+
+    // Statistics
+    pub total_commits_processed: usize,
+    pub total_blobs_processed: usize,
+    pub total_refs_rewritten: usize,
+
+    // Sample paths (limited to REPORT_SAMPLE_LIMIT)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub samples_size: Vec<Vec<u8>>, // paths
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -368,27 +376,31 @@ pub fn finalize(
         if opts.write_report {
             let mut f = File::create(debug_dir.join("report.txt"))?;
             if let Some(ref r) = report {
-                let size_samples = &r.samples_size;
-                let size_count = std::cmp::max(r.stripped_by_size, size_samples.len());
-                writeln!(f, "Blobs stripped by size: {}", size_count)?;
+                writeln!(f, "=== Summary ===")?;
+                writeln!(f, "Blobs stripped by size: {}", r.stripped_by_size)?;
                 writeln!(f, "Blobs stripped by SHA: {}", r.stripped_by_sha)?;
                 writeln!(f, "Blobs modified by replace-text: {}", r.modified_blobs)?;
+                writeln!(f, "\n=== Statistics ===")?;
+                writeln!(f, "Total commits processed: {}", r.total_commits_processed)?;
+                writeln!(f, "Total blobs processed: {}", r.total_blobs_processed)?;
+                writeln!(f, "Total refs rewritten: {}", r.total_refs_rewritten)?;
+                let size_samples = &r.samples_size;
                 if !size_samples.is_empty() {
-                    writeln!(f, "\nSample paths (size):")?;
+                    writeln!(f, "\n=== Sample paths (size) ===")?;
                     for p in size_samples {
                         f.write_all(p)?;
                         f.write_all(b"\n")?;
                     }
                 }
                 if !r.samples_sha.is_empty() {
-                    writeln!(f, "\nSample paths (sha):")?;
+                    writeln!(f, "\n=== Sample paths (sha) ===")?;
                     for p in &r.samples_sha {
                         f.write_all(p)?;
                         f.write_all(b"\n")?;
                     }
                 }
                 if !r.samples_modified.is_empty() {
-                    writeln!(f, "\nSample paths (modified):")?;
+                    writeln!(f, "\n=== Sample paths (modified) ===")?;
                     for p in &r.samples_modified {
                         f.write_all(p)?;
                         f.write_all(b"\n")?;
@@ -817,6 +829,9 @@ mod tests {
             stripped_by_size: 2,
             stripped_by_sha: 1,
             modified_blobs: 3,
+            total_commits_processed: 10,
+            total_blobs_processed: 20,
+            total_refs_rewritten: 5,
             samples_size: vec![b"path/size.bin".to_vec()],
             samples_sha: vec![b"path/sha.bin".to_vec()],
             samples_modified: vec![b"path/modified.bin".to_vec()],
@@ -861,8 +876,9 @@ mod tests {
 
         let report_txt =
             std::fs::read_to_string(debug_dir.path().join("report.txt")).expect("read report.txt");
+        assert!(report_txt.contains("=== Summary ==="));
         assert!(report_txt.contains("Blobs stripped by size: 2"));
-        assert!(report_txt.contains("Sample paths (modified):"));
+        assert!(report_txt.contains("=== Sample paths (modified) ==="));
 
         let report_json = std::fs::read_to_string(debug_dir.path().join("report.json"))
             .expect("read report.json");
