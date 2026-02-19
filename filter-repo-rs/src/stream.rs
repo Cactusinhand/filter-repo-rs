@@ -22,6 +22,13 @@ use crate::opts::Options;
 const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
 const SHA_BIN_LEN: usize = 20;
+
+/// Add a path sample to the collection if under limit and not already present.
+fn add_sample(samples: &mut Vec<Vec<u8>>, path: &[u8]) {
+    if samples.len() < REPORT_SAMPLE_LIMIT && !samples.iter().any(|p| p == path) {
+        samples.push(path.to_vec());
+    }
+}
 /// Threshold for deciding whether to keep SHA lookup in memory or on disk.
 /// When number of SHAs exceeds this, use disk-based sorted file.
 /// Lowered from 50,000 to 10,000 to reduce memory spike during sorting
@@ -888,11 +895,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         commit_buf.push(b'\n');
                         commit_has_changes = true;
                         // Record report sample for size-based strip
-                        if samples_size.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_size.iter().any(|p| p == &path_bytes)
-                        {
-                            samples_size.push(path_bytes);
-                        }
+                        add_sample(&mut samples_size, &path_bytes);
                         continue;
                     } else {
                         // Keep inline content: apply --replace-text (literal then regex) and append
@@ -921,11 +924,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             commit_buf.extend_from_slice(header.as_bytes());
                             commit_buf.extend_from_slice(&new_payload);
                             if changed {
-                                if samples_modified.len() < REPORT_SAMPLE_LIMIT
-                                    && !samples_modified.iter().any(|p| p == &path_bytes)
-                                {
-                                    samples_modified.push(path_bytes.clone());
-                                }
+                                add_sample(&mut samples_modified, &path_bytes);
                                 inline_modified_paths.insert(path_bytes.clone());
                             }
                         }
@@ -1002,22 +1001,14 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     if seen && oversize_marks.contains(&num) {
                         drop_path = true;
                         // Record size sample path eagerly
-                        let path_bytes = &bytes[path_start..].to_vec();
-                        if samples_size.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_size.iter().any(|p| p == path_bytes)
-                        {
-                            samples_size.push(path_bytes.clone());
-                        }
+                        let path_bytes = &bytes[path_start..];
+                        add_sample(&mut samples_size, path_bytes);
                         reason_size = suppressed_marks_by_size.contains(&num);
                         reason_sha = suppressed_marks_by_sha.contains(&num);
                     }
                     if seen && modified_marks.contains(&num) {
-                        let path_bytes = &bytes[path_start..].to_vec();
-                        if samples_modified.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_modified.iter().any(|p| p == path_bytes)
-                        {
-                            samples_modified.push(path_bytes.clone());
-                        }
+                        let path_bytes = &bytes[path_start..];
+                        add_sample(&mut samples_modified, path_bytes);
                     }
                 } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
                     // } else if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
@@ -1051,7 +1042,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     commit_buf.extend_from_slice(&enc);
                     commit_buf.push(b'\n');
                     commit_has_changes = true;
-                    let path_bytes = &bytes[path_start..].to_vec();
+                    let path_bytes = &bytes[path_start..];
                     let (mut r_size, mut r_sha) = (reason_size, reason_sha);
                     if !r_size && !r_sha {
                         if opts.max_blob_size.is_some() {
@@ -1061,16 +1052,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         }
                     }
                     if r_size {
-                        if samples_size.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_size.iter().any(|p| p == path_bytes)
-                        {
-                            samples_size.push(path_bytes.clone());
-                        }
-                    } else if r_sha
-                        && samples_sha.len() < REPORT_SAMPLE_LIMIT
-                        && !samples_sha.iter().any(|p| p == path_bytes)
-                    {
-                        samples_sha.push(path_bytes.clone());
+                        add_sample(&mut samples_size, path_bytes);
+                    } else if r_sha {
+                        add_sample(&mut samples_sha, path_bytes);
                     }
                     continue;
                 }
