@@ -23,6 +23,64 @@ const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
 const SHA_BIN_LEN: usize = 20;
 
+fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
+    if opts.date_shift.is_none() && opts.date_set.is_none() {
+        return line.to_vec();
+    }
+
+    let line_str = match std::str::from_utf8(line) {
+        Ok(s) => s,
+        Err(_) => return line.to_vec(),
+    };
+
+    let prefix = if line_str.starts_with("author ") {
+        "author "
+    } else if line_str.starts_with("committer ") {
+        "committer "
+    } else {
+        return line.to_vec();
+    };
+
+    let rest = &line_str[prefix.len()..];
+
+    let email_end = match rest.rfind('>') {
+        Some(pos) => pos,
+        None => return line.to_vec(),
+    };
+
+    let after_email = &rest[email_end + 1..].trim_start();
+
+    let mut parts = after_email.split_whitespace();
+    let timestamp_str = match parts.next() {
+        Some(t) => t,
+        None => return line.to_vec(),
+    };
+    let timezone = match parts.next() {
+        Some(tz) => tz,
+        None => return line.to_vec(),
+    };
+
+    let timestamp: i64 = match timestamp_str.parse() {
+        Ok(t) => t,
+        Err(_) => return line.to_vec(),
+    };
+
+    let new_timestamp = if let Some(fixed_ts) = opts.date_set {
+        fixed_ts
+    } else if let Some(shift) = opts.date_shift {
+        timestamp.saturating_add(shift)
+    } else {
+        timestamp
+    };
+
+    let identity_part = &rest[..email_end + 1];
+    format!(
+        "{}{} {} {}\n",
+        prefix, identity_part, new_timestamp, timezone
+    )
+    .into_bytes()
+}
+
 /// Add a path sample to the collection if under limit and not already present.
 fn add_sample(samples: &mut Vec<Vec<u8>>, path: &[u8]) {
     if samples.len() < REPORT_SAMPLE_LIMIT && !samples.iter().any(|p| p == path) {
@@ -1089,6 +1147,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             }
                         }
                     }
+
+                    rewritten = rewrite_timestamp_line(&rewritten, opts);
+
                     rewritten
                 } else {
                     line.clone()

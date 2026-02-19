@@ -202,6 +202,8 @@ pub struct Options {
     pub prune_empty: PruneMode,
     pub prune_degenerate: PruneMode,
     pub no_ff: bool,
+    pub date_shift: Option<i64>,
+    pub date_set: Option<i64>,
 }
 
 impl Default for Options {
@@ -253,6 +255,8 @@ impl Default for Options {
             prune_empty: PruneMode::Auto,
             prune_degenerate: PruneMode::Auto,
             no_ff: false,
+            date_shift: None,
+            date_set: None,
         }
     }
 }
@@ -769,6 +773,14 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     std::process::exit(2);
                 }
             }
+            "--date-shift" => {
+                let v = it.next().expect("--date-shift requires DURATION");
+                opts.date_shift = Some(parse_duration(&v));
+            }
+            "--date-set" => {
+                let v = it.next().expect("--date-set requires TIMESTAMP");
+                opts.date_set = Some(parse_timestamp(&v));
+            }
             "--fe_stream_override" => {
                 guard_debug("--fe_stream_override", opts.debug_mode);
                 let p = it.next().expect("--fe_stream_override requires FILE");
@@ -1039,6 +1051,94 @@ fn parse_usize(s: &str, flag: &str) -> usize {
     })
 }
 
+fn parse_duration(s: &str) -> i64 {
+    let s = s.trim();
+    let (sign, rest) = if let Some(stripped) = s.strip_prefix('+') {
+        (1, stripped)
+    } else if let Some(stripped) = s.strip_prefix('-') {
+        (-1, stripped)
+    } else {
+        (1, s)
+    };
+
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    let mut total_seconds: i64 = 0;
+
+    for i in (0..parts.len()).step_by(2) {
+        if i + 1 >= parts.len() {
+            eprintln!("--date-shift expects format like '+2 hours' or '-1 day 3 hours'");
+            std::process::exit(2);
+        }
+
+        let value = parse_integer_allowing_underscores::<i64>(parts[i]).unwrap_or_else(|_| {
+            eprintln!("--date-shift: invalid number '{}'", parts[i]);
+            std::process::exit(2);
+        });
+
+        let unit = parts[i + 1].to_lowercase();
+        let multiplier = match unit.as_str() {
+            "second" | "seconds" | "s" => 1,
+            "minute" | "minutes" | "min" | "mins" | "m" => 60,
+            "hour" | "hours" | "h" => 3600,
+            "day" | "days" | "d" => 86400,
+            "week" | "weeks" | "w" => 604800,
+            "month" | "months" | "mo" => 2592000,
+            "year" | "years" | "y" => 31536000,
+            _ => {
+                eprintln!("--date-shift: unknown unit '{}'", parts[i + 1]);
+                std::process::exit(2);
+            }
+        };
+
+        total_seconds = total_seconds.saturating_add(value.saturating_mul(multiplier));
+    }
+
+    total_seconds.saturating_mul(sign)
+}
+
+fn parse_timestamp(s: &str) -> i64 {
+    let s = s.trim();
+
+    if let Ok(ts) = s.parse::<i64>() {
+        return ts;
+    }
+
+    if let Ok(ts) = parse_integer_allowing_underscores::<i64>(s) {
+        return ts;
+    }
+
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return dt.timestamp();
+    }
+
+    for fmt in [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d",
+    ] {
+        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
+            return naive.and_utc().timestamp();
+        }
+    }
+
+    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return naive_date
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp();
+    }
+
+    eprintln!("--date-set: invalid timestamp '{}'", s);
+    eprintln!(
+        "Expected: Unix timestamp (e.g., '1700000000') or ISO 8601 (e.g., '2024-01-01T00:00:00Z')"
+    );
+    std::process::exit(2);
+}
+
 #[derive(Debug, Clone)]
 struct HelpOption {
     name: String,
@@ -1231,6 +1331,21 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--branch-rename OLD:NEW".to_string(),
                     description: vec!["Rename branches with given prefix".to_string()],
+                },
+                HelpOption {
+                    name: "--date-shift DURATION".to_string(),
+                    description: vec![
+                        "Shift all commit timestamps by duration".to_string(),
+                        "Format: \"+2 hours\", \"-1 day 3 hours\", \"+30 minutes\"".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--date-set TIMESTAMP".to_string(),
+                    description: vec![
+                        "Set all commit timestamps to fixed value".to_string(),
+                        "Format: Unix timestamp or ISO 8601 (e.g., 2024-01-01T00:00:00Z)"
+                            .to_string(),
+                    ],
                 },
             ],
         },
