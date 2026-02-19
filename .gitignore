@@ -6,3 +6,4 @@ target/
 tmpnpm-cache/
 CLAUDE.md
 AGENTS.md
+.ruff_cache/
