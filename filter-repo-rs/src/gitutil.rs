@@ -433,7 +433,8 @@ fn collect_replace_refs(dir: &Path, replace_refs: &mut HashSet<String>) -> io::R
 ///
 /// Ensures that the Git directory structure matches the repository type.
 /// For bare repositories, GIT_DIR should be "." (the repository root).
-/// For non-bare repositories, GIT_DIR should be ".git".
+/// For non-bare repositories, GIT_DIR should be ".git" for the main worktree,
+/// or ".git/worktrees/<name>" for linked worktrees.
 ///
 /// # Arguments
 ///
@@ -462,12 +463,21 @@ pub fn validate_git_dir_structure(repo_path: &Path, is_bare: bool) -> io::Result
             ));
         }
     } else {
-        // For non-bare repositories, GIT_DIR should be ".git"
-        if git_dir_name != ".git" {
+        // For non-bare repositories, accept:
+        // 1) main worktree: GIT_DIR ending in ".git"
+        // 2) linked worktree: .../.git/worktrees/<worktree-name>
+        let is_linked_worktree_git_dir = repo_path.join(".git").is_file()
+            && git_dir
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                == Some("worktrees");
+
+        if git_dir_name != ".git" && !is_linked_worktree_git_dir {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "Non-bare repository GIT_DIR should be '.git', but found '{}'",
+                    "Non-bare repository GIT_DIR should be '.git' or a linked worktree git dir, but found '{}'",
                     git_dir_name
                 ),
             ));
@@ -677,6 +687,42 @@ mod tests {
 
         // Should succeed for non-bare repo
         assert!(result.is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_validate_git_dir_structure_non_bare_worktree() -> io::Result<()> {
+        let temp_repo = create_test_repo()?;
+        create_commit(temp_repo.path())?;
+
+        let worktree_root = TempDir::new()?;
+        let worktree_path = worktree_root.path().join("linked-worktree");
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(temp_repo.path())
+            .arg("worktree")
+            .arg("add")
+            .arg("--detach")
+            .arg(&worktree_path)
+            .arg("HEAD")
+            .output()?;
+
+        if !output.status.success() {
+            return Err(io::Error::other(format!(
+                "Failed to create test worktree. stdout: {}, stderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+
+        let result = validate_git_dir_structure(&worktree_path, false);
+
+        assert!(
+            result.is_ok(),
+            "Expected linked worktree to be valid non-bare repo, got {:?}",
+            result
+        );
 
         Ok(())
     }
