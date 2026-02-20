@@ -253,6 +253,66 @@ fn max_blob_size_rejects_invalid_suffix() {
 }
 
 #[test]
+fn missing_option_value_reports_error_instead_of_panicking() {
+    let output = cli_command()
+        .arg("--path")
+        .output()
+        .expect("run filter-repo-rs with missing --path value");
+
+    assert!(
+        !output.status.success(),
+        "missing value should fail with non-zero exit"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--path requires value"),
+        "stderr should explain missing value: {}",
+        stderr
+    );
+    assert!(
+        !stderr.contains("panicked at"),
+        "missing value should be handled without panic: {}",
+        stderr
+    );
+}
+
+#[test]
+fn missing_option_values_do_not_panic_for_common_flags() {
+    let cases = [
+        ("--source", "--source requires value"),
+        ("--target", "--target requires value"),
+        ("--mailmap", "--mailmap requires file"),
+        ("--detect-pattern", "--detect-pattern requires REGEX"),
+        ("--analyze-top", "--analyze-top requires COUNT"),
+    ];
+
+    for (flag, expected_msg) in cases {
+        let output = cli_command()
+            .arg(flag)
+            .output()
+            .unwrap_or_else(|e| panic!("run filter-repo-rs with missing value for {flag}: {e}"));
+
+        assert!(
+            !output.status.success(),
+            "missing value for {flag} should fail with non-zero exit"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(expected_msg),
+            "stderr should include missing-value guidance for {flag}: {}",
+            stderr
+        );
+        assert!(
+            !stderr.contains("panicked at"),
+            "missing value for {flag} should not panic: {}",
+            stderr
+        );
+    }
+}
+
+#[test]
 fn env_toggle_enables_debug_help() {
     let output = cli_command()
         .env("FRRS_DEBUG", "1")

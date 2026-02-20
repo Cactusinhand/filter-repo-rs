@@ -387,7 +387,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 overrides.json = Some(true);
             }
             "--analyze-top" => {
-                let v = it.next().expect("--analyze-top requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-top requires COUNT")?;
                 let n = parse_usize(&v, "--analyze-top");
                 let top = n.max(1);
                 opts.analyze.top = top;
@@ -399,7 +399,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-total-warn",
                     "analyze.thresholds.warn_total_bytes",
                 );
-                let v = it.next().expect("--analyze-total-warn requires BYTES");
+                let v = require_arg_value(&mut it, "--analyze-total-warn requires BYTES")?;
                 let parsed = parse_u64(&v, "--analyze-total-warn");
                 opts.analyze.thresholds.warn_total_bytes = parsed;
                 overrides.thresholds.warn_total_bytes = Some(parsed);
@@ -410,7 +410,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-total-critical",
                     "analyze.thresholds.crit_total_bytes",
                 );
-                let v = it.next().expect("--analyze-total-critical requires BYTES");
+                let v = require_arg_value(&mut it, "--analyze-total-critical requires BYTES")?;
                 let parsed = parse_u64(&v, "--analyze-total-critical");
                 opts.analyze.thresholds.crit_total_bytes = parsed;
                 overrides.thresholds.crit_total_bytes = Some(parsed);
@@ -421,7 +421,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-large-blob",
                     "analyze.thresholds.warn_blob_bytes",
                 );
-                let v = it.next().expect("--analyze-large-blob requires BYTES");
+                let v = require_arg_value(&mut it, "--analyze-large-blob requires BYTES")?;
                 let parsed = parse_u64(&v, "--analyze-large-blob");
                 opts.analyze.thresholds.warn_blob_bytes = parsed;
                 overrides.thresholds.warn_blob_bytes = Some(parsed);
@@ -432,7 +432,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-ref-warn",
                     "analyze.thresholds.warn_ref_count",
                 );
-                let v = it.next().expect("--analyze-ref-warn requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-ref-warn requires COUNT")?;
                 let parsed = parse_usize(&v, "--analyze-ref-warn");
                 opts.analyze.thresholds.warn_ref_count = parsed;
                 overrides.thresholds.warn_ref_count = Some(parsed);
@@ -443,7 +443,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-object-warn",
                     "analyze.thresholds.warn_object_count",
                 );
-                let v = it.next().expect("--analyze-object-warn requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-object-warn requires COUNT")?;
                 let parsed = parse_usize(&v, "--analyze-object-warn");
                 opts.analyze.thresholds.warn_object_count = parsed;
                 overrides.thresholds.warn_object_count = Some(parsed);
@@ -454,7 +454,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-tree-entries",
                     "analyze.thresholds.warn_tree_entries",
                 );
-                let v = it.next().expect("--analyze-tree-entries requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-tree-entries requires COUNT")?;
                 let parsed = parse_usize(&v, "--analyze-tree-entries");
                 opts.analyze.thresholds.warn_tree_entries = parsed;
                 overrides.thresholds.warn_tree_entries = Some(parsed);
@@ -465,7 +465,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-path-length",
                     "analyze.thresholds.warn_path_length",
                 );
-                let v = it.next().expect("--analyze-path-length requires LENGTH");
+                let v = require_arg_value(&mut it, "--analyze-path-length requires LENGTH")?;
                 let parsed = parse_usize(&v, "--analyze-path-length");
                 opts.analyze.thresholds.warn_path_length = parsed;
                 overrides.thresholds.warn_path_length = Some(parsed);
@@ -476,7 +476,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-duplicate-paths",
                     "analyze.thresholds.warn_duplicate_paths",
                 );
-                let v = it.next().expect("--analyze-duplicate-paths requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-duplicate-paths requires COUNT")?;
                 let parsed = parse_usize(&v, "--analyze-duplicate-paths");
                 opts.analyze.thresholds.warn_duplicate_paths = parsed;
                 overrides.thresholds.warn_duplicate_paths = Some(parsed);
@@ -487,7 +487,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-commit-msg-warn",
                     "analyze.thresholds.warn_commit_msg_bytes",
                 );
-                let v = it.next().expect("--analyze-commit-msg-warn requires BYTES");
+                let v = require_arg_value(&mut it, "--analyze-commit-msg-warn requires BYTES")?;
                 let parsed = parse_usize(&v, "--analyze-commit-msg-warn");
                 opts.analyze.thresholds.warn_commit_msg_bytes = parsed;
                 overrides.thresholds.warn_commit_msg_bytes = Some(parsed);
@@ -498,9 +498,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "--analyze-max-parents-warn",
                     "analyze.thresholds.warn_max_parents",
                 );
-                let v = it
-                    .next()
-                    .expect("--analyze-max-parents-warn requires COUNT");
+                let v = require_arg_value(&mut it, "--analyze-max-parents-warn requires COUNT")?;
                 let parsed = parse_usize(&v, "--analyze-max-parents-warn");
                 opts.analyze.thresholds.warn_max_parents = parsed;
                 overrides.thresholds.warn_max_parents = Some(parsed);
@@ -509,12 +507,17 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.debug_mode = true;
                 continue;
             }
-            "--source" => opts.source = PathBuf::from(it.next().expect("--source requires value")),
-            "--target" => opts.target = PathBuf::from(it.next().expect("--target requires value")),
+            "--source" => {
+                opts.source = PathBuf::from(require_arg_value(&mut it, "--source requires value")?)
+            }
+            "--target" => {
+                opts.target = PathBuf::from(require_arg_value(&mut it, "--target requires value")?)
+            }
             "--ref" | "--refs" => {
                 // --refs implies a partial rewrite
                 // so we do not run remote/cleanup behaviors by default.
-                opts.refs.push(it.next().expect("--ref requires value"));
+                opts.refs
+                    .push(require_arg_value(&mut it, "--ref requires value")?);
                 opts.partial = true;
             }
             "--date-order" => {
@@ -528,31 +531,31 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.reset = false;
             }
             "--replace-message" => {
-                let p = it.next().expect("--replace-message requires file");
+                let p = require_arg_value(&mut it, "--replace-message requires file")?;
                 opts.replace_message_file = Some(PathBuf::from(p));
             }
             "--replace-text" => {
-                let p = it.next().expect("--replace-text requires file");
+                let p = require_arg_value(&mut it, "--replace-text requires file")?;
                 opts.replace_text_file = Some(PathBuf::from(p));
             }
             "--mailmap" => {
-                let p = it.next().expect("--mailmap requires file");
+                let p = require_arg_value(&mut it, "--mailmap requires file")?;
                 opts.mailmap_file = Some(PathBuf::from(p));
             }
             "--author-rewrite" => {
-                let p = it.next().expect("--author-rewrite requires file");
+                let p = require_arg_value(&mut it, "--author-rewrite requires file")?;
                 opts.author_rewrite_file = Some(PathBuf::from(p));
             }
             "--committer-rewrite" => {
-                let p = it.next().expect("--committer-rewrite requires file");
+                let p = require_arg_value(&mut it, "--committer-rewrite requires file")?;
                 opts.committer_rewrite_file = Some(PathBuf::from(p));
             }
             "--email-rewrite" => {
-                let p = it.next().expect("--email-rewrite requires file");
+                let p = require_arg_value(&mut it, "--email-rewrite requires file")?;
                 opts.email_rewrite_file = Some(PathBuf::from(p));
             }
             "--path" => {
-                let raw = it.next().expect("--path requires value");
+                let raw = require_arg_value(&mut it, "--path requires value")?;
                 match normalize_cli_path_str(&raw, /*allow_empty=*/ false) {
                     Ok(mut norm) => {
                         // For directory prefixes, users often omit trailing '/'; keep as-is.
@@ -568,7 +571,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.invert_paths = true;
             }
             "--path-glob" => {
-                let raw = it.next().expect("--path-glob requires value");
+                let raw = require_arg_value(&mut it, "--path-glob requires value")?;
                 match normalize_cli_glob_str(&raw) {
                     Ok(mut norm) => opts.path_globs.push(std::mem::take(&mut norm)),
                     Err(msg) => {
@@ -578,7 +581,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 }
             }
             "--path-regex" => {
-                let p = it.next().expect("--path-regex requires value");
+                let p = require_arg_value(&mut it, "--path-regex requires value")?;
                 match Regex::new(&p) {
                     Ok(re) => opts.path_regexes.push(re),
                     Err(err) => {
@@ -588,7 +591,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 }
             }
             "--path-rename" => {
-                let v = it.next().expect("--path-rename requires OLD:NEW");
+                let v = require_arg_value(&mut it, "--path-rename requires OLD:NEW")?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
                     eprintln!("--path-rename expects OLD:NEW");
@@ -608,7 +611,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.path_renames.push(rename);
             }
             "--subdirectory-filter" => {
-                let dir = it.next().expect("--subdirectory-filter requires DIRECTORY");
+                let dir = require_arg_value(&mut it, "--subdirectory-filter requires DIRECTORY")?;
                 let mut d =
                     normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
                         eprintln!("invalid --subdirectory-filter '{}': {}", dir, m);
@@ -621,9 +624,8 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.path_renames.push((d, Vec::new()));
             }
             "--to-subdirectory-filter" => {
-                let dir = it
-                    .next()
-                    .expect("--to-subdirectory-filter requires DIRECTORY");
+                let dir =
+                    require_arg_value(&mut it, "--to-subdirectory-filter requires DIRECTORY")?;
                 let mut d =
                     normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
                         eprintln!("invalid --to-subdirectory-filter '{}': {}", dir, m);
@@ -635,9 +637,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.path_renames.push((Vec::new(), d));
             }
             "--tag-rename" => {
-                let v = it
-                    .next()
-                    .expect("--tag-rename requires OLD:NEW (either may be empty)");
+                let v = require_arg_value(
+                    &mut it,
+                    "--tag-rename requires OLD:NEW (either may be empty)",
+                )?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
                     eprintln!("--tag-rename expects OLD:NEW");
@@ -647,9 +650,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     Some((parts[0].as_bytes().to_vec(), parts[1].as_bytes().to_vec()));
             }
             "--branch-rename" => {
-                let v = it
-                    .next()
-                    .expect("--branch-rename requires OLD:NEW (either may be empty)");
+                let v = require_arg_value(
+                    &mut it,
+                    "--branch-rename requires OLD:NEW (either may be empty)",
+                )?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
                     eprintln!("--branch-rename expects OLD:NEW");
@@ -659,7 +663,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     Some((parts[0].as_bytes().to_vec(), parts[1].as_bytes().to_vec()));
             }
             "--max-blob-size" => {
-                let v = it.next().expect("--max-blob-size requires BYTES");
+                let v = require_arg_value(&mut it, "--max-blob-size requires BYTES")?;
                 let n = parse_max_blob_size(&v).unwrap_or_else(|_| {
                     eprintln!(
                         "--max-blob-size expects an integer number of bytes (optionally suffixed with K, M, or G)"
@@ -669,7 +673,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.max_blob_size = Some(n);
             }
             "--strip-blobs-with-ids" => {
-                let p = it.next().expect("--strip-blobs-with-ids requires FILE");
+                let p = require_arg_value(&mut it, "--strip-blobs-with-ids requires FILE")?;
                 opts.strip_blobs_with_ids = Some(PathBuf::from(p));
             }
             "--write-report" => {
@@ -679,7 +683,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.write_report_json = true;
             }
             "--path-compat-policy" => {
-                let v = it.next().expect("--path-compat-policy requires MODE");
+                let v = require_arg_value(&mut it, "--path-compat-policy requires MODE")?;
                 opts.path_compat_policy = PathCompatPolicy::parse(&v).unwrap_or_else(|| {
                     eprintln!("--path-compat-policy expects one of sanitize|skip|error");
                     std::process::exit(2);
@@ -688,7 +692,7 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             "--cleanup" => {
                 if let Some(next) = it.clone().next() {
                     if matches!(next.as_str(), "none" | "standard" | "aggressive") {
-                        let legacy = it.next().expect("--cleanup legacy value consumed");
+                        let legacy = require_arg_value(&mut it, "--cleanup legacy value consumed")?;
                         parse_legacy_cleanup_value(&legacy, &mut opts);
                         continue;
                     }
@@ -739,13 +743,14 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.detect_secrets = true;
             }
             "--detect-pattern" => {
-                let p = it.next().expect("--detect-pattern requires REGEX");
+                let p = require_arg_value(&mut it, "--detect-pattern requires REGEX")?;
                 opts.detect_patterns.push(p);
             }
             "--prune-empty" => {
-                let v = it
-                    .next()
-                    .expect("--prune-empty requires MODE (always|auto|never)");
+                let v = require_arg_value(
+                    &mut it,
+                    "--prune-empty requires MODE (always|auto|never)",
+                )?;
                 opts.prune_empty = match v.as_str() {
                     "always" => PruneMode::Always,
                     "auto" => PruneMode::Auto,
@@ -757,9 +762,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 };
             }
             "--prune-degenerate" => {
-                let v = it
-                    .next()
-                    .expect("--prune-degenerate requires MODE (always|auto|never)");
+                let v = require_arg_value(
+                    &mut it,
+                    "--prune-degenerate requires MODE (always|auto|never)",
+                )?;
                 opts.prune_degenerate = match v.as_str() {
                     "always" => PruneMode::Always,
                     "auto" => PruneMode::Auto,
@@ -794,16 +800,16 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 }
             }
             "--date-shift" => {
-                let v = it.next().expect("--date-shift requires DURATION");
+                let v = require_arg_value(&mut it, "--date-shift requires DURATION")?;
                 opts.date_shift = Some(parse_duration(&v));
             }
             "--date-set" => {
-                let v = it.next().expect("--date-set requires TIMESTAMP");
+                let v = require_arg_value(&mut it, "--date-set requires TIMESTAMP")?;
                 opts.date_set = Some(parse_timestamp(&v));
             }
             "--fe_stream_override" => {
                 guard_debug("--fe_stream_override", opts.debug_mode);
-                let p = it.next().expect("--fe_stream_override requires FILE");
+                let p = require_arg_value(&mut it, "--fe_stream_override requires FILE")?;
                 opts.fe_stream_override = Some(PathBuf::from(p));
             }
             "-h" | "--help" => {
@@ -878,6 +884,14 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
     }
 
     Ok(opts)
+}
+
+fn require_arg_value(
+    it: &mut std::vec::IntoIter<String>,
+    message: &'static str,
+) -> Result<String, FilterRepoError> {
+    it.next()
+        .ok_or_else(|| FilterRepoError::invalid_options(message))
 }
 
 enum ConfigError {
