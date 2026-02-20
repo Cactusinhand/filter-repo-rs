@@ -295,6 +295,42 @@ fn gather_footprint(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<
     Ok(())
 }
 
+#[cfg(test)]
+fn collect_blob_sizes_from_reader<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<(HashMap<String, u64>, HashMap<String, u64>, usize)> {
+    let mut unpacked_size = HashMap::new();
+    let mut packed_size = HashMap::new();
+    let mut processed_objects = 0usize;
+    let mut line_buf = String::new();
+
+    while reader.read_line(&mut line_buf)? > 0 {
+        let trimmed = line_buf.trim();
+        if !trimmed.is_empty() {
+            let mut parts_iter = trimmed.split_whitespace();
+            if let (Some(sha), Some(objtype), Some(objsize_str), Some(objdisksize_str)) = (
+                parts_iter.next(),
+                parts_iter.next(),
+                parts_iter.next(),
+                parts_iter.next(),
+            ) {
+                if objtype == "blob" {
+                    if let (Ok(objsize), Ok(objdisksize)) =
+                        (objsize_str.parse::<u64>(), objdisksize_str.parse::<u64>())
+                    {
+                        unpacked_size.insert(sha.to_string(), objsize);
+                        packed_size.insert(sha.to_string(), objdisksize);
+                    }
+                }
+            }
+            processed_objects += 1;
+        }
+        line_buf.clear();
+    }
+
+    Ok((unpacked_size, packed_size, processed_objects))
+}
+
 fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
     let refs = gitutil::get_all_refs(repo)?;
     for name in refs.keys() {
@@ -316,7 +352,7 @@ fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
 // History-wide metrics via single rev-list | diff-tree pipeline
 fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashMap<String, u64>)> {
     let start_time = Instant::now();
-    let output = run_git_capture(
+    let (mut reader, mut child) = run_git_capture_stream(
         repo,
         &[
             "cat-file",
@@ -325,91 +361,77 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
         ],
     )?;
 
-    // Count total lines first for progress bar
-    let lines: Vec<&str> = output.lines().collect();
-    let total_lines = lines.len();
-
-    // Pre-allocate with reasonable capacity based on typical repository size
+    // Pre-allocate with reasonable capacity based on typical repository size.
     let mut unpacked_size = HashMap::with_capacity(100_000);
     let mut packed_size = HashMap::with_capacity(100_000);
-    let mut blob_count = 0;
-    let mut processed_objects = 0;
+    let mut blob_count = 0usize;
+    let mut processed_objects = 0usize;
+    let mut line_buf = String::new();
 
-    for (idx, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Use more efficient parsing - avoid Vec allocation
-        let mut parts_iter = trimmed.split_whitespace();
-        if let (Some(sha), Some(objtype), Some(objsize_str), Some(objdisksize_str)) = (
-            parts_iter.next(),
-            parts_iter.next(),
-            parts_iter.next(),
-            parts_iter.next(),
-        ) {
-            if objtype == "blob" {
-                if let (Ok(objsize), Ok(objdisksize)) =
-                    (objsize_str.parse::<u64>(), objdisksize_str.parse::<u64>())
-                {
-                    unpacked_size.insert(sha.to_string(), objsize);
-                    packed_size.insert(sha.to_string(), objdisksize);
-                    blob_count += 1;
+    while reader.read_line(&mut line_buf)? > 0 {
+        let trimmed = line_buf.trim();
+        if !trimmed.is_empty() {
+            let mut parts_iter = trimmed.split_whitespace();
+            if let (Some(sha), Some(objtype), Some(objsize_str), Some(objdisksize_str)) = (
+                parts_iter.next(),
+                parts_iter.next(),
+                parts_iter.next(),
+                parts_iter.next(),
+            ) {
+                if objtype == "blob" {
+                    if let (Ok(objsize), Ok(objdisksize)) =
+                        (objsize_str.parse::<u64>(), objdisksize_str.parse::<u64>())
+                    {
+                        unpacked_size.insert(sha.to_string(), objsize);
+                        packed_size.insert(sha.to_string(), objdisksize);
+                        blob_count += 1;
+                    }
                 }
             }
-        }
+            processed_objects += 1;
 
-        processed_objects += 1;
-
-        // Update progress bar every 1000 items
-        if idx % 1000 == 0 && total_lines > 0 {
-            let elapsed = start_time.elapsed();
-            let rate = if elapsed.as_secs_f64() > 0.0 {
-                processed_objects as f64 / elapsed.as_secs_f64()
-            } else {
-                0.0
-            };
-            let progress = ((processed_objects as f64 / total_lines as f64) * 100.0) as u32;
-            let bar_length = 30;
-            let filled = progress as usize * bar_length / 100;
-            let bar: String = (0..bar_length)
-                .map(|i| if i < filled { '=' } else { ' ' })
-                .collect();
-            print!(
-                "\r[*] Processing objects [{}] {}% {}/{} {} ({:.0}/s)",
-                bar,
-                progress,
-                processed_objects,
-                total_lines,
-                format_elapsed(elapsed),
-                rate as u64
-            );
-            use std::io::Write;
-            std::io::stdout().flush().unwrap();
+            // Keep lightweight progress reporting without requiring full output buffering.
+            if processed_objects.is_multiple_of(1000) {
+                let elapsed = start_time.elapsed();
+                let rate = if elapsed.as_secs_f64() > 0.0 {
+                    processed_objects as f64 / elapsed.as_secs_f64()
+                } else {
+                    0.0
+                };
+                print!(
+                    "\r[*] Processing objects {} {} ({:.0}/s)",
+                    processed_objects,
+                    format_elapsed(elapsed),
+                    rate
+                );
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
+            }
         }
+        line_buf.clear();
     }
 
-    // Show final progress at 100%
-    if total_lines > 0 {
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "git cat-file --batch-all-objects failed: {}",
+            status
+        )));
+    }
+
+    if processed_objects > 0 {
         let elapsed = start_time.elapsed();
         let rate = if elapsed.as_secs_f64() > 0.0 {
             processed_objects as f64 / elapsed.as_secs_f64()
         } else {
             0.0
         };
-        let bar_length = 30;
-        let bar: String = (0..bar_length).map(|_| '=').collect();
         println!(
-            "\r[*] Processing objects [{}] 100% {}/{} {} ({}/s)",
-            bar,
+            "\r[*] Processing objects {} {} ({:.0}/s)",
             processed_objects,
-            total_lines,
             format_elapsed(elapsed),
-            rate as u64
+            rate
         );
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
     }
 
     eprintln!(
@@ -1288,4 +1310,61 @@ fn build_summary_rows(metrics: &RepositoryMetrics) -> Vec<Vec<Cow<'_, str>>> {
     ]);
 
     rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_blob_sizes_from_reader;
+    use std::io::Cursor;
+
+    #[test]
+    fn collect_blob_sizes_from_reader_tracks_only_blob_entries() {
+        let input = "\
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa blob 10 8
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tree 7 5
+cccccccccccccccccccccccccccccccccccccccc blob 42 21
+";
+        let mut reader = Cursor::new(input.as_bytes());
+
+        let (unpacked, packed, processed) =
+            collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
+
+        assert_eq!(processed, 3, "expected all non-empty lines to be processed");
+        assert_eq!(unpacked.len(), 2, "expected only blob entries");
+        assert_eq!(packed.len(), 2, "expected only blob entries");
+        assert_eq!(
+            unpacked.get("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some(&10)
+        );
+        assert_eq!(
+            packed.get("cccccccccccccccccccccccccccccccccccccccc"),
+            Some(&21)
+        );
+    }
+
+    #[test]
+    fn collect_blob_sizes_from_reader_skips_malformed_or_invalid_sizes() {
+        let input = "\
+invalid line
+dddddddddddddddddddddddddddddddddddddddd blob NaN 1
+eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee blob 11 not-a-number
+ffffffffffffffffffffffffffffffffffffffff blob 12 6
+";
+        let mut reader = Cursor::new(input.as_bytes());
+
+        let (unpacked, packed, processed) =
+            collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
+
+        assert_eq!(processed, 4);
+        assert_eq!(unpacked.len(), 1);
+        assert_eq!(packed.len(), 1);
+        assert_eq!(
+            unpacked.get("ffffffffffffffffffffffffffffffffffffffff"),
+            Some(&12)
+        );
+        assert_eq!(
+            packed.get("ffffffffffffffffffffffffffffffffffffffff"),
+            Some(&6)
+        );
+    }
 }
