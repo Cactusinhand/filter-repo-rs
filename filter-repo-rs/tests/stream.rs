@@ -61,6 +61,81 @@ done
 }
 
 #[test]
+fn rename_and_copy_paths_requote_handles_escaped_quotes_backslashes_and_octal_utf8() {
+    let repo = init_repo();
+    let stream_path = repo.join("fe-renames-quoted.stream");
+    let stream = r#"blob
+mark :1
+data 4
+one
+
+commit refs/heads/main
+mark :2
+author Tester <tester@example.com> 0 +0000
+committer Tester <tester@example.com> 0 +0000
+data 3
+c1
+M 100644 :1 "src/quo\"te\\caf\303\251.txt"
+
+commit refs/heads/main
+mark :3
+author Tester <tester@example.com> 1 +0000
+committer Tester <tester@example.com> 1 +0000
+data 3
+c2
+from :2
+C "src/quo\"te\\caf\303\251.txt" "src/dup\"te\\caf\303\251.txt"
+R "src/quo\"te\\caf\303\251.txt" "src/fin\"al\\caf\303\251.txt"
+D "src/dup\"te\\caf\303\251.txt"
+
+done
+"#;
+    std::fs::write(&stream_path, stream).expect("write quoted fast-export stream");
+
+    run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
+        o.dry_run = true;
+        o.path_renames.push((b"src/".to_vec(), b"dst/".to_vec()));
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    });
+
+    let filtered_path = repo
+        .join(".git")
+        .join("filter-repo")
+        .join("fast-export.filtered");
+    let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
+
+    assert!(
+        filtered.contains(r#"M 100644 :1 "dst/quo\"te\\caf\303\251.txt""#),
+        "expected modify line with escaped quote/backslash/octal bytes:\n{}",
+        filtered
+    );
+    assert!(
+        filtered.contains(r#"C "dst/quo\"te\\caf\303\251.txt" "dst/dup\"te\\caf\303\251.txt""#),
+        "expected copy line to preserve escaping and rename:\n{}",
+        filtered
+    );
+    assert!(
+        filtered.contains(r#"R "dst/quo\"te\\caf\303\251.txt" "dst/fin\"al\\caf\303\251.txt""#),
+        "expected rename line to preserve escaping and rename:\n{}",
+        filtered
+    );
+    assert!(
+        filtered.contains(r#"D "dst/dup\"te\\caf\303\251.txt""#),
+        "expected delete line to preserve escaping and rename:\n{}",
+        filtered
+    );
+    assert!(
+        !filtered.contains(r#""src/quo\"te\\caf\303\251.txt""#),
+        "expected source prefix fully renamed:\n{}",
+        filtered
+    );
+}
+
+#[test]
 fn path_compat_policy_sanitize_rewrites_on_windows_or_noops_elsewhere() {
     let repo = init_repo();
     let stream_path = repo.join("fe-path-compat-sanitize.stream");

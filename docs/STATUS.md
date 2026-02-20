@@ -164,7 +164,7 @@ Remaining for MVP polish:
    - Done: `--path-compat-policy=[sanitize|skip|error]` (default sanitize), plus per-path compatibility reporting.
 
 5) Tests & docs
-   - Initial integration tests added for path filtering + branch rename + HEAD update, and for commit-map pruned entries. Next: annotated vs lightweight tag scenarios, path-rename matrices, and encoding/quoting notes.
+   - Integration coverage now includes path filtering + branch rename + HEAD update, commit-map pruned entries, annotated vs lightweight tag scenarios, path-rename matrices, and encoding/quoting notes (including escaped quote/backslash + octal UTF-8 path round-trips).
 
 ## Recent Test Coverage Additions
 
