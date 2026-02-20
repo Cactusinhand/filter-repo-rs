@@ -583,25 +583,63 @@ fn gather_oversized_commit_messages(
     if threshold_bytes == 0 {
         return Ok(Vec::new());
     }
-    let output = run_git_capture(repo, &["log", "--all", "--pretty=%H%x00%B%x00"])?;
+    let (mut reader, mut child) =
+        run_git_capture_stream(repo, &["log", "--all", "--pretty=%H%x00%B%x00"])?;
+    let stats = collect_oversized_commit_messages_from_reader(&mut reader, threshold_bytes)?;
+
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "git log --all --pretty=%H%x00%B%x00 failed: {}",
+            status
+        )));
+    }
+
+    Ok(stats)
+}
+
+fn collect_oversized_commit_messages_from_reader<R: BufRead>(
+    reader: &mut R,
+    threshold_bytes: usize,
+) -> io::Result<Vec<CommitMessageStat>> {
+    if threshold_bytes == 0 {
+        return Ok(Vec::new());
+    }
+
     let mut stats = Vec::new();
-    let mut iter = output.split('\0');
-    while let Some(oid) = iter.next() {
-        if oid.is_empty() {
+    let mut oid_buf = Vec::new();
+    let mut msg_buf = Vec::new();
+
+    loop {
+        oid_buf.clear();
+        let oid_read = reader.read_until(0, &mut oid_buf)?;
+        if oid_read == 0 {
             break;
         }
-        if let Some(msg) = iter.next() {
-            let len = msg.len();
-            if len >= threshold_bytes {
-                stats.push(CommitMessageStat {
-                    oid: oid.trim().to_string(),
-                    length: len,
-                });
-            }
-        } else {
+        if oid_buf.last() == Some(&0) {
+            oid_buf.pop();
+        }
+        if oid_buf.is_empty() {
             break;
+        }
+
+        msg_buf.clear();
+        let msg_read = reader.read_until(0, &mut msg_buf)?;
+        if msg_read == 0 {
+            break;
+        }
+        if msg_buf.last() == Some(&0) {
+            msg_buf.pop();
+        }
+
+        if msg_buf.len() >= threshold_bytes {
+            stats.push(CommitMessageStat {
+                oid: String::from_utf8_lossy(&oid_buf).trim().to_string(),
+                length: msg_buf.len(),
+            });
         }
     }
+
     Ok(stats)
 }
 
@@ -1265,7 +1303,10 @@ fn build_summary_rows(metrics: &RepositoryMetrics) -> Vec<Vec<Cow<'_, str>>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_blob_sizes_from_reader, flush_progress_writer};
+    use super::{
+        collect_blob_sizes_from_reader, collect_oversized_commit_messages_from_reader,
+        flush_progress_writer,
+    };
     use std::io::{Cursor, ErrorKind, Write};
 
     struct ErrorWriter {
@@ -1353,5 +1394,40 @@ ffffffffffffffffffffffffffffffffffffffff blob 12 6
         };
         let result = flush_progress_writer(&mut writer);
         assert!(result.is_err(), "non-BrokenPipe flush errors should propagate");
+    }
+
+    #[test]
+    fn collect_oversized_commit_messages_from_reader_filters_by_threshold() {
+        let input = b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0short\0\
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0this message is long enough\0";
+        let mut reader = Cursor::new(&input[..]);
+
+        let stats =
+            collect_oversized_commit_messages_from_reader(&mut reader, 10).expect("parse stream");
+
+        assert_eq!(stats.len(), 1, "expected only one message above threshold");
+        assert_eq!(
+            stats[0].oid,
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "expected longer message oid to be captured"
+        );
+        assert!(
+            stats[0].length >= 10,
+            "expected captured message length >= threshold"
+        );
+    }
+
+    #[test]
+    fn collect_oversized_commit_messages_from_reader_ignores_truncated_pairs() {
+        let input = b"cccccccccccccccccccccccccccccccccccccccc\0";
+        let mut reader = Cursor::new(&input[..]);
+
+        let stats =
+            collect_oversized_commit_messages_from_reader(&mut reader, 1).expect("parse stream");
+
+        assert!(
+            stats.is_empty(),
+            "truncated oid/message pair should be ignored without panic"
+        );
     }
 }
