@@ -63,6 +63,8 @@ filter-repo-rs --analyze
 filter-repo-rs --max-blob-size 10M --write-report
 ```
 
+说明：`--analyze` 中依赖历史遍历的 blob/路径指标只统计可达对象；悬空/不可达对象会被跳过。
+
 ### 重构路径
 
 ```sh
@@ -255,6 +257,8 @@ filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths
 ```sh
 filter-repo-rs --analyze --analyze-json
 ```
+
+可达性说明：分析输出中对象/路径相关的指标仅统计从 refs 可达的对象。
 
 在 `.filter-repo-rs.toml` 配置阈值：
 

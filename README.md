@@ -63,6 +63,8 @@ filter-repo-rs --analyze
 filter-repo-rs --max-blob-size 10M --write-report
 ```
 
+Note: `--analyze` history-derived blob/path metrics are computed from reachable objects only; dangling/unreachable objects are skipped.
+
 ### Restructure Paths
 
 ```sh
@@ -255,6 +257,8 @@ filter-repo-rs --path-regex "^temp/.*\.tmp$" --invert-paths
 ```sh
 filter-repo-rs --analyze --analyze-json
 ```
+
+Reachability note: object/path-heavy metrics in analyze output only consider objects reachable from refs.
 
 Configure thresholds in `.filter-repo-rs.toml`:
 

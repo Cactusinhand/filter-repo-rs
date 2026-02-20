@@ -239,3 +239,61 @@ fn analyze_report_does_not_include_placeholder_blob_ids() {
         report.metrics.largest_blobs
     );
 }
+
+#[test]
+fn analyze_report_excludes_unreachable_blobs_from_top_lists() {
+    let repo = init_repo();
+    write_file(&repo, "src/reachable.txt", "reachable\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["commit", "-m", "add reachable blob"]).0,
+        0
+    );
+
+    write_file(&repo, "tmp-unreachable.bin", &"U".repeat(128 * 1024));
+    let (status, stdout, stderr) = run_git(&repo, &["hash-object", "-w", "tmp-unreachable.bin"]);
+    assert_eq!(status, 0, "hash-object should succeed: {}", stderr);
+    let unreachable_oid = stdout.trim().to_string();
+    assert!(
+        !unreachable_oid.is_empty(),
+        "expected hash-object to return an oid"
+    );
+
+    let (_, rev_list, _) = run_git(&repo, &["rev-list", "--objects", "--all"]);
+    assert!(
+        !rev_list
+            .lines()
+            .any(|line| line.starts_with(unreachable_oid.as_str())),
+        "unreachable blob should not appear in reachable object listing"
+    );
+
+    let mut opts = fr::Options::default();
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.mode = fr::Mode::Analyze;
+    opts.force = true;
+    opts.analyze.top = 1;
+    opts.analyze.thresholds.warn_blob_bytes = 1;
+
+    let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
+    assert!(
+        report
+            .metrics
+            .largest_blobs
+            .iter()
+            .all(|blob| blob.oid != unreachable_oid),
+        "largest_blobs should not include unreachable oid {}: {:?}",
+        unreachable_oid,
+        report.metrics.largest_blobs
+    );
+    assert!(
+        report
+            .metrics
+            .blobs_over_threshold
+            .iter()
+            .all(|blob| blob.oid != unreachable_oid),
+        "blobs_over_threshold should not include unreachable oid {}: {:?}",
+        unreachable_oid,
+        report.metrics.blobs_over_threshold
+    );
+}
