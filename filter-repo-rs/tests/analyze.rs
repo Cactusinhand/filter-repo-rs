@@ -214,3 +214,28 @@ fn analyze_json_stdout_is_valid_json_without_progress_prefix() {
         stdout
     );
 }
+
+#[test]
+fn analyze_report_does_not_include_placeholder_blob_ids() {
+    let repo = init_repo();
+    write_file(&repo, "src/a.txt", "a\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(run_git(&repo, &["commit", "-m", "seed analyze placeholder"]).0, 0);
+
+    let mut opts = fr::Options::default();
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.mode = fr::Mode::Analyze;
+    opts.force = true;
+
+    let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
+    assert!(
+        report
+            .metrics
+            .largest_blobs
+            .iter()
+            .all(|b| !b.oid.starts_with("placeholder_")),
+        "largest_blobs should not contain placeholder oids: {:?}",
+        report.metrics.largest_blobs
+    );
+}

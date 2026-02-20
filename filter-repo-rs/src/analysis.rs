@@ -540,36 +540,10 @@ fn process_commit_block(commit_data: &[String], stats: &mut StatsCollection) -> 
         return Ok(());
     }
 
-    let commit = parts[0].to_string();
-    let parents: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-
-    // Remaining lines are file changes (from --name-status)
-    let mut file_changes = Vec::new();
-    for line in commit_data.iter().skip(1) {
-        if line.is_empty() {
-            continue;
-        }
-        // Format: STATUS\tOLD_PATH\tNEW_PATH or STATUS\tPATH
-        let parts: Vec<&str> = line.split('\t').collect();
-        if parts.is_empty() {
-            continue;
-        }
-
-        let status = parts[0];
-        let path = if parts.len() > 1 { parts[1] } else { parts[0] };
-
-        // Create placeholder that won't interfere with real hashes
-        let placeholder_id = format!("placeholder_{}", path.len());
-
-        file_changes.push((
-            vec!["100644".to_string()],
-            vec![placeholder_id],
-            status.to_string(),
-            vec![path.to_string()],
-        ));
+    let parent_count = parts.len().saturating_sub(1);
+    if stats.max_parents < parent_count {
+        stats.max_parents = parent_count;
     }
-
-    analyze_commit(stats, commit, parents, file_changes);
     stats.num_commits += 1;
 
     Ok(())
@@ -629,47 +603,6 @@ fn gather_oversized_commit_messages(
         }
     }
     Ok(stats)
-}
-
-// Type alias to reduce complexity
-type FileChange = (Vec<String>, Vec<String>, String, Vec<String>);
-
-fn analyze_commit(
-    stats: &mut StatsCollection,
-    _commit: String,
-    parents: Vec<String>,
-    file_changes: Vec<FileChange>,
-) {
-    // Track max parents seen
-    if stats.max_parents < parents.len() {
-        stats.max_parents = parents.len();
-    }
-    for change in file_changes {
-        let (modes, shas, change_types, filenames) = change;
-        let mode = &modes[modes.len() - 1];
-        let sha = &shas[shas.len() - 1];
-        let filename = &filenames[filenames.len() - 1];
-
-        // Skip submodules and deletions
-        if mode == "160000" || mode == "000000" {
-            continue;
-        }
-
-        // Track deletions - more efficient check
-        let has_additions = !change_types.is_empty()
-            && change_types
-                .bytes()
-                .any(|c| matches!(c, b'A' | b'M' | b'T'));
-        if !has_additions {
-            continue;
-        }
-
-        // Record blob paths - use the hash as-is to avoid to_ascii_lowercase allocation
-        // Git hashes are already lowercase in most cases, and case insensitivity isn't critical for analysis
-        let paths_entry = stats.blob_paths.entry(sha.clone()).or_default();
-        paths_entry.push(filename.clone());
-        stats.all_names.insert(filename.clone());
-    }
 }
 
 // (removed old gather_history_stats; superseded by gather_history_fast_export)
