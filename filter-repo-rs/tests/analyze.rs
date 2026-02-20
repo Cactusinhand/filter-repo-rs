@@ -176,3 +176,41 @@ fn analyze_mode_warns_on_commit_thresholds() {
         "expected warning about excessive commit parents"
     );
 }
+
+#[test]
+fn analyze_json_stdout_is_valid_json_without_progress_prefix() {
+    let repo = init_repo();
+    write_file(&repo, "src/a.txt", "a\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(run_git(&repo, &["commit", "-m", "seed analyze json"]).0, 0);
+
+    let output = cli_command()
+        .arg("--analyze")
+        .arg("--analyze-json")
+        .arg("--source")
+        .arg(repo.to_string_lossy().as_ref())
+        .arg("--target")
+        .arg(repo.to_string_lossy().as_ref())
+        .output()
+        .expect("run filter-repo-rs analyze json");
+
+    assert!(
+        output.status.success(),
+        "analyze json should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("stdout should contain only valid json");
+    assert!(
+        parsed.get("metrics").is_some(),
+        "metrics missing from json: {}",
+        stdout
+    );
+    assert!(
+        parsed.get("warnings").is_some(),
+        "warnings missing from json: {}",
+        stdout
+    );
+}

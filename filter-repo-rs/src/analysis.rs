@@ -1049,9 +1049,10 @@ fn flush_progress_writer<W: Write>(writer: &mut W) -> io::Result<bool> {
 }
 
 fn write_progress_stdout(args: std::fmt::Arguments<'_>) -> io::Result<bool> {
-    let mut stdout = io::stdout();
-    match stdout.write_fmt(args) {
-        Ok(()) => flush_progress_writer(&mut stdout),
+    // Progress belongs on stderr so machine-readable stdout (e.g. --analyze-json) stays clean.
+    let mut stderr = io::stderr();
+    match stderr.write_fmt(args) {
+        Ok(()) => flush_progress_writer(&mut stderr),
         Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
         Err(err) => Err(err),
     }
