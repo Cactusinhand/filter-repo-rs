@@ -1228,16 +1228,16 @@ fn get_base_help_sections() -> Vec<HelpSection> {
             options: vec![
                 HelpOption {
                     name: "--source DIR".to_string(),
-                    description: vec!["Source Git working directory (default .)".to_string()],
+                    description: vec!["Source Git working directory (default: .)".to_string()],
                 },
                 HelpOption {
                     name: "--target DIR".to_string(),
-                    description: vec!["Target Git working directory (default .)".to_string()],
+                    description: vec!["Target Git working directory (default: .)".to_string()],
                 },
                 HelpOption {
                     name: "--refs REF".to_string(),
                     description: vec![
-                        "Ref to export (repeatable; defaults to --all)".to_string(),
+                        "Ref to export. Repeatable. Defaults to --all.".to_string(),
                         "Implies --partial".to_string(),
                     ],
                 },
@@ -1252,15 +1252,15 @@ fn get_base_help_sections() -> Vec<HelpSection> {
             options: vec![
                 HelpOption {
                     name: "--path PREFIX".to_string(),
-                    description: vec!["Include-only files under PREFIX (repeatable)".to_string()],
+                    description: vec!["Include-only files under PREFIX. Repeatable.".to_string()],
                 },
                 HelpOption {
                     name: "--path-glob GLOB".to_string(),
-                    description: vec!["Include by glob (repeatable)".to_string()],
+                    description: vec!["Include by glob. Repeatable.".to_string()],
                 },
                 HelpOption {
                     name: "--path-regex REGEX".to_string(),
-                    description: vec!["Include by Rust regex (repeatable)".to_string()],
+                    description: vec!["Include by Rust regex. Repeatable.".to_string()],
                 },
                 HelpOption {
                     name: "--invert-paths".to_string(),
@@ -1418,7 +1418,7 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     description: vec!["Reduce output noise".to_string()],
                 },
                 HelpOption {
-                    name: "--force, -f".to_string(),
+                    name: "-f, --force".to_string(),
                     description: vec![
                         "Bypass safety prompts and checks where applicable".to_string()
                     ],
@@ -1444,7 +1444,7 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     name: "--detect-pattern REGEX".to_string(),
                     description: vec![
                         "Additional regex pattern for --detect-secrets".to_string(),
-                        "Repeatable; first capture group is used when present".to_string(),
+                        "Repeatable. First capture group is used when present.".to_string(),
                     ],
                 },
                 HelpOption {
@@ -1502,7 +1502,7 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--analyze-top N".to_string(),
                     description: vec![
-                        "Number of largest blobs/trees to show (default 10)".to_string()
+                        "Number of largest blobs/trees to show (default: 10)".to_string()
                     ],
                 },
             ],
@@ -1586,8 +1586,8 @@ fn get_misc_help_section() -> HelpSection {
             HelpOption {
                 name: "--config FILE".to_string(),
                 description: vec![
-                    "Load options from TOML config file (default".to_string(),
-                    "<source>/.filter-repo-rs.toml)".to_string(),
+                    "Load options from TOML config file (default: <source>/.filter-repo-rs.toml)"
+                        .to_string(),
                 ],
             },
             HelpOption {
@@ -1601,6 +1601,28 @@ fn get_misc_help_section() -> HelpSection {
             HelpOption {
                 name: "-V, --version".to_string(),
                 description: vec!["Show version information".to_string()],
+            },
+        ],
+    }
+}
+
+fn get_examples_help_section() -> HelpSection {
+    HelpSection {
+        title: "Examples:".to_string(),
+        options: vec![
+            HelpOption {
+                name: "Analyze only".to_string(),
+                description: vec!["filter-repo-rs --analyze --analyze-top 20".to_string()],
+            },
+            HelpOption {
+                name: "Keep src/ at repo root".to_string(),
+                description: vec![
+                    "filter-repo-rs --path src/ --path-rename src/: --force".to_string()
+                ],
+            },
+            HelpOption {
+                name: "Dry-run secret detection".to_string(),
+                description: vec!["filter-repo-rs --detect-secrets --dry-run".to_string()],
             },
         ],
     }
@@ -1629,4 +1651,7 @@ pub fn print_help(debug_mode: bool) {
 
     // Print misc section
     print!("{}", format_help_section(&get_misc_help_section()));
+
+    // Print usage examples
+    print!("{}", format_help_section(&get_examples_help_section()));
 }

@@ -65,6 +65,42 @@ fn help_hides_debug_sections_without_debug_mode() {
 }
 
 #[test]
+fn help_format_follows_cli_conventions() {
+    let output = cli_command()
+        .arg("--help")
+        .output()
+        .expect("run filter-repo-rs --help");
+
+    assert!(output.status.success(), "help should exit successfully");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("-f, --force"),
+        "help should list short option before long option for force"
+    );
+    assert!(
+        !stdout.contains("--force, -f"),
+        "help should not list long option before short option for force"
+    );
+    assert!(
+        stdout.contains("Examples:"),
+        "help should include an examples section"
+    );
+    assert!(
+        stdout.contains("Source Git working directory (default: .)"),
+        "default values should use consistent '(default: value)' style"
+    );
+    assert!(
+        stdout.contains("Ref to export. Repeatable. Defaults to --all."),
+        "repeatable options should use consistent sentence style"
+    );
+    assert!(
+        stdout.contains("Number of largest blobs/trees to show (default: 10)"),
+        "default value formatting should be consistent for numeric defaults"
+    );
+}
+
+#[test]
 fn help_shows_debug_sections_in_debug_mode() {
     let output = cli_command()
         .arg("--debug-mode")
