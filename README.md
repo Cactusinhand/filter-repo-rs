@@ -103,6 +103,7 @@ Note: `--mailmap` takes precedence. If `--mailmap` is provided, `--author-rewrit
 | `--dry-run`      | Preview changes without modifying anything |
 | `--write-report` | Generate audit report of all changes       |
 | `--sensitive`    | Cover all refs including remotes           |
+| `--path-compat-policy` | Windows path compatibility mode (`sanitize|skip|error`) |
 | `--detect-secrets` | Detect potential secrets in reachable history |
 
 ## Installation
@@ -282,12 +283,13 @@ After running, check `.git/filter-repo/`:
 - `commit-map` — old → new commit mapping
 - `ref-map` — old → new reference mapping
 - `report.txt` — change summary (with `--write-report`)
+- `windows-path-report.txt` — Windows path compatibility details (written automatically when paths are sanitized/skipped)
 
 ## Limitations
 
 - Merge simplification still being optimized for complex topologies
 - No incremental processing (`--state-branch`) yet
-- Windows path policy fixed to "sanitize" mode
+- `--path-compat-policy` currently applies only when running on Windows hosts
 
 ## Acknowledgments
 

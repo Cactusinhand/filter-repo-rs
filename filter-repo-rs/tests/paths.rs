@@ -339,7 +339,7 @@ fn path_regex_filters_and_respects_invert() {
 }
 
 #[test]
-fn windows_path_policy_sanitizes_or_preserves_bytes() {
+fn path_compat_windows_sanitizes_or_preserves_bytes() {
     let cases = vec![
         (
             b"dir/inv:name?.txt ".as_ref(),

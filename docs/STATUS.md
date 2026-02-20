@@ -109,11 +109,11 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
   - Commit/tag message short/long hash translation is implemented using `commit-map` (old → new);
     a `--preserve-commit-hashes` flag to disable this behavior is not yet available.
 
- - Windows path policy
- - Sanitization is always on for rebuilt lines; no user-selectable policy (sanitize|skip|error) yet.
-  - Integration tests cover the sanitization behavior (mirrors existing always-sanitize policy) alongside
-    path filtering/renames, commit/ref map emission, and ref finalization. Run them with
-    `cargo test -p filter-repo-rs` (requires Git in `PATH`).
+ - Path compatibility policy
+ - `--path-compat-policy={sanitize|skip|error}` is available (default `sanitize`).
+  - Policy is currently enforced only when running on Windows hosts.
+  - When policy matches paths, a dedicated `.git/filter-repo/windows-path-report.txt` audit file is emitted.
+  - `report.txt` / `report.json` include a Windows path compatibility summary when enabled via report flags.
 
 ## Non-goals
 
@@ -160,8 +160,8 @@ Remaining for MVP polish:
 3) Commit-map completeness
    - Done: pruned commits recorded as `old -> 0000000000000000000000000000000000000000`; commit-map always written.
 
-4) Windows path policy flag
-   - `--windows-path-policy=[sanitize|skip|error]` (default sanitize) with a per-path report for changed names.
+4) Path compatibility policy
+   - Done: `--path-compat-policy=[sanitize|skip|error]` (default sanitize), plus per-path compatibility reporting.
 
 5) Tests & docs
    - Initial integration tests added for path filtering + branch rename + HEAD update, and for commit-map pruned entries. Next: annotated vs lightweight tag scenarios, path-rename matrices, and encoding/quoting notes.

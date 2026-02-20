@@ -98,6 +98,10 @@ fn help_format_follows_cli_conventions() {
         stdout.contains("Number of largest blobs/trees to show (default: 10)"),
         "default value formatting should be consistent for numeric defaults"
     );
+    assert!(
+        stdout.contains("--path-compat-policy"),
+        "help should mention path compatibility policy flag"
+    );
 }
 
 #[test]
@@ -508,6 +512,72 @@ fn cli_returns_exit_code_2_for_parse_errors() {
     assert!(
         stderr.contains("Unknown argument"),
         "parse error should mention unknown argument: {}",
+        stderr
+    );
+}
+
+#[test]
+fn path_compat_policy_accepts_known_values() {
+    let repo = init_repo();
+    for value in ["sanitize", "skip", "error"] {
+        let output = cli_command()
+            .arg("--path-compat-policy")
+            .arg(value)
+            .arg("--dry-run")
+            .current_dir(&repo)
+            .output()
+            .expect("run filter-repo-rs with --path-compat-policy");
+        assert!(
+            output.status.success(),
+            "expected --path-compat-policy={} to parse successfully: stderr={}",
+            value,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn path_compat_policy_rejects_unknown_value() {
+    let repo = init_repo();
+    let output = cli_command()
+        .arg("--path-compat-policy")
+        .arg("maybe")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with invalid --path-compat-policy value");
+    assert_eq!(
+        Some(2),
+        output.status.code(),
+        "invalid policy value should fail parse with exit code 2"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--path-compat-policy expects one of sanitize|skip|error"),
+        "expected invalid value guidance in stderr: {}",
+        stderr
+    );
+}
+
+#[test]
+fn windows_path_policy_flag_is_rejected() {
+    let repo = init_repo();
+    let output = cli_command()
+        .arg("--windows-path-policy")
+        .arg("sanitize")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with legacy windows policy flag");
+    assert_eq!(
+        Some(2),
+        output.status.code(),
+        "legacy --windows-path-policy should be rejected"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unknown argument: --windows-path-policy"),
+        "expected unknown-argument error for removed flag: {}",
         stderr
     );
 }

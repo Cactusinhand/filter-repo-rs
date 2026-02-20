@@ -103,6 +103,7 @@ filter-repo-rs --author-rewrite author.txt \
 | `--dry-run`      | 预演，不实际修改         |
 | `--write-report` | 生成变更审计报告         |
 | `--sensitive`    | 覆盖所有 refs（含远端）  |
+| `--path-compat-policy` | Windows 路径兼容策略（`sanitize|skip|error`） |
 | `--detect-secrets` | 检测可达历史中的潜在敏感信息 |
 
 ## 安装
@@ -282,12 +283,13 @@ git clone /path/to/backup.bundle restored-repo
 - `commit-map` — 旧提交 → 新提交映射
 - `ref-map` — 旧引用 → 新引用映射
 - `report.txt` — 变更摘要（需 `--write-report`）
+- `windows-path-report.txt` — Windows 路径兼容详情（当发生 sanitize/skip 时自动生成）
 
 ## 限制
 
 - 合并简化策略仍在优化，复杂拓扑可能需手动处理
 - 暂不支持增量处理（`--state-branch`）
-- Windows 路径策略固定为 "sanitize" 模式
+- `--path-compat-policy` 当前仅在 Windows 主机上生效
 
 ## 致谢
 

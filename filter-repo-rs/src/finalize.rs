@@ -38,6 +38,28 @@ pub struct Samples {
 }
 
 #[derive(Debug, Serialize)]
+pub struct WindowsPathSummary {
+    pub policy: String,
+    pub sanitized: usize,
+    pub skipped: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WindowsPathSamples {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sanitized: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WindowsPathReport {
+    pub summary: WindowsPathSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub samples: Option<WindowsPathSamples>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct Metadata {
     pub version: String,
     pub timestamp: String,
@@ -48,6 +70,8 @@ pub struct ReportData {
     pub summary: Summary,
     pub statistics: Statistics,
     pub samples: Samples,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows_path: Option<WindowsPathReport>,
     pub metadata: Metadata,
 }
 
@@ -397,6 +421,42 @@ pub fn finalize(
         }
     }
 
+    // Always emit windows path compatibility report when policy had hits.
+    if let Some(ref r) = report {
+        if let Some(ref wp) = r.windows_path {
+            let total_hits = wp.summary.sanitized + wp.summary.skipped;
+            if total_hits > 0 {
+                let path_report = debug_dir.join("windows-path-report.txt");
+                let mut f = File::create(&path_report)?;
+                writeln!(f, "=== Windows Path Compatibility Report ===")?;
+                writeln!(f, "Policy: {}", wp.summary.policy)?;
+                writeln!(f, "Sanitized: {}", wp.summary.sanitized)?;
+                writeln!(f, "Skipped: {}", wp.summary.skipped)?;
+                if let Some(samples) = &wp.samples {
+                    if !samples.sanitized.is_empty() {
+                        writeln!(f, "\n=== Sanitized paths ===")?;
+                        for s in &samples.sanitized {
+                            writeln!(f, "{}", s)?;
+                        }
+                    }
+                    if !samples.skipped.is_empty() {
+                        writeln!(f, "\n=== Skipped paths ===")?;
+                        for s in &samples.skipped {
+                            writeln!(f, "{}", s)?;
+                        }
+                    }
+                }
+                eprintln!(
+                    "warning: path compatibility policy '{}' adjusted history (sanitized: {}, skipped: {}); details: {}",
+                    wp.summary.policy,
+                    wp.summary.sanitized,
+                    wp.summary.skipped,
+                    path_report.display()
+                );
+            }
+        }
+    }
+
     // Optional reporting (use only stream-collected data; no rescans)
     if opts.write_report || opts.write_report_json {
         // Write text report
@@ -443,6 +503,29 @@ pub fn finalize(
                     writeln!(f, "\n=== Sample paths (modified) ===")?;
                     for p in &r.samples.modified {
                         writeln!(f, "{}", p)?;
+                    }
+                }
+                if let Some(ref wp) = r.windows_path {
+                    let total_hits = wp.summary.sanitized + wp.summary.skipped;
+                    if total_hits > 0 {
+                        writeln!(f, "\n=== Windows path compatibility ===")?;
+                        writeln!(f, "Policy: {}", wp.summary.policy)?;
+                        writeln!(f, "Sanitized: {}", wp.summary.sanitized)?;
+                        writeln!(f, "Skipped: {}", wp.summary.skipped)?;
+                        if let Some(samples) = &wp.samples {
+                            if !samples.sanitized.is_empty() {
+                                writeln!(f, "\n=== Sample paths (path-compat sanitized) ===")?;
+                                for p in &samples.sanitized {
+                                    writeln!(f, "{}", p)?;
+                                }
+                            }
+                            if !samples.skipped.is_empty() {
+                                writeln!(f, "\n=== Sample paths (path-compat skipped) ===")?;
+                                for p in &samples.skipped {
+                                    writeln!(f, "{}", p)?;
+                                }
+                            }
+                        }
                     }
                 }
             } else {
@@ -892,6 +975,7 @@ mod tests {
                 by_sha: vec!["path/sha.bin".to_string()],
                 modified: vec!["path/modified.bin".to_string()],
             },
+            windows_path: None,
             metadata: Metadata {
                 version: "0.2.0".to_string(),
                 timestamp: "1234567890".to_string(),

@@ -1,5 +1,7 @@
 use crate::opts::Options;
-use crate::pathutil::{dequote_c_style_bytes, encode_path_for_fi, glob_match_bytes};
+use crate::pathutil::{
+    dequote_c_style_bytes, encode_path_for_fi_with_policy, glob_match_bytes, PathCompatEvent,
+};
 
 #[derive(Debug)]
 enum FileChange {
@@ -174,10 +176,36 @@ fn rewrite_path(mut path: Vec<u8>, opts: &Options) -> Vec<u8> {
 }
 
 // Return Some(new_line) if the filechange should be kept (possibly rebuilt), None to drop.
-pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
+pub struct HandleFileChangeOutcome {
+    pub line: Option<Vec<u8>>,
+    pub path_compat_events: Vec<PathCompatEvent>,
+}
+
+fn encode_path_with_policy(
+    path: &[u8],
+    opts: &Options,
+    path_compat_events: &mut Vec<PathCompatEvent>,
+) -> Result<Option<Vec<u8>>, String> {
+    let (encoded, event) = encode_path_for_fi_with_policy(path, opts.path_compat_policy)?;
+    if let Some(e) = event {
+        path_compat_events.push(e);
+    }
+    Ok(encoded)
+}
+
+// Return Some(new_line) if the filechange should be kept (possibly rebuilt), None to drop.
+pub fn handle_file_change_line(
+    line: &[u8],
+    opts: &Options,
+) -> Result<HandleFileChangeOutcome, String> {
     let parsed = match parse_file_change_line(line) {
         Some(p) => p,
-        None => return Some(line.to_vec()),
+        None => {
+            return Ok(HandleFileChangeOutcome {
+                line: Some(line.to_vec()),
+                path_compat_events: Vec::new(),
+            });
+        }
     };
 
     let keep = match &parsed {
@@ -189,58 +217,125 @@ pub fn handle_file_change_line(line: &[u8], opts: &Options) -> Option<Vec<u8>> {
         }
     };
     if !keep {
-        return None;
+        return Ok(HandleFileChangeOutcome {
+            line: None,
+            path_compat_events: Vec::new(),
+        });
     }
 
+    let mut path_compat_events = Vec::new();
     match parsed {
-        FileChange::DeleteAll => Some(line.to_vec()),
+        FileChange::DeleteAll => Ok(HandleFileChangeOutcome {
+            line: Some(line.to_vec()),
+            path_compat_events,
+        }),
         FileChange::Modify { mode, id, path } => {
             let new_path = rewrite_path(path, opts);
+            let enc = match encode_path_with_policy(&new_path, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
             let mut rebuilt = Vec::with_capacity(line.len() + new_path.len());
             rebuilt.extend_from_slice(b"M ");
             rebuilt.extend_from_slice(&mode);
             rebuilt.push(b' ');
             rebuilt.extend_from_slice(&id);
             rebuilt.push(b' ');
-            let enc = encode_path_for_fi(&new_path);
             rebuilt.extend_from_slice(&enc);
             rebuilt.push(b'\n');
-            Some(rebuilt)
+            Ok(HandleFileChangeOutcome {
+                line: Some(rebuilt),
+                path_compat_events,
+            })
         }
         FileChange::Delete { path } => {
             let new_path = rewrite_path(path, opts);
+            let enc = match encode_path_with_policy(&new_path, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
             let mut rebuilt = Vec::with_capacity(2 + new_path.len() + 2);
             rebuilt.extend_from_slice(b"D ");
-            let enc = encode_path_for_fi(&new_path);
             rebuilt.extend_from_slice(&enc);
             rebuilt.push(b'\n');
-            Some(rebuilt)
+            Ok(HandleFileChangeOutcome {
+                line: Some(rebuilt),
+                path_compat_events,
+            })
         }
         FileChange::Copy { src, dst } => {
             let new_src = rewrite_path(src, opts);
             let new_dst = rewrite_path(dst, opts);
+            let enc_src = match encode_path_with_policy(&new_src, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
+            let enc_dst = match encode_path_with_policy(&new_dst, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
             let mut rebuilt = Vec::with_capacity(line.len() + new_src.len() + new_dst.len());
             rebuilt.extend_from_slice(b"C ");
-            let enc_src = encode_path_for_fi(&new_src);
             rebuilt.extend_from_slice(&enc_src);
             rebuilt.push(b' ');
-            let enc_dst = encode_path_for_fi(&new_dst);
             rebuilt.extend_from_slice(&enc_dst);
             rebuilt.push(b'\n');
-            Some(rebuilt)
+            Ok(HandleFileChangeOutcome {
+                line: Some(rebuilt),
+                path_compat_events,
+            })
         }
         FileChange::Rename { src, dst } => {
             let new_src = rewrite_path(src, opts);
             let new_dst = rewrite_path(dst, opts);
+            let enc_src = match encode_path_with_policy(&new_src, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
+            let enc_dst = match encode_path_with_policy(&new_dst, opts, &mut path_compat_events)? {
+                Some(enc) => enc,
+                None => {
+                    return Ok(HandleFileChangeOutcome {
+                        line: None,
+                        path_compat_events,
+                    });
+                }
+            };
             let mut rebuilt = Vec::with_capacity(line.len() + new_src.len() + new_dst.len());
             rebuilt.extend_from_slice(b"R ");
-            let enc_src = encode_path_for_fi(&new_src);
             rebuilt.extend_from_slice(&enc_src);
             rebuilt.push(b' ');
-            let enc_dst = encode_path_for_fi(&new_dst);
             rebuilt.extend_from_slice(&enc_dst);
             rebuilt.push(b'\n');
-            Some(rebuilt)
+            Ok(HandleFileChangeOutcome {
+                line: Some(rebuilt),
+                path_compat_events,
+            })
         }
     }
 }

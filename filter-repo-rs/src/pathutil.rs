@@ -1,3 +1,130 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathCompatPolicy {
+    Sanitize,
+    Skip,
+    Error,
+}
+
+impl Default for PathCompatPolicy {
+    fn default() -> Self {
+        Self::Sanitize
+    }
+}
+
+impl PathCompatPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PathCompatPolicy::Sanitize => "sanitize",
+            PathCompatPolicy::Skip => "skip",
+            PathCompatPolicy::Error => "error",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "sanitize" => Some(PathCompatPolicy::Sanitize),
+            "skip" => Some(PathCompatPolicy::Skip),
+            "error" => Some(PathCompatPolicy::Error),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathCompatAction {
+    Sanitized,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathCompatEvent {
+    pub action: PathCompatAction,
+    pub original: Vec<u8>,
+    pub rewritten: Option<Vec<u8>>,
+    pub reason: String,
+}
+
+fn windows_path_compat_reasons(path: &[u8]) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if path
+        .iter()
+        .any(|b| matches!(*b, b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*'))
+    {
+        reasons.push("contains one or more Windows-forbidden characters");
+    }
+    let trailing_invalid = path
+        .rsplit(|&c| c == b'/')
+        .next()
+        .and_then(|comp| comp.last())
+        .is_some_and(|c| *c == b'.' || *c == b' ');
+    if trailing_invalid {
+        reasons.push("final path component ends with '.' or space");
+    }
+    reasons
+}
+
+fn summarize_windows_path_compat_reason(path: &[u8]) -> String {
+    let reasons = windows_path_compat_reasons(path);
+    if reasons.is_empty() {
+        "path is incompatible with Windows filename rules".to_string()
+    } else {
+        reasons.join("; ")
+    }
+}
+
+pub fn format_path_bytes_for_report(path: &[u8]) -> String {
+    let mut out = String::with_capacity(path.len() + 2);
+    out.push('"');
+    for &b in path {
+        for c in std::ascii::escape_default(b) {
+            out.push(c as char);
+        }
+    }
+    out.push('"');
+    out
+}
+
+pub fn apply_path_compat_policy(
+    path: &[u8],
+    policy: PathCompatPolicy,
+) -> Result<(Option<Vec<u8>>, Option<PathCompatEvent>), String> {
+    if !cfg!(windows) {
+        return Ok((Some(path.to_vec()), None));
+    }
+
+    let sanitized = sanitize_invalid_windows_path_bytes(path);
+    if sanitized == path {
+        return Ok((Some(path.to_vec()), None));
+    }
+
+    let reason = summarize_windows_path_compat_reason(path);
+    match policy {
+        PathCompatPolicy::Sanitize => Ok((
+            Some(sanitized.clone()),
+            Some(PathCompatEvent {
+                action: PathCompatAction::Sanitized,
+                original: path.to_vec(),
+                rewritten: Some(sanitized),
+                reason,
+            }),
+        )),
+        PathCompatPolicy::Skip => Ok((
+            None,
+            Some(PathCompatEvent {
+                action: PathCompatAction::Skipped,
+                original: path.to_vec(),
+                rewritten: None,
+                reason,
+            }),
+        )),
+        PathCompatPolicy::Error => Err(format!(
+            "--path-compat-policy=error rejected path {} ({})",
+            format_path_bytes_for_report(path),
+            reason
+        )),
+    }
+}
+
 #[allow(dead_code)]
 #[cfg(windows)]
 pub fn sanitize_invalid_windows_path_bytes(p: &[u8]) -> Vec<u8> {
@@ -237,13 +364,22 @@ pub fn normalize_cli_glob_str(s: &str) -> Result<Vec<u8>, String> {
 /// - Apply C-style quoting if needed (spaces, control, non-ASCII, quotes, backslashes)
 #[allow(dead_code)]
 pub fn encode_path_for_fi(bytes: &[u8]) -> Vec<u8> {
-    let win = sanitize_invalid_windows_path_bytes(bytes);
-    let safe = sanitize_fast_import_path_bytes(&win);
+    let safe = sanitize_fast_import_path_bytes(bytes);
     if needs_c_style_quote(&safe) {
         enquote_c_style_bytes(&safe)
     } else {
         safe
     }
+}
+
+#[allow(dead_code)]
+pub fn encode_path_for_fi_with_policy(
+    bytes: &[u8],
+    policy: PathCompatPolicy,
+) -> Result<(Option<Vec<u8>>, Option<PathCompatEvent>), String> {
+    let (maybe_path, event) = apply_path_compat_policy(bytes, policy)?;
+    let encoded = maybe_path.map(|p| encode_path_for_fi(&p));
+    Ok((encoded, event))
 }
 /// Sanitize bytes that git fast-import rejects in pathnames.
 ///
@@ -265,13 +401,7 @@ pub fn sanitize_fast_import_path_bytes(p: &[u8]) -> Vec<u8> {
 
 #[allow(dead_code)]
 pub fn sanitize_and_encode_path_for_import(path: &[u8]) -> Vec<u8> {
-    let win = sanitize_invalid_windows_path_bytes(path);
-    let safe = sanitize_fast_import_path_bytes(&win);
-    if needs_c_style_quote(&safe) {
-        enquote_c_style_bytes(&safe)
-    } else {
-        safe
-    }
+    encode_path_for_fi(path)
 }
 
 #[allow(dead_code)]

@@ -143,6 +143,7 @@ pub fn process_commit_line(
     parent_lines: &mut Vec<ParentLine>,
     alias_map: &mut HashMap<u32, u32>,
     emitted_marks: &std::collections::HashSet<u32>,
+    path_compat_events: &mut Vec<crate::pathutil::PathCompatEvent>,
 ) -> io::Result<CommitAction> {
     // mark line
     if let Some(m) = parse_mark_number(line) {
@@ -214,7 +215,9 @@ pub fn process_commit_line(
         || line.starts_with(b"R ")
         || line == b"deleteall\n"
     {
-        if let Some(newline) = filechange::handle_file_change_line(line, opts) {
+        let outcome = filechange::handle_file_change_line(line, opts).map_err(io::Error::other)?;
+        path_compat_events.extend(outcome.path_compat_events);
+        if let Some(newline) = outcome.line {
             commit_buf.extend_from_slice(&newline);
             *commit_has_changes = true;
         }

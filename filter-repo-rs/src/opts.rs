@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use crate::error::FilterRepoError;
 use crate::gitutil::{self, GitCapabilities};
-use crate::pathutil::{normalize_cli_glob_str, normalize_cli_path_str};
+use crate::pathutil::{normalize_cli_glob_str, normalize_cli_path_str, PathCompatPolicy};
 
 /// Stage-3 toggle: set to `false` to error out instead of accepting legacy cleanup syntax.
 const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
@@ -179,6 +179,7 @@ pub struct Options {
     pub strip_blobs_with_ids: Option<PathBuf>,
     pub write_report: bool,
     pub write_report_json: bool,
+    pub path_compat_policy: PathCompatPolicy,
     pub cleanup: CleanupMode,
     pub reencode: bool,
     pub reencode_requested: Option<bool>,
@@ -235,6 +236,7 @@ impl Default for Options {
             strip_blobs_with_ids: None,
             write_report: false,
             write_report_json: false,
+            path_compat_policy: PathCompatPolicy::default(),
             cleanup: CleanupMode::None,
             reencode: true,
             reencode_requested: None,
@@ -675,6 +677,13 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--write-report-json" => {
                 opts.write_report_json = true;
+            }
+            "--path-compat-policy" => {
+                let v = it.next().expect("--path-compat-policy requires MODE");
+                opts.path_compat_policy = PathCompatPolicy::parse(&v).unwrap_or_else(|| {
+                    eprintln!("--path-compat-policy expects one of sanitize|skip|error");
+                    std::process::exit(2);
+                });
             }
             "--cleanup" => {
                 if let Some(next) = it.clone().next() {
@@ -1403,6 +1412,13 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     name: "--write-report-json".to_string(),
                     description: vec![
                         "Write .git/filter-repo/report.json (machine-readable)".to_string()
+                    ],
+                },
+                HelpOption {
+                    name: "--path-compat-policy {sanitize|skip|error}".to_string(),
+                    description: vec![
+                        "Windows path compatibility policy for rebuilt paths".to_string(),
+                        "Current scope: enforced only when running on Windows hosts".to_string(),
                     ],
                 },
                 HelpOption {

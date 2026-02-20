@@ -87,6 +87,48 @@ fn add_sample(samples: &mut Vec<Vec<u8>>, path: &[u8]) {
         samples.push(path.to_vec());
     }
 }
+
+#[derive(Debug, Default)]
+struct PathCompatStats {
+    policy: String,
+    sanitized: usize,
+    skipped: usize,
+    sanitized_samples: Vec<String>,
+    skipped_samples: Vec<String>,
+}
+
+fn path_compat_sample_label(event: &crate::pathutil::PathCompatEvent) -> String {
+    let original = crate::pathutil::format_path_bytes_for_report(&event.original);
+    if let Some(ref rewritten) = event.rewritten {
+        format!(
+            "{} -> {} ({})",
+            original,
+            crate::pathutil::format_path_bytes_for_report(rewritten),
+            event.reason
+        )
+    } else {
+        format!("{} ({})", original, event.reason)
+    }
+}
+
+fn record_path_compat_event(stats: &mut PathCompatStats, event: crate::pathutil::PathCompatEvent) {
+    match event.action {
+        crate::pathutil::PathCompatAction::Sanitized => {
+            stats.sanitized += 1;
+            if stats.sanitized_samples.len() < REPORT_SAMPLE_LIMIT {
+                stats
+                    .sanitized_samples
+                    .push(path_compat_sample_label(&event));
+            }
+        }
+        crate::pathutil::PathCompatAction::Skipped => {
+            stats.skipped += 1;
+            if stats.skipped_samples.len() < REPORT_SAMPLE_LIMIT {
+                stats.skipped_samples.push(path_compat_sample_label(&event));
+            }
+        }
+    }
+}
 /// Threshold for deciding whether to keep SHA lookup in memory or on disk.
 /// When number of SHAs exceeds this, use disk-based sorted file.
 /// Lowered from 50,000 to 10,000 to reduce memory spike during sorting
@@ -701,6 +743,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     let mut samples_sha: Vec<Vec<u8>> = Vec::new();
     let mut samples_modified: Vec<Vec<u8>> = Vec::new();
     let mut inline_modified_paths: HashSet<Vec<u8>> = HashSet::new();
+    let mut path_compat_stats = PathCompatStats {
+        policy: opts.path_compat_policy.as_str().to_string(),
+        ..PathCompatStats::default()
+    };
     let mut line = Vec::with_capacity(8192);
     // Track if the previous M-line used inline content; store commit_buf position and path bytes
     let mut pending_inline: Option<(usize, Vec<u8>)> = None;
@@ -873,6 +919,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 || line == b"done\n"
             {
                 let short_mapper = short_hash_mapper.as_ref();
+                let mut path_events = Vec::new();
                 match crate::commit::process_commit_line(
                     b"\n",
                     opts,
@@ -898,6 +945,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     &mut parent_lines,
                     &mut alias_map,
                     &emitted_marks,
+                    &mut path_events,
                 )? {
                     crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
                     crate::commit::CommitAction::Ended => {
@@ -923,6 +971,9 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         in_commit = false;
                     }
                 }
+                for event in path_events {
+                    record_path_compat_event(&mut path_compat_stats, event);
+                }
             }
         }
         if in_commit {
@@ -947,11 +998,20 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         // Replace previously appended M inline line with a sanitized deletion
                         commit_buf.truncate(pos);
                         let decoded = crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
-                        let enc = crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
-                        commit_buf.extend_from_slice(b"D ");
-                        commit_buf.extend_from_slice(&enc);
-                        commit_buf.push(b'\n');
-                        commit_has_changes = true;
+                        let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
+                            &decoded,
+                            opts.path_compat_policy,
+                        )
+                        .map_err(io::Error::other)?;
+                        if let Some(event) = path_event {
+                            record_path_compat_event(&mut path_compat_stats, event);
+                        }
+                        if let Some(enc) = enc {
+                            commit_buf.extend_from_slice(b"D ");
+                            commit_buf.extend_from_slice(&enc);
+                            commit_buf.push(b'\n');
+                            commit_has_changes = true;
+                        }
                         // Record report sample for size-based strip
                         add_sample(&mut samples_size, &path_bytes);
                         continue;
@@ -1095,11 +1155,20 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                     // Emit deletion for the path (sanitize + quote)
                     let raw = &bytes[path_start..];
                     let decoded = crate::pathutil::decode_fast_export_path_bytes(raw);
-                    let enc = crate::pathutil::sanitize_and_encode_path_for_import(&decoded);
-                    commit_buf.extend_from_slice(b"D ");
-                    commit_buf.extend_from_slice(&enc);
-                    commit_buf.push(b'\n');
-                    commit_has_changes = true;
+                    let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
+                        &decoded,
+                        opts.path_compat_policy,
+                    )
+                    .map_err(io::Error::other)?;
+                    if let Some(event) = path_event {
+                        record_path_compat_event(&mut path_compat_stats, event);
+                    }
+                    if let Some(enc) = enc {
+                        commit_buf.extend_from_slice(b"D ");
+                        commit_buf.extend_from_slice(&enc);
+                        commit_buf.push(b'\n');
+                        commit_has_changes = true;
+                    }
                     let path_bytes = &bytes[path_start..];
                     let (mut r_size, mut r_sha) = (reason_size, reason_sha);
                     if !r_size && !r_sha {
@@ -1159,6 +1228,7 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             };
 
             let short_mapper = short_hash_mapper.as_ref();
+            let mut path_events = Vec::new();
             match crate::commit::process_commit_line(
                 &processed_line,
                 opts,
@@ -1184,11 +1254,18 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 &mut parent_lines,
                 &mut alias_map,
                 &emitted_marks,
+                &mut path_events,
             )? {
                 crate::commit::CommitAction::Consumed => {
+                    for event in path_events {
+                        record_path_compat_event(&mut path_compat_stats, event);
+                    }
                     continue;
                 }
                 crate::commit::CommitAction::Ended => {
+                    for event in path_events {
+                        record_path_compat_event(&mut path_compat_stats, event);
+                    }
                     if let Some(m) = commit_mark {
                         emitted_marks.insert(m);
                         if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
@@ -1515,7 +1592,10 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         import_broken,
         allow_flush_tag_resets,
         {
-            use crate::finalize::{Metadata, ReportData, Samples, Statistics, Summary};
+            use crate::finalize::{
+                Metadata, ReportData, Samples, Statistics, Summary, WindowsPathReport,
+                WindowsPathSamples, WindowsPathSummary,
+            };
             Some(ReportData {
                 summary: Summary {
                     blobs_stripped_by_size: suppressed_shas_by_size
@@ -1544,6 +1624,27 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         .into_iter()
                         .map(|p| String::from_utf8_lossy(&p).into_owned())
                         .collect(),
+                },
+                windows_path: if path_compat_stats.sanitized + path_compat_stats.skipped > 0 {
+                    Some(WindowsPathReport {
+                        summary: WindowsPathSummary {
+                            policy: path_compat_stats.policy,
+                            sanitized: path_compat_stats.sanitized,
+                            skipped: path_compat_stats.skipped,
+                        },
+                        samples: if path_compat_stats.sanitized_samples.is_empty()
+                            && path_compat_stats.skipped_samples.is_empty()
+                        {
+                            None
+                        } else {
+                            Some(WindowsPathSamples {
+                                sanitized: path_compat_stats.sanitized_samples,
+                                skipped: path_compat_stats.skipped_samples,
+                            })
+                        },
+                    })
+                } else {
+                    None
                 },
                 metadata: Metadata {
                     version: env!("CARGO_PKG_VERSION").to_string(),
