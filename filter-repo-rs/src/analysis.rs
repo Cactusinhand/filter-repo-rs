@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Instant;
@@ -366,6 +366,7 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
     let mut packed_size = HashMap::with_capacity(100_000);
     let mut blob_count = 0usize;
     let mut processed_objects = 0usize;
+    let mut progress_output_enabled = true;
     let mut line_buf = String::new();
 
     while reader.read_line(&mut line_buf)? > 0 {
@@ -391,21 +392,19 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
             processed_objects += 1;
 
             // Keep lightweight progress reporting without requiring full output buffering.
-            if processed_objects.is_multiple_of(1000) {
+            if progress_output_enabled && processed_objects.is_multiple_of(1000) {
                 let elapsed = start_time.elapsed();
                 let rate = if elapsed.as_secs_f64() > 0.0 {
                     processed_objects as f64 / elapsed.as_secs_f64()
                 } else {
                     0.0
                 };
-                print!(
+                progress_output_enabled = write_progress_stdout(format_args!(
                     "\r[*] Processing objects {} {} ({:.0}/s)",
                     processed_objects,
                     format_elapsed(elapsed),
                     rate
-                );
-                use std::io::Write;
-                std::io::stdout().flush().unwrap();
+                ))?;
             }
         }
         line_buf.clear();
@@ -419,19 +418,19 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
         )));
     }
 
-    if processed_objects > 0 {
+    if processed_objects > 0 && progress_output_enabled {
         let elapsed = start_time.elapsed();
         let rate = if elapsed.as_secs_f64() > 0.0 {
             processed_objects as f64 / elapsed.as_secs_f64()
         } else {
             0.0
         };
-        println!(
-            "\r[*] Processing objects {} {} ({:.0}/s)",
+        let _ = write_progress_stdout(format_args!(
+            "\r[*] Processing objects {} {} ({:.0}/s)\n",
             processed_objects,
             format_elapsed(elapsed),
             rate
-        );
+        ))?;
     }
 
     eprintln!(
@@ -471,6 +470,7 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
     let mut line_buf = String::new();
     let mut processed: usize = 0;
     let mut commit_data: Vec<String> = Vec::new();
+    let mut progress_output_enabled = true;
 
     while reader.read_line(&mut line_buf)? > 0 {
         let line = line_buf.trim_end();
@@ -482,19 +482,17 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
                 processed += 1;
 
                 // Progress indicator every 1000 commits
-                if processed.is_multiple_of(1000) {
+                if progress_output_enabled && processed.is_multiple_of(1000) {
                     let progress = ((processed as f64 / total_commits as f64) * 100.0) as u32;
                     let bar_length = 30;
                     let filled = progress as usize * bar_length / 100;
                     let bar: String = (0..bar_length)
                         .map(|i| if i < filled { '=' } else { ' ' })
                         .collect();
-                    print!(
+                    progress_output_enabled = write_progress_stdout(format_args!(
                         "\r[*] Processing commits [{}] {}% ({}/{})",
                         bar, progress, processed, total_commits
-                    );
-                    use std::io::Write;
-                    std::io::stdout().flush().unwrap();
+                    ))?;
                 }
             }
         } else {
@@ -518,7 +516,9 @@ fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result
     }
 
     // Clear progress line and show final result
-    println!();
+    if progress_output_enabled {
+        let _ = write_progress_stdout(format_args!("\n"))?;
+    }
     stats.num_commits = total_commits as u64;
     eprintln!(
         "[*] Commit processing completed. Total: {}",
@@ -1040,6 +1040,23 @@ fn run_git_capture_stream(
     Ok((BufReader::new(stdout), cmd))
 }
 
+fn flush_progress_writer<W: Write>(writer: &mut W) -> io::Result<bool> {
+    match writer.flush() {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
+fn write_progress_stdout(args: std::fmt::Arguments<'_>) -> io::Result<bool> {
+    let mut stdout = io::stdout();
+    match stdout.write_fmt(args) {
+        Ok(()) => flush_progress_writer(&mut stdout),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 fn to_mib(bytes: u64) -> f64 {
     bytes as f64 / 1024.0 / 1024.0
 }
@@ -1314,8 +1331,22 @@ fn build_summary_rows(metrics: &RepositoryMetrics) -> Vec<Vec<Cow<'_, str>>> {
 
 #[cfg(test)]
 mod tests {
-    use super::collect_blob_sizes_from_reader;
-    use std::io::Cursor;
+    use super::{collect_blob_sizes_from_reader, flush_progress_writer};
+    use std::io::{Cursor, ErrorKind, Write};
+
+    struct ErrorWriter {
+        kind: ErrorKind,
+    }
+
+    impl Write for ErrorWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::Error::new(self.kind, "forced flush error"))
+        }
+    }
 
     #[test]
     fn collect_blob_sizes_from_reader_tracks_only_blob_entries() {
@@ -1366,5 +1397,27 @@ ffffffffffffffffffffffffffffffffffffffff blob 12 6
             packed.get("ffffffffffffffffffffffffffffffffffffffff"),
             Some(&6)
         );
+    }
+
+    #[test]
+    fn flush_progress_writer_treats_broken_pipe_as_non_fatal() {
+        let mut writer = ErrorWriter {
+            kind: ErrorKind::BrokenPipe,
+        };
+        let result = flush_progress_writer(&mut writer);
+        assert!(result.is_ok(), "BrokenPipe should not propagate as error");
+        assert!(
+            !result.expect("BrokenPipe should map to non-fatal false"),
+            "BrokenPipe should return false to indicate no further progress output"
+        );
+    }
+
+    #[test]
+    fn flush_progress_writer_propagates_other_flush_errors() {
+        let mut writer = ErrorWriter {
+            kind: ErrorKind::PermissionDenied,
+        };
+        let result = flush_progress_writer(&mut writer);
+        assert!(result.is_err(), "non-BrokenPipe flush errors should propagate");
     }
 }
