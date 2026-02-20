@@ -56,7 +56,6 @@ fn strip_ids_report_written() {
     assert!(s.contains("secret.bin"));
 }
 
-#[cfg(windows)]
 #[test]
 fn windows_path_report_is_written_even_without_write_report() {
     let repo = init_repo();
@@ -92,24 +91,30 @@ done
         .join(".git")
         .join("filter-repo")
         .join("windows-path-report.txt");
-    assert!(
-        path_report.exists(),
-        "windows path report should be generated when policy has hits"
-    );
-    let mut s = String::new();
-    File::open(path_report)
-        .unwrap()
-        .read_to_string(&mut s)
-        .unwrap();
-    assert!(s.contains("Policy: sanitize"), "missing policy line: {}", s);
-    assert!(
-        s.contains("bad:name?.txt"),
-        "missing original path sample: {}",
-        s
-    );
+    if cfg!(windows) {
+        assert!(
+            path_report.exists(),
+            "windows path report should be generated when policy has hits"
+        );
+        let mut s = String::new();
+        File::open(path_report)
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
+        assert!(s.contains("Policy: sanitize"), "missing policy line: {}", s);
+        assert!(
+            s.contains("bad:name?.txt"),
+            "missing original path sample: {}",
+            s
+        );
+    } else {
+        assert!(
+            !path_report.exists(),
+            "non-windows hosts should not generate windows path report"
+        );
+    }
 }
 
-#[cfg(windows)]
 #[test]
 fn windows_path_summary_is_included_in_text_and_json_reports() {
     let repo = init_repo();
@@ -149,11 +154,19 @@ done
         .unwrap()
         .read_to_string(&mut txt)
         .unwrap();
-    assert!(
-        txt.contains("Windows path compatibility"),
-        "text report should include windows path summary: {}",
-        txt
-    );
+    if cfg!(windows) {
+        assert!(
+            txt.contains("Windows path compatibility"),
+            "text report should include windows path summary: {}",
+            txt
+        );
+    } else {
+        assert!(
+            !txt.contains("Windows path compatibility"),
+            "non-windows host should not include windows path summary: {}",
+            txt
+        );
+    }
 
     let report_json = repo.join(".git").join("filter-repo").join("report.json");
     let mut json = String::new();
@@ -161,9 +174,17 @@ done
         .unwrap()
         .read_to_string(&mut json)
         .unwrap();
-    assert!(
-        json.contains("\"windows_path\""),
-        "json report should include windows_path section: {}",
-        json
-    );
+    if cfg!(windows) {
+        assert!(
+            json.contains("\"windows_path\""),
+            "json report should include windows_path section: {}",
+            json
+        );
+    } else {
+        assert!(
+            !json.contains("\"windows_path\""),
+            "non-windows host should not include windows_path section: {}",
+            json
+        );
+    }
 }

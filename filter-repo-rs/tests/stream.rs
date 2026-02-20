@@ -60,9 +60,8 @@ done
     assert!(filtered.contains("R prefix/old_.txt prefix/final_name.txt"));
 }
 
-#[cfg(windows)]
 #[test]
-fn path_compat_policy_sanitize_rewrites_windows_incompatible_path() {
+fn path_compat_policy_sanitize_rewrites_on_windows_or_noops_elsewhere() {
     let repo = init_repo();
     let stream_path = repo.join("fe-path-compat-sanitize.stream");
     let stream = r#"blob
@@ -97,16 +96,23 @@ done
         .join("filter-repo")
         .join("fast-export.filtered");
     let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
-    assert!(
-        filtered.contains("M 100644 :1 bad_name_.txt"),
-        "expected sanitized path in filtered stream:\n{}",
-        filtered
-    );
+    if cfg!(windows) {
+        assert!(
+            filtered.contains("M 100644 :1 bad_name_.txt"),
+            "expected sanitized path in filtered stream:\n{}",
+            filtered
+        );
+    } else {
+        assert!(
+            filtered.contains("bad:name?.txt "),
+            "expected non-windows host to keep original path:\n{}",
+            filtered
+        );
+    }
 }
 
-#[cfg(windows)]
 #[test]
-fn path_compat_policy_skip_drops_windows_incompatible_filechange() {
+fn path_compat_policy_skip_drops_on_windows_or_noops_elsewhere() {
     let repo = init_repo();
     let stream_path = repo.join("fe-path-compat-skip.stream");
     let stream = r#"blob
@@ -141,16 +147,23 @@ done
         .join("filter-repo")
         .join("fast-export.filtered");
     let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
-    assert!(
-        !filtered.contains("bad:name?.txt") && !filtered.contains("bad_name_.txt"),
-        "expected incompatible path filechange to be dropped:\n{}",
-        filtered
-    );
+    if cfg!(windows) {
+        assert!(
+            !filtered.contains("bad:name?.txt") && !filtered.contains("bad_name_.txt"),
+            "expected incompatible path filechange to be dropped:\n{}",
+            filtered
+        );
+    } else {
+        assert!(
+            filtered.contains("bad:name?.txt "),
+            "expected non-windows host to keep original path:\n{}",
+            filtered
+        );
+    }
 }
 
-#[cfg(windows)]
 #[test]
-fn path_compat_policy_error_fails_on_windows_incompatible_path() {
+fn path_compat_policy_error_fails_on_windows_or_noops_elsewhere() {
     let repo = init_repo();
     let stream_path = repo.join("fe-path-compat-error.stream");
     let stream = r#"blob
@@ -170,66 +183,45 @@ done
 "#;
     std::fs::write(&stream_path, stream).expect("write path-compat error stream");
 
-    let err = run_tool(&repo, |o| {
-        o.debug_mode = true;
-        o.dry_run = true;
-        o.path_compat_policy = filter_repo_rs::pathutil::PathCompatPolicy::Error;
-        #[allow(deprecated)]
-        {
-            o.fe_stream_override = Some(stream_path.clone());
-        }
-    })
-    .expect_err("error policy should fail on first incompatible path");
+    if cfg!(windows) {
+        let err = run_tool(&repo, |o| {
+            o.debug_mode = true;
+            o.dry_run = true;
+            o.path_compat_policy = filter_repo_rs::pathutil::PathCompatPolicy::Error;
+            #[allow(deprecated)]
+            {
+                o.fe_stream_override = Some(stream_path.clone());
+            }
+        })
+        .expect_err("error policy should fail on first incompatible path");
 
-    let msg = err.to_string();
-    assert!(
-        msg.contains("--path-compat-policy=error"),
-        "expected policy context in error: {msg}"
-    );
-}
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--path-compat-policy=error"),
+            "expected policy context in error: {msg}"
+        );
+    } else {
+        run_tool_expect_success(&repo, |o| {
+            o.debug_mode = true;
+            o.dry_run = true;
+            o.path_compat_policy = filter_repo_rs::pathutil::PathCompatPolicy::Error;
+            #[allow(deprecated)]
+            {
+                o.fe_stream_override = Some(stream_path.clone());
+            }
+        });
 
-#[cfg(not(windows))]
-#[test]
-fn path_compat_policy_is_noop_on_non_windows_hosts() {
-    let repo = init_repo();
-    let stream_path = repo.join("fe-path-compat-nonwindows.stream");
-    let stream = r#"blob
-mark :1
-data 1
-x
-
-commit refs/heads/main
-mark :2
-author Tester <tester@example.com> 0 +0000
-committer Tester <tester@example.com> 0 +0000
-data 3
-c1
-M 100644 :1 "bad:name?.txt "
-
-done
-"#;
-    std::fs::write(&stream_path, stream).expect("write non-windows path-compat stream");
-
-    run_tool_expect_success(&repo, |o| {
-        o.debug_mode = true;
-        o.dry_run = true;
-        o.path_compat_policy = filter_repo_rs::pathutil::PathCompatPolicy::Error;
-        #[allow(deprecated)]
-        {
-            o.fe_stream_override = Some(stream_path.clone());
-        }
-    });
-
-    let filtered_path = repo
-        .join(".git")
-        .join("filter-repo")
-        .join("fast-export.filtered");
-    let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
-    assert!(
-        filtered.contains("bad:name?.txt "),
-        "expected no-op behavior for path compatibility policy on non-Windows:\n{}",
-        filtered
-    );
+        let filtered_path = repo
+            .join(".git")
+            .join("filter-repo")
+            .join("fast-export.filtered");
+        let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
+        assert!(
+            filtered.contains("bad:name?.txt "),
+            "expected non-windows host to keep original path:\n{}",
+            filtered
+        );
+    }
 }
 
 #[test]
