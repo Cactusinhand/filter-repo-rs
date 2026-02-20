@@ -136,6 +136,54 @@ done
 }
 
 #[test]
+fn quoted_modify_path_with_crlf_is_still_parsed_and_renamed() {
+    let repo = init_repo();
+    let stream_path = repo.join("fe-renames-crlf.stream");
+    let stream = "blob\n\
+mark :1\n\
+data 4\n\
+one\n\
+\n\
+commit refs/heads/main\n\
+mark :2\n\
+author Tester <tester@example.com> 0 +0000\n\
+committer Tester <tester@example.com> 0 +0000\n\
+data 3\n\
+c1\n\
+M 100644 :1 \"src/sp ace.txt\"\r\n\
+\n\
+done\n";
+    std::fs::write(&stream_path, stream).expect("write crlf fast-export stream");
+
+    run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
+        o.dry_run = true;
+        o.path_renames.push((b"src/".to_vec(), b"dst/".to_vec()));
+        #[allow(deprecated)]
+        {
+            o.fe_stream_override = Some(stream_path.clone());
+        }
+    });
+
+    let filtered_path = repo
+        .join(".git")
+        .join("filter-repo")
+        .join("fast-export.filtered");
+    let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
+
+    assert!(
+        filtered.contains(r#"M 100644 :1 "dst/sp ace.txt""#),
+        "expected CRLF-terminated quoted path to be parsed and renamed:\n{}",
+        filtered
+    );
+    assert!(
+        !filtered.contains(r#"M 100644 :1 "src/sp ace.txt""#),
+        "expected original prefix to be removed after rename:\n{}",
+        filtered
+    );
+}
+
+#[test]
 fn path_compat_policy_sanitize_rewrites_on_windows_or_noops_elsewhere() {
     let repo = init_repo();
     let stream_path = repo.join("fe-path-compat-sanitize.stream");

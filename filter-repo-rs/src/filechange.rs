@@ -27,7 +27,7 @@ enum FileChange {
 // Parse a fast-export filechange line we care about. Returns None if the line
 // is not recognized as a supported filechange directive.
 fn parse_file_change_line(line: &[u8]) -> Option<FileChange> {
-    if line == b"deleteall\n" {
+    if line == b"deleteall\n" || line == b"deleteall\r\n" || line == b"deleteall" {
         return Some(FileChange::DeleteAll);
     }
     if line.len() < 2 {
@@ -121,7 +121,7 @@ fn parse_path(input: &[u8]) -> Option<(Vec<u8>, &[u8])> {
         let mut idx = 0usize;
         while idx < input.len() {
             let b = input[idx];
-            if b == b' ' || b == b'\n' {
+            if b == b' ' || b == b'\n' || b == b'\r' {
                 return Some((input[..idx].to_vec(), &input[idx..]));
             }
             idx += 1;
@@ -134,10 +134,7 @@ fn is_line_end(rest: &[u8]) -> bool {
     if rest.is_empty() {
         return true;
     }
-    if rest[0] != b'\n' {
-        return false;
-    }
-    rest[1..].is_empty()
+    matches!(rest, b"\n" | b"\r\n" | b"\r")
 }
 
 fn path_matches(path: &[u8], opts: &Options) -> bool {

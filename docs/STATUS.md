@@ -135,7 +135,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 - [x] Baseline `--help` hides debug-only flags while `--debug-mode` / `FRRS_DEBUG` surfaces fast-export passthrough, cleanup, and analysis overrides.
 - [x] Debug gating is enforced for cleanup semantics (`--no-reset`, `--cleanup-aggressive`) and fast-export knobs; errors guide users to enable debug mode when necessary.
 - [x] `.filter-repo-rs.toml` config loading is wired in with a shared example at `docs/examples/filter-repo-rs.toml`; integration tests consume the same sample to keep docs and behavior aligned.
-- [ ] Stage-3 toggles remain available to drop legacy cleanup/analysis flags entirely once ecosystem consumers finish migrating.
+- [x] Stage-3 toggles remain available to drop legacy cleanup/analysis flags entirely once ecosystem consumers finish migrating (runtime exercise via `FRRS_STAGE3_DISABLE_LEGACY_CLEANUP` and `FRRS_STAGE3_DISABLE_LEGACY_ANALYZE_FLAGS`).
 
 ## MVP Scope (target) and Gap
 
@@ -152,7 +152,7 @@ MVP Goal: a stable, performant subset that covers the most common workflows:
 Remaining for MVP polish:
 
 1) Path semantics
-   - Robust dequote/enquote for pass-through lines when needed.
+   - Improved parser robustness for filechange lines with CRLF endings: quoted/unquoted `M/D/C/R` and `deleteall` now parse instead of falling back to pass-through, so path filtering/renaming and requoting still apply.
 
 2) Refs finalization
    - Done: batch atomic updates for branches/tags via `git update-ref --stdin`; HEAD updated via `git symbolic-ref`.
