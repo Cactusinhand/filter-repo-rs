@@ -108,26 +108,49 @@ done
         .join("fast-export.filtered");
     let filtered = std::fs::read_to_string(&filtered_path).expect("read filtered stream");
 
-    assert!(
-        filtered.contains(r#"M 100644 :1 "dst/quo\"te\\caf\303\251.txt""#),
-        "expected modify line with escaped quote/backslash/octal bytes:\n{}",
-        filtered
-    );
-    assert!(
-        filtered.contains(r#"C "dst/quo\"te\\caf\303\251.txt" "dst/dup\"te\\caf\303\251.txt""#),
-        "expected copy line to preserve escaping and rename:\n{}",
-        filtered
-    );
-    assert!(
-        filtered.contains(r#"R "dst/quo\"te\\caf\303\251.txt" "dst/fin\"al\\caf\303\251.txt""#),
-        "expected rename line to preserve escaping and rename:\n{}",
-        filtered
-    );
-    assert!(
-        filtered.contains(r#"D "dst/dup\"te\\caf\303\251.txt""#),
-        "expected delete line to preserve escaping and rename:\n{}",
-        filtered
-    );
+    if cfg!(windows) {
+        assert!(
+            filtered.contains(r#"M 100644 :1 "dst/quo_te\\caf\303\251.txt""#),
+            "expected modify line with Windows-sanitized quote and preserved backslash/octal bytes:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"C "dst/quo_te\\caf\303\251.txt" "dst/dup_te\\caf\303\251.txt""#),
+            "expected copy line with Windows-sanitized quote and preserved backslash/octal bytes:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"R "dst/quo_te\\caf\303\251.txt" "dst/fin_al\\caf\303\251.txt""#),
+            "expected rename line with Windows-sanitized quote and preserved backslash/octal bytes:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"D "dst/dup_te\\caf\303\251.txt""#),
+            "expected delete line with Windows-sanitized quote and preserved backslash/octal bytes:\n{}",
+            filtered
+        );
+    } else {
+        assert!(
+            filtered.contains(r#"M 100644 :1 "dst/quo\"te\\caf\303\251.txt""#),
+            "expected modify line with escaped quote/backslash/octal bytes:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"C "dst/quo\"te\\caf\303\251.txt" "dst/dup\"te\\caf\303\251.txt""#),
+            "expected copy line to preserve escaping and rename:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"R "dst/quo\"te\\caf\303\251.txt" "dst/fin\"al\\caf\303\251.txt""#),
+            "expected rename line to preserve escaping and rename:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains(r#"D "dst/dup\"te\\caf\303\251.txt""#),
+            "expected delete line to preserve escaping and rename:\n{}",
+            filtered
+        );
+    }
     assert!(
         !filtered.contains(r#""src/quo\"te\\caf\303\251.txt""#),
         "expected source prefix fully renamed:\n{}",
