@@ -32,6 +32,81 @@ fn tag_rename_annotated_produces_tag_object() {
 }
 
 #[test]
+fn tag_rename_handles_annotated_and_lightweight_together() {
+    let repo = init_repo();
+    assert_eq!(
+        run_git(&repo, &["tag", "-a", "-m", "annotated tag", "vann"]).0,
+        0
+    );
+    assert_eq!(run_git(&repo, &["tag", "vlw"]).0, 0);
+
+    run_tool_expect_success(&repo, |o| {
+        o.debug_mode = true;
+        o.no_data = true;
+        o.tag_rename = Some((b"v".to_vec(), b"release-".to_vec()));
+    });
+
+    let (_c_tags, tags_out, _e_tags) = run_git(&repo, &["show-ref", "--tags"]);
+    assert!(
+        tags_out.contains("refs/tags/release-ann"),
+        "expected renamed annotated tag: {}",
+        tags_out
+    );
+    assert!(
+        tags_out.contains("refs/tags/release-lw"),
+        "expected renamed lightweight tag: {}",
+        tags_out
+    );
+    assert!(
+        !tags_out.contains("refs/tags/vann") && !tags_out.contains("refs/tags/vlw"),
+        "old tag refs should be removed: {}",
+        tags_out
+    );
+
+    let (_c_ann_oid, ann_oid, _e_ann_oid) = run_git(&repo, &["rev-parse", "refs/tags/release-ann"]);
+    let (_c_ann_type, ann_type, _e_ann_type) = run_git(&repo, &["cat-file", "-t", ann_oid.trim()]);
+    assert_eq!(ann_type.trim(), "tag");
+
+    let (_c_lw_oid, lw_oid, _e_lw_oid) = run_git(&repo, &["rev-parse", "refs/tags/release-lw"]);
+    let (_c_lw_type, lw_type, _e_lw_type) = run_git(&repo, &["cat-file", "-t", lw_oid.trim()]);
+    assert_eq!(lw_type.trim(), "commit");
+
+    let ref_map_path = repo.join(".git").join("filter-repo").join("ref-map");
+    let ref_map = std::fs::read_to_string(ref_map_path).expect("read ref-map");
+    assert!(
+        ref_map.contains("refs/tags/vann refs/tags/release-ann"),
+        "ref-map should include annotated tag rename: {}",
+        ref_map
+    );
+    assert!(
+        ref_map.contains("refs/tags/vlw refs/tags/release-lw"),
+        "ref-map should include lightweight tag rename: {}",
+        ref_map
+    );
+
+    let filtered_path = repo
+        .join(".git")
+        .join("filter-repo")
+        .join("fast-export.filtered");
+    let filtered = std::fs::read_to_string(filtered_path).expect("read filtered stream");
+    assert!(
+        filtered.contains("tag release-ann"),
+        "annotated tag should remain tag block: {}",
+        filtered
+    );
+    assert!(
+        filtered.contains("reset refs/tags/release-lw"),
+        "lightweight tag should be represented by reset: {}",
+        filtered
+    );
+    assert!(
+        !filtered.contains("reset refs/tags/release-ann"),
+        "annotated tag should not be emitted as lightweight reset: {}",
+        filtered
+    );
+}
+
+#[test]
 fn branch_rename_updates_ref_and_head() {
     let repo = init_repo();
     let (_c0, headref, _e0) = run_git(&repo, &["symbolic-ref", "HEAD"]);
