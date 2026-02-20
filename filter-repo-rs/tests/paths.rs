@@ -102,6 +102,44 @@ fn path_glob_selects_md_under_src() {
 }
 
 #[test]
+fn path_glob_with_to_subdirectory_filter_moves_only_matched_paths() {
+    let repo = init_repo();
+    write_file(&repo, "frontend/docs/guide.md", "guide\n");
+    write_file(&repo, "frontend/app/main.ts", "console.log('x')\n");
+    write_file(&repo, "backend/main.go", "package main\n");
+    run_git(&repo, &["add", "."]);
+    assert_eq!(run_git(&repo, &["commit", "-q", "-m", "seed glob+subdir"]).0, 0);
+
+    run_tool_expect_success(&repo, |o| {
+        o.path_globs.push(b"frontend/**/*.md".to_vec());
+        // Equivalent to --to-subdirectory-filter exports/
+        o.path_renames.push((Vec::new(), b"exports/".to_vec()));
+    });
+
+    let (_c_tree, tree, _e_tree) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(
+        tree.contains("exports/frontend/docs/guide.md"),
+        "expected matched markdown under new prefix: {}",
+        tree
+    );
+    assert!(
+        !tree.contains("frontend/app/main.ts") && !tree.contains("backend/main.go"),
+        "non-matching files should not survive glob filter: {}",
+        tree
+    );
+}
+
+#[test]
 fn path_filter_and_rename_updates_commit_and_ref_maps() {
     let repo = init_repo();
 
@@ -240,6 +278,53 @@ fn invert_paths_drops_prefix() {
     assert!(
         !tree.contains("drop/file.txt"),
         "expected to drop drop/file.txt, got: {}",
+        tree
+    );
+}
+
+#[test]
+fn invert_paths_with_path_rename_keeps_non_matches_and_renames_kept_prefix() {
+    let repo = init_repo();
+    write_file(&repo, "keep/a.txt", "a\n");
+    write_file(&repo, "drop/b.txt", "b\n");
+    write_file(&repo, "other/c.txt", "c\n");
+    run_git(&repo, &["add", "."]);
+    assert_eq!(
+        run_git(&repo, &["commit", "-q", "-m", "seed invert+rename"]).0,
+        0
+    );
+
+    run_tool_expect_success(&repo, |o| {
+        o.paths.push(b"drop/".to_vec());
+        o.invert_paths = true;
+        o.path_renames
+            .push((b"keep/".to_vec(), b"renamed/".to_vec()));
+    });
+
+    let (_c_tree, tree, _e_tree) = run_git(
+        &repo,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "HEAD",
+        ],
+    );
+    assert!(
+        tree.contains("renamed/a.txt"),
+        "expected kept prefix to be renamed: {}",
+        tree
+    );
+    assert!(
+        tree.contains("other/c.txt"),
+        "expected unrelated non-matching path to remain: {}",
+        tree
+    );
+    assert!(
+        !tree.contains("drop/b.txt") && !tree.contains("keep/a.txt"),
+        "dropped paths should be removed and old prefix should not remain: {}",
         tree
     );
 }
