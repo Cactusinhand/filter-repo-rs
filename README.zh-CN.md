@@ -164,6 +164,8 @@ password==>[removed]
 filter-repo-rs --replace-message messages.txt --write-report
 ```
 
+提示：若要删除 `Co-authored-by` 尾注，可在 `messages.txt` 中加入规则 `regex:(?m)^\s*Co-authored-by:.*$==>`。
+
 </details>
 
 <details>

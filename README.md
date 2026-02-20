@@ -164,6 +164,8 @@ password==>[removed]
 filter-repo-rs --replace-message messages.txt --write-report
 ```
 
+Tip: To remove `Co-authored-by` trailers, add rule `regex:(?m)^\s*Co-authored-by:.*$==>` in `messages.txt`.
+
 </details>
 
 <details>
