@@ -15,6 +15,10 @@ fn help_hides_debug_sections_without_debug_mode() {
         "baseline help should mention analyze-top"
     );
     assert!(
+        stdout.contains("--detect-secrets"),
+        "baseline help should mention detect-secrets"
+    );
+    assert!(
         stdout.contains("--debug-mode"),
         "baseline help should mention debug-mode toggle"
     );

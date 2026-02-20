@@ -9,6 +9,7 @@
 | 😱 痛点                 | ✅ 一条命令                                             |
 | ----------------------- | ------------------------------------------------------- |
 | 密钥/Token 不小心提交了 | `filter-repo-rs --replace-text secrets.txt --sensitive` |
+| 需要检测历史中的潜在敏感信息 | `filter-repo-rs --detect-secrets --dry-run`         |
 | 仓库太大，clone 半天    | `filter-repo-rs --max-blob-size 10M`                    |
 | 想把子目录拆成独立仓库  | `filter-repo-rs --subdirectory-filter frontend`         |
 | 批量改 tag/branch 前缀  | `filter-repo-rs --tag-rename v1.:legacy/v1.`            |
@@ -33,6 +34,17 @@ filter-repo-rs --replace-text secrets.txt --sensitive --write-report
 
 # 4. 强制推送
 git push --force --all && git push --force --tags
+```
+
+### 自动检测潜在敏感信息
+
+```sh
+# 扫描可达历史中的潜在敏感信息
+filter-repo-rs --detect-secrets --dry-run
+
+# 输出文件: detected-secrets.txt
+# 审核检测结果后再执行正式清理:
+filter-repo-rs --replace-text detected-secrets.txt --sensitive --write-report
 ```
 
 ### 仓库瘦身
@@ -85,6 +97,7 @@ filter-repo-rs --author-rewrite author.txt \
 | `--dry-run`      | 预演，不实际修改         |
 | `--write-report` | 生成变更审计报告         |
 | `--sensitive`    | 覆盖所有 refs（含远端）  |
+| `--detect-secrets` | 检测可达历史中的潜在敏感信息 |
 
 ## 安装
 

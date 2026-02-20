@@ -189,6 +189,7 @@ pub struct Options {
     pub force: bool,
     pub enforce_sanity: bool,
     pub dry_run: bool,
+    pub detect_secrets: bool,
     pub partial: bool,
     pub sensitive: bool,
     pub no_fetch: bool,
@@ -243,6 +244,7 @@ impl Default for Options {
             force: false,
             enforce_sanity: true,
             dry_run: false,
+            detect_secrets: false,
             partial: false,
             sensitive: false,
             no_fetch: false,
@@ -721,6 +723,9 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--dry-run" => {
                 opts.dry_run = true;
+            }
+            "--detect-secrets" => {
+                opts.detect_secrets = true;
             }
             "--prune-empty" => {
                 let v = it
@@ -1421,6 +1426,13 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                 HelpOption {
                     name: "--dry-run".to_string(),
                     description: vec!["Prepare and validate without writing changes".to_string()],
+                },
+                HelpOption {
+                    name: "--detect-secrets".to_string(),
+                    description: vec![
+                        "Detect likely secret values in reachable history".to_string(),
+                        "and write matches to detected-secrets.txt".to_string(),
+                    ],
                 },
                 HelpOption {
                     name: "--partial".to_string(),

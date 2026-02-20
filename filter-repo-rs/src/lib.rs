@@ -1,6 +1,7 @@
 pub mod analysis;
 mod backup;
 mod commit;
+mod detect;
 pub mod error;
 mod filechange;
 mod finalize;
@@ -55,6 +56,10 @@ fn validate_options(opts: &Options) -> FilterRepoResult<()> {
 }
 
 pub fn run(opts: &Options) -> FilterRepoResult<()> {
+    if opts.detect_secrets {
+        return Ok(detect::run(opts)?);
+    }
+
     match opts.mode {
         Mode::Filter => {
             validate_options(opts)?;

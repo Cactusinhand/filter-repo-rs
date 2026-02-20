@@ -9,6 +9,7 @@
 | 😱 Your Problem                          | ✅ One Command                                          |
 | ---------------------------------------- | ------------------------------------------------------- |
 | Leaked API keys/tokens in history        | `filter-repo-rs --replace-text secrets.txt --sensitive` |
+| Need to detect potential secrets in history | `filter-repo-rs --detect-secrets --dry-run`          |
 | Repo too large, clone takes forever      | `filter-repo-rs --max-blob-size 10M`                    |
 | Need to extract subdirectory as new repo | `filter-repo-rs --subdirectory-filter frontend`         |
 | Bulk rename tags/branches                | `filter-repo-rs --tag-rename v1.:legacy/v1.`            |
@@ -33,6 +34,17 @@ filter-repo-rs --replace-text secrets.txt --sensitive --write-report
 
 # 4. Force push
 git push --force --all && git push --force --tags
+```
+
+### Detect Potential Secrets Automatically
+
+```sh
+# Scan reachable history for potential secrets
+filter-repo-rs --detect-secrets --dry-run
+
+# Output file: detected-secrets.txt
+# Review detected entries, then run an actual cleanup:
+filter-repo-rs --replace-text detected-secrets.txt --sensitive --write-report
 ```
 
 ### Slim Down Bloated Repo
@@ -85,6 +97,7 @@ Note: `--mailmap` takes precedence. If `--mailmap` is provided, `--author-rewrit
 | `--dry-run`      | Preview changes without modifying anything |
 | `--write-report` | Generate audit report of all changes       |
 | `--sensitive`    | Cover all refs including remotes           |
+| `--detect-secrets` | Detect potential secrets in reachable history |
 
 ## Installation
 
