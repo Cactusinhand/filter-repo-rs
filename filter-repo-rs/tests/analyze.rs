@@ -220,7 +220,10 @@ fn analyze_report_does_not_include_placeholder_blob_ids() {
     let repo = init_repo();
     write_file(&repo, "src/a.txt", "a\n");
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
-    assert_eq!(run_git(&repo, &["commit", "-m", "seed analyze placeholder"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["commit", "-m", "seed analyze placeholder"]).0,
+        0
+    );
 
     let mut opts = fr::Options::default();
     opts.source = repo.clone();
@@ -245,10 +248,7 @@ fn analyze_report_excludes_unreachable_blobs_from_top_lists() {
     let repo = init_repo();
     write_file(&repo, "src/reachable.txt", "reachable\n");
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
-    assert_eq!(
-        run_git(&repo, &["commit", "-m", "add reachable blob"]).0,
-        0
-    );
+    assert_eq!(run_git(&repo, &["commit", "-m", "add reachable blob"]).0, 0);
 
     write_file(&repo, "tmp-unreachable.bin", &"U".repeat(128 * 1024));
     let (status, stdout, stderr) = run_git(&repo, &["hash-object", "-w", "tmp-unreachable.bin"]);

@@ -108,7 +108,10 @@ fn path_glob_with_to_subdirectory_filter_moves_only_matched_paths() {
     write_file(&repo, "frontend/app/main.ts", "console.log('x')\n");
     write_file(&repo, "backend/main.go", "package main\n");
     run_git(&repo, &["add", "."]);
-    assert_eq!(run_git(&repo, &["commit", "-q", "-m", "seed glob+subdir"]).0, 0);
+    assert_eq!(
+        run_git(&repo, &["commit", "-q", "-m", "seed glob+subdir"]).0,
+        0
+    );
 
     run_tool_expect_success(&repo, |o| {
         o.path_globs.push(b"frontend/**/*.md".to_vec());

@@ -749,10 +749,8 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.detect_patterns.push(p);
             }
             "--prune-empty" => {
-                let v = require_arg_value(
-                    &mut it,
-                    "--prune-empty requires MODE (always|auto|never)",
-                )?;
+                let v =
+                    require_arg_value(&mut it, "--prune-empty requires MODE (always|auto|never)")?;
                 opts.prune_empty = match v.as_str() {
                     "always" => PruneMode::Always,
                     "auto" => PruneMode::Auto,

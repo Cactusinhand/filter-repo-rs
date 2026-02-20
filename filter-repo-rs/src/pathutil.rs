@@ -1,12 +1,10 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PathCompatPolicy {
     #[default]
     Sanitize,
     Skip,
     Error,
 }
-
 
 impl PathCompatPolicy {
     pub fn as_str(&self) -> &'static str {

@@ -14,7 +14,11 @@ fn commit_with_identity(
     committer_email: &str,
 ) {
     write_file(repo, rel_path, contents);
-    assert_eq!(run_git(repo, &["add", rel_path]).0, 0, "git add should succeed");
+    assert_eq!(
+        run_git(repo, &["add", rel_path]).0,
+        0,
+        "git add should succeed"
+    );
 
     let output = Command::new("git")
         .current_dir(repo)

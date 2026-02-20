@@ -1393,7 +1393,10 @@ ffffffffffffffffffffffffffffffffffffffff blob 12 6
             kind: ErrorKind::PermissionDenied,
         };
         let result = flush_progress_writer(&mut writer);
-        assert!(result.is_err(), "non-BrokenPipe flush errors should propagate");
+        assert!(
+            result.is_err(),
+            "non-BrokenPipe flush errors should propagate"
+        );
     }
 
     #[test]
@@ -1407,8 +1410,7 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0this message is long enough\0";
 
         assert_eq!(stats.len(), 1, "expected only one message above threshold");
         assert_eq!(
-            stats[0].oid,
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            stats[0].oid, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "expected longer message oid to be captured"
         );
         assert!(
