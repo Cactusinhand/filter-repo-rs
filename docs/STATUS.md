@@ -128,7 +128,7 @@ A minimal Rust prototype of git-filter-repo is working end-to-end on real reposi
 
 - See docs/CLI-CONVERGENCE.zh-CN.md for the proposed CLI consolidation plan (core vs. hidden/debug, merged semantics, config file for analysis thresholds, and deprecation strategy).
 - Analysis threshold "micro-tuning" flags (`--analyze-*-warn`) are now hidden by default and require `--debug-mode` or `FRRS_DEBUG=1`; core help surfaces only `--analyze`, `--analyze-json`, and `--analyze-top`. As of the latest prototype, these legacy flags emit a one-time warning pointing to `analyze.thresholds.*` config keys, and the help text references them only as compatibility shims.
-- Legacy `--cleanup=<mode>` syntax continues to parse for now, but prints a one-time warning steering users to the boolean `--cleanup` or debug-only `--cleanup-aggressive`. Stage-3 toggles exist in the parser to disable the legacy syntax once compatibility can be removed.
+- Legacy `--cleanup=<mode>` syntax continues to parse for now, but prints a one-time warning steering users to the boolean `--cleanup` or debug-only `--cleanup-aggressive`. Stage-3 toggles exist in the parser to disable legacy cleanup/analyze syntax once compatibility can be removed, and can now be exercised at runtime with `FRRS_STAGE3_DISABLE_LEGACY_CLEANUP=1` / `FRRS_STAGE3_DISABLE_LEGACY_ANALYZE_FLAGS=1`.
 
 ### Progress checklist
 

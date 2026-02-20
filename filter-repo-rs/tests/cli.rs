@@ -557,6 +557,53 @@ fn cleanup_flag_supports_new_and_legacy_syntax() {
 }
 
 #[test]
+fn cleanup_legacy_syntax_can_be_disabled_with_stage3_toggle_env() {
+    let repo = init_repo();
+    let output = cli_command()
+        .env("FRRS_STAGE3_DISABLE_LEGACY_CLEANUP", "1")
+        .arg("--cleanup=standard")
+        .arg("--dry-run")
+        .current_dir(&repo)
+        .output()
+        .expect("run filter-repo-rs with stage-3 cleanup toggle");
+
+    assert_eq!(
+        Some(2),
+        output.status.code(),
+        "legacy cleanup syntax should fail when stage-3 toggle is enabled"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("legacy --cleanup=<mode> syntax has been removed"),
+        "expected explicit stage-3 cleanup removal message: {}",
+        stderr
+    );
+}
+
+#[test]
+fn analyze_legacy_threshold_flag_can_be_disabled_with_stage3_toggle_env() {
+    let output = cli_command()
+        .env("FRRS_STAGE3_DISABLE_LEGACY_ANALYZE_FLAGS", "1")
+        .arg("--debug-mode")
+        .arg("--analyze-total-warn")
+        .arg("1")
+        .output()
+        .expect("run filter-repo-rs with stage-3 analyze toggle");
+
+    assert_eq!(
+        Some(2),
+        output.status.code(),
+        "legacy analyze threshold flag should fail when stage-3 toggle is enabled"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--analyze-total-warn is no longer accepted"),
+        "expected explicit stage-3 analyze removal message: {}",
+        stderr
+    );
+}
+
+#[test]
 fn cli_returns_exit_code_2_for_parse_errors() {
     let output = cli_command()
         .arg("--definitely-not-a-real-flag")

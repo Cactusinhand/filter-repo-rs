@@ -15,6 +15,8 @@ use crate::pathutil::{normalize_cli_glob_str, normalize_cli_path_str, PathCompat
 const LEGACY_CLEANUP_SYNTAX_ALLOWED: bool = true;
 /// Stage-3 toggle: set to `false` to disable legacy --analyze-*-warn overrides entirely.
 const LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED: bool = true;
+const LEGACY_CLEANUP_STAGE3_ENV: &str = "FRRS_STAGE3_DISABLE_LEGACY_CLEANUP";
+const LEGACY_ANALYZE_STAGE3_ENV: &str = "FRRS_STAGE3_DISABLE_LEGACY_ANALYZE_FLAGS";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupMode {
@@ -974,7 +976,7 @@ fn legacy_warning_once(key: &str) -> bool {
 }
 
 fn enforce_legacy_cleanup_allowed() {
-    if LEGACY_CLEANUP_SYNTAX_ALLOWED {
+    if LEGACY_CLEANUP_SYNTAX_ALLOWED && !stage3_env_toggle_enabled(LEGACY_CLEANUP_STAGE3_ENV) {
         return;
     }
 
@@ -983,7 +985,9 @@ fn enforce_legacy_cleanup_allowed() {
 }
 
 fn enforce_legacy_analyze_flag_allowed(flag: &str, debug_mode: bool) {
-    if !LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED {
+    if !LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED
+        || stage3_env_toggle_enabled(LEGACY_ANALYZE_STAGE3_ENV)
+    {
         eprintln!(
       "error: {flag} is no longer accepted; configure analyze.thresholds.* in your filter-repo-rs config file instead."
     );
@@ -1019,6 +1023,10 @@ fn debug_env_flag_enabled(raw: &str) -> bool {
         return false;
     }
     !matches!(normalized.as_str(), "0" | "false" | "no" | "off")
+}
+
+fn stage3_env_toggle_enabled(var: &str) -> bool {
+    matches!(std::env::var(var), Ok(val) if debug_env_flag_enabled(&val))
 }
 
 fn guard_debug(flag: &str, debug_mode: bool) {
