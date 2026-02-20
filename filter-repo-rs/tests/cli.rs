@@ -19,6 +19,10 @@ fn help_hides_debug_sections_without_debug_mode() {
         "baseline help should mention detect-secrets"
     );
     assert!(
+        stdout.contains("--detect-pattern"),
+        "baseline help should mention detect-pattern"
+    );
+    assert!(
         stdout.contains("--debug-mode"),
         "baseline help should mention debug-mode toggle"
     );
@@ -494,6 +498,27 @@ fn cli_returns_exit_code_1_for_runtime_failures() {
     assert!(
         stderr.contains("Caused by:"),
         "runtime error path should include chained cause output: {}",
+        stderr
+    );
+}
+
+#[test]
+fn detect_pattern_requires_detect_secrets() {
+    let output = cli_command()
+        .arg("--detect-pattern")
+        .arg("SECRET_[A-Z0-9]{8,}")
+        .output()
+        .expect("run filter-repo-rs with detect-pattern only");
+
+    assert_eq!(
+        Some(1),
+        output.status.code(),
+        "using --detect-pattern without --detect-secrets should exit with 1"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--detect-pattern requires --detect-secrets"),
+        "runtime error should explain option dependency: {}",
         stderr
     );
 }

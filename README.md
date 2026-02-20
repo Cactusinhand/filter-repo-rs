@@ -42,6 +42,12 @@ git push --force --all && git push --force --tags
 # Scan reachable history for potential secrets
 filter-repo-rs --detect-secrets --dry-run
 
+# Add custom regex patterns when needed (repeatable)
+filter-repo-rs --detect-secrets \
+  --detect-pattern 'ZZZ-CUSTOM-SECRET-[0-9]{4}' \
+  --detect-pattern 'my_internal_token_[A-Za-z0-9_-]{16,}' \
+  --dry-run
+
 # Output file: detected-secrets.txt
 # Review detected entries, then run an actual cleanup:
 filter-repo-rs --replace-text detected-secrets.txt --sensitive --write-report

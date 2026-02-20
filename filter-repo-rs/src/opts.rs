@@ -190,6 +190,7 @@ pub struct Options {
     pub enforce_sanity: bool,
     pub dry_run: bool,
     pub detect_secrets: bool,
+    pub detect_patterns: Vec<String>,
     pub partial: bool,
     pub sensitive: bool,
     pub no_fetch: bool,
@@ -245,6 +246,7 @@ impl Default for Options {
             enforce_sanity: true,
             dry_run: false,
             detect_secrets: false,
+            detect_patterns: Vec::new(),
             partial: false,
             sensitive: false,
             no_fetch: false,
@@ -726,6 +728,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--detect-secrets" => {
                 opts.detect_secrets = true;
+            }
+            "--detect-pattern" => {
+                let p = it.next().expect("--detect-pattern requires REGEX");
+                opts.detect_patterns.push(p);
             }
             "--prune-empty" => {
                 let v = it
@@ -1432,6 +1438,13 @@ fn get_base_help_sections() -> Vec<HelpSection> {
                     description: vec![
                         "Detect likely secret values in reachable history".to_string(),
                         "and write matches to detected-secrets.txt".to_string(),
+                    ],
+                },
+                HelpOption {
+                    name: "--detect-pattern REGEX".to_string(),
+                    description: vec![
+                        "Additional regex pattern for --detect-secrets".to_string(),
+                        "Repeatable; first capture group is used when present".to_string(),
                     ],
                 },
                 HelpOption {

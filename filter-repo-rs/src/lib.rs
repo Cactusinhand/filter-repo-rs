@@ -22,6 +22,12 @@ pub use opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
 pub use pathutil::dequote_c_style_bytes;
 
 fn validate_options(opts: &Options) -> FilterRepoResult<()> {
+    if !opts.detect_secrets && !opts.detect_patterns.is_empty() {
+        return Err(FilterRepoError::invalid_options(
+            "--detect-pattern requires --detect-secrets",
+        ));
+    }
+
     if let Some(max) = opts.max_blob_size {
         if max == 0 || max == usize::MAX {
             return Err(FilterRepoError::invalid_options(
