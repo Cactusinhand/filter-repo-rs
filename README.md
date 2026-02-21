@@ -113,9 +113,11 @@ Note: `--mailmap` takes precedence. If `--mailmap` is provided, `--author-rewrit
 **Requirements:** Git on PATH, Rust toolchain (stable), Linux/macOS/Windows
 
 ```sh
-# Build from source
-cargo build -p filter-repo-rs --release
+# Install from crates.io (recommended)
+cargo install filter-repo-rs
 
+# Or build from source
+cargo build -p filter-repo-rs --release
 # Binary at: target/release/filter-repo-rs
 ```
 

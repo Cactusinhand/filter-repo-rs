@@ -635,7 +635,7 @@ pub fn finalize(
 
     if !opts.quiet {
         eprintln!(
-            "New history written (1.0.0). Debug files in {:?}",
+            "New history written (1.0.1). Debug files in {:?}",
             debug_dir
         );
     }

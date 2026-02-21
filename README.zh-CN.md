@@ -113,9 +113,11 @@ filter-repo-rs --author-rewrite author.txt \
 **环境要求：** Git、Rust 工具链 (stable)、Linux/macOS/Windows
 
 ```sh
-# 从源码构建
-cargo build -p filter-repo-rs --release
+# 从 crates.io 安装（推荐）
+cargo install filter-repo-rs
 
+# 或从源码构建
+cargo build -p filter-repo-rs --release
 # 产物位置: target/release/filter-repo-rs
 ```
 
