@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-02-21
+
+> **Stable Release**: The first stable release of filter-repo-rs, a fast and safe Git history rewriting tool written in Rust.
+
+### Highlights
+
+- **Production Ready**: After beta testing, the core functionality is now stable and ready for production use
+- **Fast & Safe**: Rust implementation provides memory safety and performance
+- **Feature Complete**: All core git-filter-repo features implemented
+- **Cross Platform**: Supports Linux, macOS, and Windows
+
+### Changes from 1.0.0-beta.1
+
+- Documentation improvements with README packaging
+- Version bump to stable 1.0.0
+
+### Known Limitations
+
+- Merge simplification still being optimized for complex topologies
+- No incremental processing (`--state-branch`) yet
+- `--path-compat-policy` currently applies only when running on Windows hosts
+
 ## [1.0.0-beta] - 2026-02-21
 
 > **Beta Release**: This release marks the transition from prototype to beta. The core functionality is now feature-complete and ready for broader testing.
