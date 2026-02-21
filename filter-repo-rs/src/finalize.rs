@@ -635,7 +635,7 @@ pub fn finalize(
 
     if !opts.quiet {
         eprintln!(
-            "New history written (prototype Rust pipeline). Debug files in {:?}",
+            "New history written (1.0.0-beta). Debug files in {:?}",
             debug_dir
         );
     }

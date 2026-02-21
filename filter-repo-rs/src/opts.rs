@@ -1669,7 +1669,7 @@ pub fn print_version() {
 }
 
 pub fn print_help(debug_mode: bool) {
-    println!("filter-repo-rs (prototype)");
+    println!("filter-repo-rs 1.0.0-beta");
     println!("Usage: filter-repo-rs [options]");
     println!();
 
