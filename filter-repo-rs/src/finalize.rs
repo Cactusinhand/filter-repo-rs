@@ -635,7 +635,8 @@ pub fn finalize(
 
     if !opts.quiet {
         eprintln!(
-            "New history written (1.0.1). Debug files in {:?}",
+            "New history written ({}). Debug files in {:?}",
+            env!("CARGO_PKG_VERSION"),
             debug_dir
         );
     }

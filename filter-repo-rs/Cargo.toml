@@ -1,6 +1,6 @@
 [package]
 name = "filter-repo-rs"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 description = "Fast, safe Git history rewriting in Rust — remove secrets, slim repos, restructure paths"
 license = "MIT"

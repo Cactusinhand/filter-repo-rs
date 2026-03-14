@@ -1801,7 +1801,7 @@ pub fn print_version() {
 }
 
 pub fn print_help(debug_mode: bool) {
-    println!("filter-repo-rs 1.0.1");
+    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
     println!("Usage: filter-repo-rs [options]");
     println!();
 
