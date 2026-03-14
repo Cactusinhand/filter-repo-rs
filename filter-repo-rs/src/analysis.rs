@@ -171,16 +171,45 @@ fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result
 
     writeln!(f, "=== Repository Summary ===")?;
     writeln!(f, "Total objects: {}", m.total_objects)?;
-    writeln!(f, "Total size: {} bytes ({:.2} MiB)", m.total_size_bytes, m.total_size_bytes as f64 / 1024.0 / 1024.0)?;
-    writeln!(f, "Loose objects: {} ({} bytes)", m.loose_objects, m.loose_size_bytes)?;
-    writeln!(f, "Packed objects: {} ({} bytes)", m.packed_objects, m.packed_size_bytes)?;
+    writeln!(
+        f,
+        "Total size: {} bytes ({:.2} MiB)",
+        m.total_size_bytes,
+        m.total_size_bytes as f64 / 1024.0 / 1024.0
+    )?;
+    writeln!(
+        f,
+        "Loose objects: {} ({} bytes)",
+        m.loose_objects, m.loose_size_bytes
+    )?;
+    writeln!(
+        f,
+        "Packed objects: {} ({} bytes)",
+        m.packed_objects, m.packed_size_bytes
+    )?;
     writeln!(f)?;
 
     writeln!(f, "=== Objects ===")?;
-    writeln!(f, "Commits: {}", m.object_types.get("commit").copied().unwrap_or(0))?;
-    writeln!(f, "Blobs: {}", m.object_types.get("blob").copied().unwrap_or(0))?;
-    writeln!(f, "Trees: {}", m.object_types.get("tree").copied().unwrap_or(0))?;
-    writeln!(f, "Tags: {}", m.object_types.get("tag").copied().unwrap_or(0))?;
+    writeln!(
+        f,
+        "Commits: {}",
+        m.object_types.get("commit").copied().unwrap_or(0)
+    )?;
+    writeln!(
+        f,
+        "Blobs: {}",
+        m.object_types.get("blob").copied().unwrap_or(0)
+    )?;
+    writeln!(
+        f,
+        "Trees: {}",
+        m.object_types.get("tree").copied().unwrap_or(0)
+    )?;
+    writeln!(
+        f,
+        "Tags: {}",
+        m.object_types.get("tag").copied().unwrap_or(0)
+    )?;
     writeln!(f, "Max commit parents: {}", m.max_commit_parents)?;
     writeln!(f)?;
 
@@ -195,7 +224,13 @@ fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result
     if !m.largest_blobs.is_empty() {
         writeln!(f, "=== Largest Blobs (Top {}) ===", m.largest_blobs.len())?;
         for (i, blob) in m.largest_blobs.iter().enumerate() {
-            writeln!(f, "  {}. OID: {}, Size: {} bytes", i + 1, blob.oid, blob.size)?;
+            writeln!(
+                f,
+                "  {}. OID: {}, Size: {} bytes",
+                i + 1,
+                blob.oid,
+                blob.size
+            )?;
             if let Some(ref path) = blob.path {
                 writeln!(f, "      Path: {}", path)?;
             }
@@ -204,17 +239,38 @@ fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result
     }
 
     if !m.largest_files.is_empty() {
-        writeln!(f, "=== Largest Files by History (Top {}) ===", m.largest_files.len())?;
+        writeln!(
+            f,
+            "=== Largest Files by History (Top {}) ===",
+            m.largest_files.len()
+        )?;
         for (i, file) in m.largest_files.iter().enumerate() {
-            writeln!(f, "  {}. Path: {}, Size: {} bytes, Versions: {}", i + 1, file.path, file.size, file.versions)?;
+            writeln!(
+                f,
+                "  {}. Path: {}, Size: {} bytes, Versions: {}",
+                i + 1,
+                file.path,
+                file.size,
+                file.versions
+            )?;
         }
         writeln!(f)?;
     }
 
     if !m.blobs_over_threshold.is_empty() {
-        writeln!(f, "=== Blobs Over Threshold (Top {}) ===", m.blobs_over_threshold.len())?;
+        writeln!(
+            f,
+            "=== Blobs Over Threshold (Top {}) ===",
+            m.blobs_over_threshold.len()
+        )?;
         for (i, blob) in m.blobs_over_threshold.iter().enumerate() {
-            writeln!(f, "  {}. OID: {}, Size: {} bytes", i + 1, blob.oid, blob.size)?;
+            writeln!(
+                f,
+                "  {}. OID: {}, Size: {} bytes",
+                i + 1,
+                blob.oid,
+                blob.size
+            )?;
             if let Some(ref path) = blob.path {
                 writeln!(f, "      Path: {}", path)?;
             }
@@ -235,9 +291,19 @@ fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result
     }
 
     if !m.oversized_commit_messages.is_empty() {
-        writeln!(f, "=== Oversized Commit Messages (Top {}) ===", m.oversized_commit_messages.len())?;
+        writeln!(
+            f,
+            "=== Oversized Commit Messages (Top {}) ===",
+            m.oversized_commit_messages.len()
+        )?;
         for (i, msg) in m.oversized_commit_messages.iter().enumerate() {
-            writeln!(f, "  {}. Commit: {}, Length: {} bytes", i + 1, msg.oid, msg.length)?;
+            writeln!(
+                f,
+                "  {}. Commit: {}, Length: {} bytes",
+                i + 1,
+                msg.oid,
+                msg.length
+            )?;
         }
         writeln!(f)?;
     }
@@ -247,7 +313,13 @@ fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result
         writeln!(f, "  No warnings.")?;
     } else {
         for (i, w) in report.warnings.iter().enumerate() {
-            writeln!(f, "  {}. [{}] {}", i + 1, format!("{:?}", w.level).to_uppercase(), w.message)?;
+            writeln!(
+                f,
+                "  {}. [{}] {}",
+                i + 1,
+                format!("{:?}", w.level).to_uppercase(),
+                w.message
+            )?;
             if let Some(ref rec) = w.recommendation {
                 writeln!(f, "      Recommendation: {}", rec)?;
             }

@@ -318,8 +318,14 @@ fn analyze_mode_with_write_report_creates_report_file() {
     assert!(report_path.exists(), "report.txt should be created");
 
     let content = std::fs::read_to_string(&report_path).expect("read report.txt");
-    assert!(content.contains("Repository Analysis Report"), "report should contain header");
-    assert!(content.contains("Total objects"), "report should contain metrics");
+    assert!(
+        content.contains("Repository Analysis Report"),
+        "report should contain header"
+    );
+    assert!(
+        content.contains("Total objects"),
+        "report should contain metrics"
+    );
 }
 
 #[test]
@@ -343,6 +349,12 @@ fn analyze_mode_with_write_report_json_creates_json_report_file() {
 
     let content = std::fs::read_to_string(&json_path).expect("read report.json");
     let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid json");
-    assert!(parsed.get("metrics").is_some(), "json should contain metrics");
-    assert!(parsed.get("warnings").is_some(), "json should contain warnings");
+    assert!(
+        parsed.get("metrics").is_some(),
+        "json should contain metrics"
+    );
+    assert!(
+        parsed.get("warnings").is_some(),
+        "json should contain warnings"
+    );
 }

@@ -1191,33 +1191,165 @@ struct HelpSection {
     options: Vec<HelpOption>,
 }
 
-fn format_help_option(option: &HelpOption, align_width: usize) -> String {
+/// ANSI escape codes for terminal styling
+const ANSI_BOLD_BRIGHT_BLUE: &str = "\x1b[1;94m";
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_DIM: &str = "\x1b[2m";
+
+/// Check if color output should be disabled
+fn color_disabled() -> bool {
+    std::env::var("NO_COLOR").is_ok() || std::env::var("TERM").unwrap_or_default() == "dumb"
+}
+
+/// Known parameter placeholder keywords to highlight
+const PARAM_KEYWORDS: &[&str] = &[
+    "FILE",
+    "DIR",
+    "PATH",
+    "REF",
+    "PREFIX",
+    "GLOB",
+    "REGEX",
+    "BYTES",
+    "DURATION",
+    "TIMESTAMP",
+    "OLD",
+    "NEW",
+    "D",
+    "N",
+    "MODE",
+    "COUNT",
+    "LENGTH",
+    "DAYS",
+    "HOURS",
+    "MINUTES",
+    "SECONDS",
+    "DURATION",
+    "SIZE",
+    "ID",
+    "IDS",
+    "EMAIL",
+    "NAME",
+    "REASON",
+    "VARIANT",
+    "COMMIT",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+];
+
+/// Highlight parameter placeholders in option names
+/// Examples:
+///   "--replace-text FILE" -> "--replace-text \x1b[1mFILE\x1b[0m"
+///   "--prune-empty {always|auto|never}" -> "--prune-empty \x1b[2m{always|auto|never}\x1b[0m"
+fn highlight_option_name(name: &str) -> String {
+    // Only highlight if it looks like a CLI option (starts with -)
+    if !name.starts_with('-') || color_disabled() {
+        return name.to_string();
+    }
+
+    let mut result = name.to_string();
+
+    // Highlight braced options like {always|auto|never}
+    result = highlight_braced_options(&result);
+
+    // Highlight known parameter keywords
+    for keyword in PARAM_KEYWORDS {
+        result = highlight_keyword(&result, keyword);
+    }
+
+    result
+}
+
+/// Highlight content within braces like {always|auto|never}
+fn highlight_braced_options(s: &str) -> String {
+    let mut result = String::new();
+    let chars = s.chars().peekable();
+    let mut in_braces = false;
+    let mut brace_buffer = String::new();
+
+    for ch in chars {
+        if ch == '{' && !in_braces {
+            in_braces = true;
+            brace_buffer.push(ch);
+        } else if ch == '}' && in_braces {
+            brace_buffer.push(ch);
+            result.push_str(ANSI_DIM);
+            result.push_str(&brace_buffer);
+            result.push_str(ANSI_RESET);
+            brace_buffer.clear();
+            in_braces = false;
+        } else if in_braces {
+            brace_buffer.push(ch);
+        } else {
+            result.push(ch);
+        }
+    }
+
+    // Unclosed braces - still highlight them
+    if in_braces && !brace_buffer.is_empty() {
+        result.push_str(ANSI_DIM);
+        result.push_str(&brace_buffer);
+        result.push_str(ANSI_RESET);
+    }
+
+    result
+}
+
+/// Highlight a specific keyword in the string (using bold blue color)
+fn highlight_keyword(s: &str, keyword: &str) -> String {
+    let pattern = format!(" {} ", keyword);
+    let replacement = format!(" {}{}{} ", ANSI_BOLD_BRIGHT_BLUE, keyword, ANSI_RESET);
+
+    // Handle keyword at end of string or before specific separators
+    let mut result = s.replace(&pattern, &replacement);
+
+    // Handle keyword followed by common separators like : ) ]
+    for sep in [':', ')', ']', ',', '.'] {
+        let pattern2 = format!(" {}{}", keyword, sep);
+        let replacement2 = format!(" {}{}{}{}", ANSI_BOLD_BRIGHT_BLUE, keyword, ANSI_RESET, sep);
+        result = result.replace(&pattern2, &replacement2);
+    }
+
+    // Handle keyword at end of string
+    if result.ends_with(keyword) {
+        let replacement_end = format!("{}{}{}", ANSI_BOLD_BRIGHT_BLUE, keyword, ANSI_RESET);
+        result = format!(
+            "{}{}",
+            &result[..result.len() - keyword.len()],
+            replacement_end
+        );
+    }
+
+    result
+}
+
+fn format_help_option(option: &HelpOption, _align_width: usize) -> String {
     let mut result = String::new();
     let indent = "  ";
+    let desc_indent = "    "; // 4 spaces for description alignment
 
     if option.description.is_empty() {
-        return format!("{}{}", indent, option.name);
+        return format!("{}{}", indent, highlight_option_name(&option.name));
     }
 
     // Handle empty name (description-only lines)
     if option.name.is_empty() {
         for line in &option.description {
-            result.push_str(&format!("{}{}\n", indent, line));
+            result.push_str(&format!("{}{}\n", desc_indent, line));
         }
         return result;
     }
 
-    let name_padding = " ".repeat(align_width - option.name.len());
-
-    // First line: option name + description
+    // Option name on its own line (with highlighted parameters)
     result.push_str(&format!(
-        "{}{}{}{}\n",
-        indent, option.name, name_padding, option.description[0]
+        "{}{}\n",
+        indent,
+        highlight_option_name(&option.name)
     ));
 
-    // Subsequent lines: just description with proper indentation
-    for line in option.description.iter().skip(1) {
-        result.push_str(&format!("{}{}{}\n", indent, " ".repeat(align_width), line));
+    // All description lines with consistent indentation
+    for line in &option.description {
+        result.push_str(&format!("{}{}\n", desc_indent, line));
     }
 
     result
