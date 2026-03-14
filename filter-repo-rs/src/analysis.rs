@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
+use std::fs::{create_dir_all, File};
 
 mod term_colors {
     use std::io::IsTerminal;
@@ -126,6 +127,133 @@ pub fn run(opts: &Options) -> io::Result<()> {
     } else {
         print_human(&report, &opts.analyze);
     }
+
+    // Write report files if requested
+    if opts.write_report || opts.write_report_json {
+        // Get the git directory
+        let git_dir = match gitutil::git_dir(&opts.target) {
+            Ok(dir) => dir,
+            Err(_) => opts.target.join(".git"),
+        };
+        let debug_dir = git_dir.join("filter-repo");
+        if !debug_dir.exists() {
+            create_dir_all(&debug_dir)?;
+        }
+
+        // Write text report
+        if opts.write_report {
+            let report_path = debug_dir.join("report.txt");
+            let mut f = File::create(&report_path)?;
+            write_text_report(&mut f, &report)?;
+            eprintln!("Analysis report written to {}", report_path.display());
+        }
+
+        // Write JSON report
+        if opts.write_report_json {
+            let json_path = debug_dir.join("report.json");
+            let mut f = File::create(&json_path)?;
+            let json = serde_json::to_string_pretty(&report).map_err(to_io_error)?;
+            f.write_all(json.as_bytes())?;
+            eprintln!("Analysis JSON report written to {}", json_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Write a text format analysis report to the given writer.
+fn write_text_report<W: Write>(f: &mut W, report: &AnalysisReport) -> io::Result<()> {
+    let m = &report.metrics;
+
+    writeln!(f, "=== Repository Analysis Report ===")?;
+    writeln!(f, "Workdir: {}", m.workdir.as_deref().unwrap_or("N/A"))?;
+    writeln!(f)?;
+
+    writeln!(f, "=== Repository Summary ===")?;
+    writeln!(f, "Total objects: {}", m.total_objects)?;
+    writeln!(f, "Total size: {} bytes ({:.2} MiB)", m.total_size_bytes, m.total_size_bytes as f64 / 1024.0 / 1024.0)?;
+    writeln!(f, "Loose objects: {} ({} bytes)", m.loose_objects, m.loose_size_bytes)?;
+    writeln!(f, "Packed objects: {} ({} bytes)", m.packed_objects, m.packed_size_bytes)?;
+    writeln!(f)?;
+
+    writeln!(f, "=== Objects ===")?;
+    writeln!(f, "Commits: {}", m.object_types.get("commit").copied().unwrap_or(0))?;
+    writeln!(f, "Blobs: {}", m.object_types.get("blob").copied().unwrap_or(0))?;
+    writeln!(f, "Trees: {}", m.object_types.get("tree").copied().unwrap_or(0))?;
+    writeln!(f, "Tags: {}", m.object_types.get("tag").copied().unwrap_or(0))?;
+    writeln!(f, "Max commit parents: {}", m.max_commit_parents)?;
+    writeln!(f)?;
+
+    writeln!(f, "=== References ===")?;
+    writeln!(f, "Total refs: {}", m.refs_total)?;
+    writeln!(f, "  Heads: {}", m.refs_heads)?;
+    writeln!(f, "  Tags: {}", m.refs_tags)?;
+    writeln!(f, "  Remotes: {}", m.refs_remotes)?;
+    writeln!(f, "  Other: {}", m.refs_other)?;
+    writeln!(f)?;
+
+    if !m.largest_blobs.is_empty() {
+        writeln!(f, "=== Largest Blobs (Top {}) ===", m.largest_blobs.len())?;
+        for (i, blob) in m.largest_blobs.iter().enumerate() {
+            writeln!(f, "  {}. OID: {}, Size: {} bytes", i + 1, blob.oid, blob.size)?;
+            if let Some(ref path) = blob.path {
+                writeln!(f, "      Path: {}", path)?;
+            }
+        }
+        writeln!(f)?;
+    }
+
+    if !m.largest_files.is_empty() {
+        writeln!(f, "=== Largest Files by History (Top {}) ===", m.largest_files.len())?;
+        for (i, file) in m.largest_files.iter().enumerate() {
+            writeln!(f, "  {}. Path: {}, Size: {} bytes, Versions: {}", i + 1, file.path, file.size, file.versions)?;
+        }
+        writeln!(f)?;
+    }
+
+    if !m.blobs_over_threshold.is_empty() {
+        writeln!(f, "=== Blobs Over Threshold (Top {}) ===", m.blobs_over_threshold.len())?;
+        for (i, blob) in m.blobs_over_threshold.iter().enumerate() {
+            writeln!(f, "  {}. OID: {}, Size: {} bytes", i + 1, blob.oid, blob.size)?;
+            if let Some(ref path) = blob.path {
+                writeln!(f, "      Path: {}", path)?;
+            }
+        }
+        writeln!(f)?;
+    }
+
+    if let Some(ref dir) = m.directory_hotspots {
+        writeln!(f, "=== Directory Hotspot ===")?;
+        writeln!(f, "  Path: {}, Entries: {}", dir.path, dir.entries)?;
+        writeln!(f)?;
+    }
+
+    if let Some(ref path) = m.longest_path {
+        writeln!(f, "=== Longest Path ===")?;
+        writeln!(f, "  Path: {}, Length: {} chars", path.path, path.length)?;
+        writeln!(f)?;
+    }
+
+    if !m.oversized_commit_messages.is_empty() {
+        writeln!(f, "=== Oversized Commit Messages (Top {}) ===", m.oversized_commit_messages.len())?;
+        for (i, msg) in m.oversized_commit_messages.iter().enumerate() {
+            writeln!(f, "  {}. Commit: {}, Length: {} bytes", i + 1, msg.oid, msg.length)?;
+        }
+        writeln!(f)?;
+    }
+
+    writeln!(f, "=== Warnings ({}) ===", report.warnings.len())?;
+    if report.warnings.is_empty() {
+        writeln!(f, "  No warnings.")?;
+    } else {
+        for (i, w) in report.warnings.iter().enumerate() {
+            writeln!(f, "  {}. [{}] {}", i + 1, format!("{:?}", w.level).to_uppercase(), w.message)?;
+            if let Some(ref rec) = w.recommendation {
+                writeln!(f, "      Recommendation: {}", rec)?;
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -297,3 +297,52 @@ fn analyze_report_excludes_unreachable_blobs_from_top_lists() {
         report.metrics.blobs_over_threshold
     );
 }
+
+#[test]
+fn analyze_mode_with_write_report_creates_report_file() {
+    let repo = init_repo();
+    write_file(&repo, "src/a.txt", "hello world\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(run_git(&repo, &["commit", "-m", "add file"]).0, 0);
+
+    let mut opts = fr::Options::default();
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.mode = fr::Mode::Analyze;
+    opts.force = true;
+    opts.write_report = true;
+
+    fr::analysis::run(&opts).expect("analyze mode with write_report should succeed");
+
+    let report_path = repo.join(".git").join("filter-repo").join("report.txt");
+    assert!(report_path.exists(), "report.txt should be created");
+
+    let content = std::fs::read_to_string(&report_path).expect("read report.txt");
+    assert!(content.contains("Repository Analysis Report"), "report should contain header");
+    assert!(content.contains("Total objects"), "report should contain metrics");
+}
+
+#[test]
+fn analyze_mode_with_write_report_json_creates_json_report_file() {
+    let repo = init_repo();
+    write_file(&repo, "src/b.txt", "hello again\n");
+    assert_eq!(run_git(&repo, &["add", "."]).0, 0);
+    assert_eq!(run_git(&repo, &["commit", "-m", "add another file"]).0, 0);
+
+    let mut opts = fr::Options::default();
+    opts.source = repo.clone();
+    opts.target = repo.clone();
+    opts.mode = fr::Mode::Analyze;
+    opts.force = true;
+    opts.write_report_json = true;
+
+    fr::analysis::run(&opts).expect("analyze mode with write_report_json should succeed");
+
+    let json_path = repo.join(".git").join("filter-repo").join("report.json");
+    assert!(json_path.exists(), "report.json should be created");
+
+    let content = std::fs::read_to_string(&json_path).expect("read report.json");
+    let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert!(parsed.get("metrics").is_some(), "json should contain metrics");
+    assert!(parsed.get("warnings").is_some(), "json should contain warnings");
+}
