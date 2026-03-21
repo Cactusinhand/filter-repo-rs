@@ -344,7 +344,6 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
-#[allow(dead_code)]
 fn process_blob_content(
     payload: Vec<u8>,
     content_replacer: &Option<MessageReplacer>,
