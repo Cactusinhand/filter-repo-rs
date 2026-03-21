@@ -130,8 +130,10 @@ impl MessageReplacer {
     }
 
     pub fn apply_with_change(&self, data: Vec<u8>) -> (Vec<u8>, bool) {
-        let changed = self.would_change(&data);
-        (self.apply(data), changed)
+        if !self.would_change(&data) {
+            return (data, false);
+        }
+        (self.apply(data), true)
     }
 
     #[allow(dead_code)]
