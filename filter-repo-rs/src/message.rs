@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead};
+#[cfg(test)]
+use std::io::{Read, Write};
 use std::path::Path;
 
 use aho_corasick::AhoCorasick;
@@ -56,14 +58,14 @@ pub fn expand_bytes_template(tpl: &[u8], caps: &Captures) -> Vec<u8> {
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub const STREAMING_THRESHOLD: usize = 1024 * 1024;
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct MessageReplacer {
     pub pairs: Vec<(Vec<u8>, Vec<u8>)>,
     ac: Option<AhoCorasick>,
+    #[cfg_attr(not(test), allow(dead_code))]
     replacements: Vec<Vec<u8>>,
 }
 
@@ -136,12 +138,12 @@ impl MessageReplacer {
         (self.apply(data), true)
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn supports_streaming(&self) -> bool {
         self.ac.is_some()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn apply_streaming<R: Read, W: Write>(
         &self,
         reader: &mut R,
@@ -168,27 +170,6 @@ impl MessageReplacer {
         Ok(changed)
     }
 
-    #[allow(dead_code)]
-    fn apply_ac_replacements(&self, ac: &AhoCorasick, data: &[u8]) -> (Vec<u8>, bool) {
-        if ac.find(data).is_none() {
-            return (data.to_vec(), false);
-        }
-
-        let mut out = Vec::with_capacity(data.len());
-        let mut last = 0usize;
-        for m in ac.find_iter(data) {
-            out.extend_from_slice(&data[last..m.start()]);
-            let idx = m.pattern().as_usize();
-            out.extend_from_slice(
-                self.replacements
-                    .get(idx)
-                    .expect("replacement index should exist"),
-            );
-            last = m.end();
-        }
-        out.extend_from_slice(&data[last..]);
-        (out, true)
-    }
 }
 
 const MIN_SHORT_HASH_LEN: usize = 7;
