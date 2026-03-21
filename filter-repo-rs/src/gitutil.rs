@@ -64,7 +64,14 @@ pub fn run_git_with_timeout(
                         ),
                     ));
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                // Adaptive sleep: short polls early, longer polls after 1s
+                let elapsed = start_time.elapsed();
+                let sleep_ms = if elapsed < Duration::from_secs(1) {
+                    10
+                } else {
+                    100
+                };
+                std::thread::sleep(Duration::from_millis(sleep_ms));
             }
         }
     }
