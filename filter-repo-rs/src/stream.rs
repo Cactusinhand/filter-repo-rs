@@ -8,8 +8,6 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rayon::prelude::*;
-
 use crate::commit::{AuthorRewriter, MailmapRewriter};
 use crate::error::Result as FilterRepoResult;
 use crate::gitutil::git_dir;
@@ -308,30 +306,6 @@ fn hex_val(b: u8) -> Option<u8> {
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
-}
-
-#[allow(dead_code)]
-fn process_blob_batch_parallel(
-    payloads: Vec<Vec<u8>>,
-    content_replacer: &Option<MessageReplacer>,
-    content_regex_replacer: &Option<BlobRegexReplacer>,
-) -> Vec<Vec<u8>> {
-    if content_replacer.is_none() && content_regex_replacer.is_none() {
-        return payloads;
-    }
-
-    payloads
-        .into_par_iter()
-        .map(|mut payload| {
-            if let Some(r) = content_replacer {
-                payload = r.apply(payload);
-            }
-            if let Some(rr) = content_regex_replacer {
-                payload = rr.apply_regex(payload);
-            }
-            payload
-        })
-        .collect()
 }
 
 #[allow(dead_code)]

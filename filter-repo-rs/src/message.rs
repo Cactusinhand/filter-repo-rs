@@ -4,7 +4,55 @@ use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 
 use aho_corasick::AhoCorasick;
-use regex::bytes::RegexBuilder;
+use regex::bytes::{Captures, RegexBuilder};
+
+pub fn expand_bytes_template(tpl: &[u8], caps: &Captures) -> Vec<u8> {
+    let mut out = Vec::with_capacity(tpl.len() + 16);
+    let mut i = 0;
+    while i < tpl.len() {
+        let b = tpl[i];
+        if b == b'$' {
+            i += 1;
+            if i < tpl.len() {
+                let nb = tpl[i];
+                if nb == b'$' {
+                    out.push(b'$');
+                    i += 1;
+                    continue;
+                }
+                let mut num: usize = 0;
+                let mut seen = false;
+                while i < tpl.len() {
+                    let c = tpl[i];
+                    if c.is_ascii_digit() {
+                        seen = true;
+                        num = num * 10 + (c - b'0') as usize;
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if seen && num > 0 {
+                    if let Some(m) = caps.get(num) {
+                        out.extend_from_slice(m.as_bytes());
+                    }
+                    continue;
+                }
+                out.push(b'$');
+                out.push(nb);
+                i += 1;
+                continue;
+            } else {
+                out.push(b'$');
+                break;
+            }
+        } else {
+            out.push(b);
+            i += 1;
+        }
+    }
+    out
+}
 
 const AHO_CORASICK_THRESHOLD: usize = 3;
 
@@ -416,58 +464,6 @@ pub mod blob_regex {
             cur
         }
     }
-
-    fn expand_bytes_template(tpl: &[u8], caps: &Captures) -> Vec<u8> {
-        // Minimal $1..$9 expansion with $$ -> literal '$'
-        let mut out = Vec::with_capacity(tpl.len() + 16);
-        let mut i = 0;
-        while i < tpl.len() {
-            let b = tpl[i];
-            if b == b'$' {
-                i += 1;
-                if i < tpl.len() {
-                    let nb = tpl[i];
-                    if nb == b'$' {
-                        out.push(b'$');
-                        i += 1;
-                        continue;
-                    }
-                    // parse number
-                    let mut num: usize = 0;
-                    let mut seen = false;
-                    while i < tpl.len() {
-                        let c = tpl[i];
-                        if c.is_ascii_digit() {
-                            seen = true;
-                            num = num * 10 + (c - b'0') as usize;
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if seen && num > 0 {
-                        if let Some(m) = caps.get(num) {
-                            out.extend_from_slice(m.as_bytes());
-                        }
-                        continue;
-                    }
-                    // No valid group number; treat as literal '$' + nb
-                    out.push(b'$');
-                    out.push(nb);
-                    i += 1;
-                    continue;
-                } else {
-                    // Trailing '$'
-                    out.push(b'$');
-                    break;
-                }
-            } else {
-                out.push(b);
-                i += 1;
-            }
-        }
-        out
-    }
 }
 
 // Regex support for commit/tag message replacements: support lines beginning with
@@ -545,58 +541,6 @@ pub mod msg_regex {
             }
             cur
         }
-    }
-
-    fn expand_bytes_template(tpl: &[u8], caps: &Captures) -> Vec<u8> {
-        // Minimal $1..$9 expansion with $$ -> literal '$'
-        let mut out = Vec::with_capacity(tpl.len() + 16);
-        let mut i = 0;
-        while i < tpl.len() {
-            let b = tpl[i];
-            if b == b'$' {
-                i += 1;
-                if i < tpl.len() {
-                    let nb = tpl[i];
-                    if nb == b'$' {
-                        out.push(b'$');
-                        i += 1;
-                        continue;
-                    }
-                    // parse number
-                    let mut num: usize = 0;
-                    let mut seen = false;
-                    while i < tpl.len() {
-                        let c = tpl[i];
-                        if c.is_ascii_digit() {
-                            seen = true;
-                            num = num * 10 + (c - b'0') as usize;
-                            i += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if seen && num > 0 {
-                        if let Some(m) = caps.get(num) {
-                            out.extend_from_slice(m.as_bytes());
-                        }
-                        continue;
-                    }
-                    // No valid group number; treat as literal '$' + nb
-                    out.push(b'$');
-                    out.push(nb);
-                    i += 1;
-                    continue;
-                } else {
-                    // Trailing '$'
-                    out.push(b'$');
-                    break;
-                }
-            } else {
-                out.push(b);
-                i += 1;
-            }
-        }
-        out
     }
 }
 
