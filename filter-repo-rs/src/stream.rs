@@ -369,6 +369,52 @@ fn process_blob_content(
     (data, changed)
 }
 
+/// Tracks which marks/shas were filtered and why (size vs sha-strip).
+struct FilterTracker {
+    oversize_marks: HashSet<u32>,
+    oversize_shas: HashSet<Vec<u8>>,
+    suppressed_marks_by_size: HashSet<u32>,
+    suppressed_marks_by_sha: HashSet<u32>,
+    suppressed_shas_by_size: HashSet<Vec<u8>>,
+    suppressed_shas_by_sha: HashSet<Vec<u8>>,
+    modified_marks: HashSet<u32>,
+    emitted_marks: HashSet<u32>,
+}
+
+impl FilterTracker {
+    fn new() -> Self {
+        Self {
+            oversize_marks: HashSet::new(),
+            oversize_shas: HashSet::new(),
+            suppressed_marks_by_size: HashSet::new(),
+            suppressed_marks_by_sha: HashSet::new(),
+            suppressed_shas_by_size: HashSet::new(),
+            suppressed_shas_by_sha: HashSet::new(),
+            modified_marks: HashSet::new(),
+            emitted_marks: HashSet::new(),
+        }
+    }
+}
+
+/// Accumulates sample paths for the final report.
+struct ReportSamples {
+    size: Vec<Vec<u8>>,
+    sha: Vec<Vec<u8>>,
+    modified: Vec<Vec<u8>>,
+    inline_modified_paths: HashSet<Vec<u8>>,
+}
+
+impl ReportSamples {
+    fn new() -> Self {
+        Self {
+            size: Vec::new(),
+            sha: Vec::new(),
+            modified: Vec::new(),
+            inline_modified_paths: HashSet::new(),
+        }
+    }
+}
+
 struct PendingInlineDataCtx<'a> {
     opts: &'a Options,
     fe_out: &'a mut BufReader<std::process::ChildStdout>,
@@ -376,9 +422,7 @@ struct PendingInlineDataCtx<'a> {
     commit_buf: &'a mut Vec<u8>,
     commit_has_changes: &'a mut bool,
     pending_inline: &'a mut Option<(usize, Vec<u8>)>,
-    samples_size: &'a mut Vec<Vec<u8>>,
-    samples_modified: &'a mut Vec<Vec<u8>>,
-    inline_modified_paths: &'a mut HashSet<Vec<u8>>,
+    samples: &'a mut ReportSamples,
     path_compat_stats: &'a mut PathCompatStats,
     content_replacer: &'a Option<MessageReplacer>,
     content_regex_replacer: &'a Option<BlobRegexReplacer>,
@@ -423,7 +467,7 @@ fn process_pending_inline_data_line(
             ctx.commit_buf.push(b'\n');
             *ctx.commit_has_changes = true;
         }
-        add_sample(ctx.samples_size, &path_bytes);
+        add_sample(&mut ctx.samples.size, &path_bytes);
         return Ok(true);
     }
 
@@ -448,8 +492,8 @@ fn process_pending_inline_data_line(
         ctx.commit_buf.extend_from_slice(header.as_bytes());
         ctx.commit_buf.extend_from_slice(&new_payload);
         if changed {
-            add_sample(ctx.samples_modified, &path_bytes);
-            ctx.inline_modified_paths.insert(path_bytes.clone());
+            add_sample(&mut ctx.samples.modified, &path_bytes);
+            ctx.samples.inline_modified_paths.insert(path_bytes.clone());
         }
     }
     *ctx.commit_has_changes = true;
@@ -478,16 +522,8 @@ struct CommitMPrecheckCtx<'a> {
     commit_buf: &'a mut Vec<u8>,
     commit_has_changes: &'a mut bool,
     pending_inline: &'a mut Option<(usize, Vec<u8>)>,
-    oversize_marks: &'a HashSet<u32>,
-    oversize_shas: &'a mut HashSet<Vec<u8>>,
-    suppressed_marks_by_size: &'a HashSet<u32>,
-    suppressed_marks_by_sha: &'a HashSet<u32>,
-    suppressed_shas_by_size: &'a mut HashSet<Vec<u8>>,
-    suppressed_shas_by_sha: &'a mut HashSet<Vec<u8>>,
-    modified_marks: &'a HashSet<u32>,
-    samples_size: &'a mut Vec<Vec<u8>>,
-    samples_sha: &'a mut Vec<Vec<u8>>,
-    samples_modified: &'a mut Vec<Vec<u8>>,
+    tracker: &'a mut FilterTracker,
+    samples: &'a mut ReportSamples,
     path_compat_stats: &'a mut PathCompatStats,
     strip_sha_lookup: &'a StripShaLookup,
     blob_size_tracker: &'a mut BlobSizeTracker,
@@ -498,22 +534,8 @@ fn process_commit_m_line_precheck(
     ctx: &mut CommitMPrecheckCtx<'_>,
 ) -> FilterRepoResult<bool> {
     let opts = ctx.opts;
-    let commit_buf = &mut *ctx.commit_buf;
-    let commit_has_changes = &mut *ctx.commit_has_changes;
-    let pending_inline = &mut *ctx.pending_inline;
-    let oversize_marks = ctx.oversize_marks;
-    let oversize_shas = &mut *ctx.oversize_shas;
-    let suppressed_marks_by_size = ctx.suppressed_marks_by_size;
-    let suppressed_marks_by_sha = ctx.suppressed_marks_by_sha;
-    let suppressed_shas_by_size = &mut *ctx.suppressed_shas_by_size;
-    let suppressed_shas_by_sha = &mut *ctx.suppressed_shas_by_sha;
-    let modified_marks = ctx.modified_marks;
-    let samples_size = &mut *ctx.samples_size;
-    let samples_sha = &mut *ctx.samples_sha;
-    let samples_modified = &mut *ctx.samples_modified;
-    let path_compat_stats = &mut *ctx.path_compat_stats;
-    let strip_sha_lookup = ctx.strip_sha_lookup;
-    let blob_size_tracker = &mut *ctx.blob_size_tracker;
+    let tracker = &mut *ctx.tracker;
+    let samples = &mut *ctx.samples;
 
     let (id, path_bytes) = parse_commit_m_line_id_and_path(line);
     if id == b"inline" {
@@ -523,7 +545,7 @@ fn process_commit_m_line_precheck(
                 p.pop();
             }
         }
-        *pending_inline = Some((commit_buf.len(), p));
+        *ctx.pending_inline = Some((ctx.commit_buf.len(), p));
     }
 
     let mut drop_path = false;
@@ -543,32 +565,32 @@ fn process_commit_m_line_precheck(
             }
             j += 1;
         }
-        if seen && oversize_marks.contains(&num) {
+        if seen && tracker.oversize_marks.contains(&num) {
             drop_path = true;
-            add_sample(samples_size, path_bytes);
-            reason_size = suppressed_marks_by_size.contains(&num);
-            reason_sha = suppressed_marks_by_sha.contains(&num);
+            add_sample(&mut samples.size, path_bytes);
+            reason_size = tracker.suppressed_marks_by_size.contains(&num);
+            reason_sha = tracker.suppressed_marks_by_sha.contains(&num);
         }
-        if seen && modified_marks.contains(&num) {
-            add_sample(samples_modified, path_bytes);
+        if seen && tracker.modified_marks.contains(&num) {
+            add_sample(&mut samples.modified, path_bytes);
         }
     } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
         let sha = id.to_vec();
-        if strip_sha_lookup.contains_hex(&sha)? {
+        if ctx.strip_sha_lookup.contains_hex(&sha)? {
             drop_path = true;
             reason_sha = true;
-            suppressed_shas_by_sha.insert(sha.clone());
+            tracker.suppressed_shas_by_sha.insert(sha.clone());
         }
-        if blob_size_tracker.is_oversize(&sha) {
-            oversize_shas.insert(sha.clone());
-            suppressed_shas_by_size.insert(sha);
+        if ctx.blob_size_tracker.is_oversize(&sha) {
+            tracker.oversize_shas.insert(sha.clone());
+            tracker.suppressed_shas_by_size.insert(sha);
             drop_path = true;
             reason_size = true;
             let path_buf = path_bytes.to_vec();
-            if samples_size.len() < REPORT_SAMPLE_LIMIT
-                && !samples_size.iter().any(|p| p == &path_buf)
+            if samples.size.len() < REPORT_SAMPLE_LIMIT
+                && !samples.size.iter().any(|p| p == &path_buf)
             {
-                samples_size.push(path_buf);
+                samples.size.push(path_buf);
             }
         }
     }
@@ -582,13 +604,13 @@ fn process_commit_m_line_precheck(
         crate::pathutil::encode_path_for_fi_with_policy(&decoded, opts.path_compat_policy)
             .map_err(io::Error::other)?;
     if let Some(event) = path_event {
-        record_path_compat_event(path_compat_stats, event);
+        record_path_compat_event(ctx.path_compat_stats, event);
     }
     if let Some(enc) = enc {
-        commit_buf.extend_from_slice(b"D ");
-        commit_buf.extend_from_slice(&enc);
-        commit_buf.push(b'\n');
-        *commit_has_changes = true;
+        ctx.commit_buf.extend_from_slice(b"D ");
+        ctx.commit_buf.extend_from_slice(&enc);
+        ctx.commit_buf.push(b'\n');
+        *ctx.commit_has_changes = true;
     }
     let (mut r_size, mut r_sha) = (reason_size, reason_sha);
     if !r_size && !r_sha {
@@ -599,9 +621,9 @@ fn process_commit_m_line_precheck(
         }
     }
     if r_size {
-        add_sample(samples_size, path_bytes);
+        add_sample(&mut samples.size, path_bytes);
     } else if r_sha {
-        add_sample(samples_sha, path_bytes);
+        add_sample(&mut samples.sha, path_bytes);
     }
     Ok(true)
 }
@@ -616,14 +638,7 @@ struct BlobPayloadCtx<'a> {
     blob_buf: &'a mut Vec<Vec<u8>>,
     last_blob_mark: &'a mut Option<u32>,
     last_blob_orig_sha: &'a mut Option<Vec<u8>>,
-    oversize_marks: &'a mut HashSet<u32>,
-    oversize_shas: &'a mut HashSet<Vec<u8>>,
-    suppressed_marks_by_size: &'a mut HashSet<u32>,
-    suppressed_marks_by_sha: &'a mut HashSet<u32>,
-    suppressed_shas_by_size: &'a mut HashSet<Vec<u8>>,
-    suppressed_shas_by_sha: &'a mut HashSet<Vec<u8>>,
-    modified_marks: &'a mut HashSet<u32>,
-    emitted_marks: &'a mut HashSet<u32>,
+    tracker: &'a mut FilterTracker,
     import_broken: &'a mut bool,
     strip_sha_lookup: &'a StripShaLookup,
 }
@@ -633,24 +648,7 @@ fn process_blob_data_payload(
     ctx: &mut BlobPayloadCtx<'_>,
 ) -> FilterRepoResult<()> {
     let opts = ctx.opts;
-    let filt_file = &mut *ctx.filt_file;
-    let fi_in_opt = &mut *ctx.fi_in_opt;
-    let content_replacer = ctx.content_replacer;
-    let content_regex_replacer = ctx.content_regex_replacer;
-    let in_blob = &mut *ctx.in_blob;
-    let blob_buf = &mut *ctx.blob_buf;
-    let last_blob_mark = &mut *ctx.last_blob_mark;
-    let last_blob_orig_sha = &mut *ctx.last_blob_orig_sha;
-    let oversize_marks = &mut *ctx.oversize_marks;
-    let oversize_shas = &mut *ctx.oversize_shas;
-    let suppressed_marks_by_size = &mut *ctx.suppressed_marks_by_size;
-    let suppressed_marks_by_sha = &mut *ctx.suppressed_marks_by_sha;
-    let suppressed_shas_by_size = &mut *ctx.suppressed_shas_by_size;
-    let suppressed_shas_by_sha = &mut *ctx.suppressed_shas_by_sha;
-    let modified_marks = &mut *ctx.modified_marks;
-    let emitted_marks = &mut *ctx.emitted_marks;
-    let import_broken = &mut *ctx.import_broken;
-    let strip_sha_lookup = ctx.strip_sha_lookup;
+    let tracker = &mut *ctx.tracker;
 
     let n = payload.len();
     let mut skip_blob = false;
@@ -658,78 +656,78 @@ fn process_blob_data_payload(
     let mut reason_sha = false;
     if let Some(max) = opts.max_blob_size {
         if n > max {
-            if let Some(m) = *last_blob_mark {
-                oversize_marks.insert(m);
-                suppressed_marks_by_size.insert(m);
+            if let Some(m) = *ctx.last_blob_mark {
+                tracker.oversize_marks.insert(m);
+                tracker.suppressed_marks_by_size.insert(m);
             }
-            if let Some(ref s) = *last_blob_orig_sha {
-                oversize_shas.insert(s.clone());
-                suppressed_shas_by_size.insert(s.clone());
+            if let Some(ref s) = *ctx.last_blob_orig_sha {
+                tracker.oversize_shas.insert(s.clone());
+                tracker.suppressed_shas_by_size.insert(s.clone());
             }
             skip_blob = true;
             reason_size = true;
         }
     }
     if !skip_blob {
-        if let Some(ref s) = *last_blob_orig_sha {
-            if strip_sha_lookup.contains_hex(s)? {
+        if let Some(ref s) = *ctx.last_blob_orig_sha {
+            if ctx.strip_sha_lookup.contains_hex(s)? {
                 skip_blob = true;
                 reason_sha = true;
             }
         }
     }
     if skip_blob {
-        if let Some(m) = last_blob_mark.take() {
-            oversize_marks.insert(m);
+        if let Some(m) = ctx.last_blob_mark.take() {
+            tracker.oversize_marks.insert(m);
             if reason_size {
-                suppressed_marks_by_size.insert(m);
+                tracker.suppressed_marks_by_size.insert(m);
             } else if reason_sha {
-                suppressed_marks_by_sha.insert(m);
+                tracker.suppressed_marks_by_sha.insert(m);
             }
         }
-        if let Some(sha) = last_blob_orig_sha.take() {
-            oversize_shas.insert(sha.clone());
+        if let Some(sha) = ctx.last_blob_orig_sha.take() {
+            tracker.oversize_shas.insert(sha.clone());
             if reason_size {
-                suppressed_shas_by_size.insert(sha);
+                tracker.suppressed_shas_by_size.insert(sha);
             } else if reason_sha {
-                suppressed_shas_by_sha.insert(sha);
+                tracker.suppressed_shas_by_sha.insert(sha);
             }
         }
-        *in_blob = false;
-        blob_buf.clear();
-        *last_blob_mark = None;
+        *ctx.in_blob = false;
+        ctx.blob_buf.clear();
+        *ctx.last_blob_mark = None;
         return Ok(());
     }
 
-    for h in blob_buf.drain(..) {
-        filt_file.write_all(&h)?;
-        if let Some(ref mut fi_in) = fi_in_opt {
+    for h in ctx.blob_buf.drain(..) {
+        ctx.filt_file.write_all(&h)?;
+        if let Some(ref mut fi_in) = ctx.fi_in_opt {
             if let Err(e) = fi_in.write_all(&h) {
                 if e.kind() == io::ErrorKind::BrokenPipe {
-                    *import_broken = true;
+                    *ctx.import_broken = true;
                 } else {
                     return Err(e.into());
                 }
             }
         }
     }
-    if content_replacer.is_none() && content_regex_replacer.is_none() {
+    if ctx.content_replacer.is_none() && ctx.content_regex_replacer.is_none() {
         let header = format!("data {}\n", n);
-        filt_file.write_all(header.as_bytes())?;
-        if let Some(ref mut fi_in) = fi_in_opt {
+        ctx.filt_file.write_all(header.as_bytes())?;
+        if let Some(ref mut fi_in) = ctx.fi_in_opt {
             if let Err(e) = fi_in.write_all(header.as_bytes()) {
                 if e.kind() == io::ErrorKind::BrokenPipe {
-                    *import_broken = true;
+                    *ctx.import_broken = true;
                 } else {
                     return Err(e.into());
                 }
             }
         }
-        filt_file.write_all(&payload)?;
-        if let Some(ref mut fi_in) = fi_in_opt {
+        ctx.filt_file.write_all(&payload)?;
+        if let Some(ref mut fi_in) = ctx.fi_in_opt {
             if let Err(e) = fi_in.write_all(&payload) {
                 if e.kind() == io::ErrorKind::BrokenPipe {
-                    *import_broken = true;
+                    *ctx.import_broken = true;
                 } else {
                     return Err(e.into());
                 }
@@ -737,39 +735,39 @@ fn process_blob_data_payload(
         }
     } else {
         let (new_payload, changed) =
-            process_blob_content(payload, content_replacer, content_regex_replacer);
+            process_blob_content(payload, ctx.content_replacer, ctx.content_regex_replacer);
         let header = format!("data {}\n", new_payload.len());
-        filt_file.write_all(header.as_bytes())?;
-        if let Some(ref mut fi_in) = fi_in_opt {
+        ctx.filt_file.write_all(header.as_bytes())?;
+        if let Some(ref mut fi_in) = ctx.fi_in_opt {
             if let Err(e) = fi_in.write_all(header.as_bytes()) {
                 if e.kind() == io::ErrorKind::BrokenPipe {
-                    *import_broken = true;
+                    *ctx.import_broken = true;
                 } else {
                     return Err(e.into());
                 }
             }
         }
-        filt_file.write_all(&new_payload)?;
-        if let Some(ref mut fi_in) = fi_in_opt {
+        ctx.filt_file.write_all(&new_payload)?;
+        if let Some(ref mut fi_in) = ctx.fi_in_opt {
             if let Err(e) = fi_in.write_all(&new_payload) {
                 if e.kind() == io::ErrorKind::BrokenPipe {
-                    *import_broken = true;
+                    *ctx.import_broken = true;
                 } else {
                     return Err(e.into());
                 }
             }
         }
         if changed {
-            if let Some(m) = *last_blob_mark {
-                modified_marks.insert(m);
+            if let Some(m) = *ctx.last_blob_mark {
+                tracker.modified_marks.insert(m);
             }
         }
     }
-    if let Some(m) = *last_blob_mark {
-        emitted_marks.insert(m);
+    if let Some(m) = *ctx.last_blob_mark {
+        tracker.emitted_marks.insert(m);
     }
-    *in_blob = false;
-    *last_blob_mark = None;
+    *ctx.in_blob = false;
+    *ctx.last_blob_mark = None;
 
     Ok(())
 }
@@ -1179,17 +1177,10 @@ impl<'a> StreamProcessor<'a> {
         annotated_tag_refs: BTreeSet<Vec<u8>>,
         updated_branch_refs: BTreeSet<Vec<u8>>,
         branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
-        suppressed_shas_by_size: HashSet<Vec<u8>>,
-        suppressed_marks_by_size: HashSet<u32>,
-        suppressed_shas_by_sha: HashSet<Vec<u8>>,
-        suppressed_marks_by_sha: HashSet<u32>,
-        modified_marks: HashSet<u32>,
-        inline_modified_paths: HashSet<Vec<u8>>,
+        tracker: FilterTracker,
+        samples: ReportSamples,
         total_commits: usize,
         total_blobs: usize,
-        samples_size: Vec<Vec<u8>>,
-        samples_sha: Vec<Vec<u8>>,
-        samples_modified: Vec<Vec<u8>>,
         path_compat_stats: PathCompatStats,
         blob_size_tracker: &BlobSizeTracker,
     ) -> FilterRepoResult<()> {
@@ -1223,13 +1214,13 @@ impl<'a> StreamProcessor<'a> {
                 };
                 Some(ReportData {
                     summary: Summary {
-                        blobs_stripped_by_size: suppressed_shas_by_size
+                        blobs_stripped_by_size: tracker.suppressed_shas_by_size
                             .len()
-                            .max(suppressed_marks_by_size.len()),
-                        blobs_stripped_by_sha: suppressed_shas_by_sha
+                            .max(tracker.suppressed_marks_by_size.len()),
+                        blobs_stripped_by_sha: tracker.suppressed_shas_by_sha
                             .len()
-                            .max(suppressed_marks_by_sha.len()),
-                        blobs_modified: modified_marks.len() + inline_modified_paths.len(),
+                            .max(tracker.suppressed_marks_by_sha.len()),
+                        blobs_modified: tracker.modified_marks.len() + samples.inline_modified_paths.len(),
                     },
                     statistics: Statistics {
                         commits_processed: total_commits,
@@ -1237,15 +1228,15 @@ impl<'a> StreamProcessor<'a> {
                         refs_rewritten: total_refs_rewritten,
                     },
                     samples: Samples {
-                        by_size: samples_size
+                        by_size: samples.size
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),
-                        by_sha: samples_sha
+                        by_sha: samples.sha
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),
-                        modified: samples_modified
+                        modified: samples.modified
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),
@@ -1343,8 +1334,6 @@ impl<'a> StreamProcessor<'a> {
         let mut in_blob: bool = false;
         let mut blob_buf: Vec<Vec<u8>> = Vec::new();
         let mut last_blob_mark: Option<u32> = None;
-        let mut oversize_marks: HashSet<u32> = HashSet::new();
-        let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
         let strip_sha_lookup = match &opts.strip_blobs_with_ids {
             Some(path) => StripShaLookup::from_path(path).map_err(|e| {
                 io::Error::other(format!("failed to load --strip-blobs-with-ids: {e}"))
@@ -1353,19 +1342,11 @@ impl<'a> StreamProcessor<'a> {
         };
         let mut last_blob_orig_sha: Option<Vec<u8>> = None;
         let mut blob_size_tracker = BlobSizeTracker::new(opts);
-        // Reporting accumulators
-        let mut suppressed_marks_by_size: HashSet<u32> = HashSet::new();
-        let mut suppressed_marks_by_sha: HashSet<u32> = HashSet::new();
-        let mut suppressed_shas_by_size: HashSet<Vec<u8>> = HashSet::new();
-        let mut suppressed_shas_by_sha: HashSet<Vec<u8>> = HashSet::new();
-        let mut modified_marks: HashSet<u32> = HashSet::new();
-        let mut samples_size: Vec<Vec<u8>> = Vec::new();
+        let mut tracker = FilterTracker::new();
+        let mut samples = ReportSamples::new();
         // Statistics counters
         let mut total_commits: usize = 0;
         let mut total_blobs: usize = 0;
-        let mut samples_sha: Vec<Vec<u8>> = Vec::new();
-        let mut samples_modified: Vec<Vec<u8>> = Vec::new();
-        let mut inline_modified_paths: HashSet<Vec<u8>> = HashSet::new();
         let mut path_compat_stats = PathCompatStats {
             policy: opts.path_compat_policy.as_str().to_string(),
             ..PathCompatStats::default()
@@ -1373,8 +1354,6 @@ impl<'a> StreamProcessor<'a> {
         let mut line = Vec::with_capacity(8192);
         // Track if the previous M-line used inline content; store commit_buf position and path bytes
         let mut pending_inline: Option<(usize, Vec<u8>)> = None;
-        // Track marks that have been emitted to avoid referencing undeclared marks in aliases
-        let mut emitted_marks: HashSet<u32> = HashSet::new();
 
         loop {
             line.clear();
@@ -1502,7 +1481,7 @@ impl<'a> StreamProcessor<'a> {
                         updated_refs: &mut updated_refs,
                         annotated_tag_refs: &mut annotated_tag_refs,
                         ref_renames: &mut ref_renames,
-                        emitted_marks: &mut emitted_marks,
+                        emitted_marks: &mut tracker.emitted_marks,
                     },
                 )?;
                 continue;
@@ -1567,14 +1546,14 @@ impl<'a> StreamProcessor<'a> {
                         &mut import_broken,
                         &mut parent_lines,
                         &mut alias_map,
-                        &emitted_marks,
+                        &tracker.emitted_marks,
                         &mut path_events,
                     )? {
                         crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
                         crate::commit::CommitAction::Ended => {
                             // Record emitted commit mark
                             if let Some(m) = commit_mark {
-                                emitted_marks.insert(m);
+                                tracker.emitted_marks.insert(m);
                                 if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
                                     short_hash_mapper.as_mut(),
                                     fi_in_opt.as_mut(),
@@ -1607,9 +1586,7 @@ impl<'a> StreamProcessor<'a> {
                     commit_buf: &mut commit_buf,
                     commit_has_changes: &mut commit_has_changes,
                     pending_inline: &mut pending_inline,
-                    samples_size: &mut samples_size,
-                    samples_modified: &mut samples_modified,
-                    inline_modified_paths: &mut inline_modified_paths,
+                    samples: &mut samples,
                     path_compat_stats: &mut path_compat_stats,
                     content_replacer: &content_replacer,
                     content_regex_replacer: &content_regex_replacer,
@@ -1623,16 +1600,8 @@ impl<'a> StreamProcessor<'a> {
                         commit_buf: &mut commit_buf,
                         commit_has_changes: &mut commit_has_changes,
                         pending_inline: &mut pending_inline,
-                        oversize_marks: &oversize_marks,
-                        oversize_shas: &mut oversize_shas,
-                        suppressed_marks_by_size: &suppressed_marks_by_size,
-                        suppressed_marks_by_sha: &suppressed_marks_by_sha,
-                        suppressed_shas_by_size: &mut suppressed_shas_by_size,
-                        suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
-                        modified_marks: &modified_marks,
-                        samples_size: &mut samples_size,
-                        samples_sha: &mut samples_sha,
-                        samples_modified: &mut samples_modified,
+                        tracker: &mut tracker,
+                        samples: &mut samples,
                         path_compat_stats: &mut path_compat_stats,
                         strip_sha_lookup: &strip_sha_lookup,
                         blob_size_tracker: &mut blob_size_tracker,
@@ -1681,7 +1650,7 @@ impl<'a> StreamProcessor<'a> {
                     &mut import_broken,
                     &mut parent_lines,
                     &mut alias_map,
-                    &emitted_marks,
+                    &tracker.emitted_marks,
                     &mut path_events,
                 )? {
                     crate::commit::CommitAction::Consumed => {
@@ -1695,7 +1664,7 @@ impl<'a> StreamProcessor<'a> {
                             record_path_compat_event(&mut path_compat_stats, event);
                         }
                         if let Some(m) = commit_mark {
-                            emitted_marks.insert(m);
+                            tracker.emitted_marks.insert(m);
                             if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
                                 short_hash_mapper.as_mut(),
                                 fi_in_opt.as_mut(),
@@ -1737,14 +1706,7 @@ impl<'a> StreamProcessor<'a> {
                         blob_buf: &mut blob_buf,
                         last_blob_mark: &mut last_blob_mark,
                         last_blob_orig_sha: &mut last_blob_orig_sha,
-                        oversize_marks: &mut oversize_marks,
-                        oversize_shas: &mut oversize_shas,
-                        suppressed_marks_by_size: &mut suppressed_marks_by_size,
-                        suppressed_marks_by_sha: &mut suppressed_marks_by_sha,
-                        suppressed_shas_by_size: &mut suppressed_shas_by_size,
-                        suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
-                        modified_marks: &mut modified_marks,
-                        emitted_marks: &mut emitted_marks,
+                        tracker: &mut tracker,
                         import_broken: &mut import_broken,
                         strip_sha_lookup: &strip_sha_lookup,
                     };
@@ -1894,17 +1856,10 @@ impl<'a> StreamProcessor<'a> {
             annotated_tag_refs,
             updated_branch_refs,
             branch_reset_targets,
-            suppressed_shas_by_size,
-            suppressed_marks_by_size,
-            suppressed_shas_by_sha,
-            suppressed_marks_by_sha,
-            modified_marks,
-            inline_modified_paths,
+            tracker,
+            samples,
             total_commits,
             total_blobs,
-            samples_size,
-            samples_sha,
-            samples_modified,
             path_compat_stats,
             &blob_size_tracker,
         )?;
