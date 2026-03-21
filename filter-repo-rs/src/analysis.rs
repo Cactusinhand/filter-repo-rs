@@ -733,7 +733,6 @@ fn process_commit_block(commit_data: &[String], stats: &mut StatsCollection) -> 
         return Ok(());
     }
 
-    // First line contains commit hash and parent hashes
     let first_line = &commit_data[0];
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.is_empty() {
@@ -744,7 +743,6 @@ fn process_commit_block(commit_data: &[String], stats: &mut StatsCollection) -> 
     if stats.max_parents < parent_count {
         stats.max_parents = parent_count;
     }
-    stats.num_commits += 1;
 
     Ok(())
 }
