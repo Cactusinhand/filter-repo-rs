@@ -17,6 +17,8 @@ pub enum FilterRepoError {
     Sanity(SanityCheckError),
     /// Invalid option or configuration supplied by the caller.
     InvalidOptions(String),
+    /// Early, explicit process exit request (e.g. --help/--version).
+    Exit(i32),
 }
 
 impl fmt::Display for FilterRepoError {
@@ -25,6 +27,7 @@ impl fmt::Display for FilterRepoError {
             FilterRepoError::Io(err) => write!(f, "{err}"),
             FilterRepoError::Sanity(err) => write!(f, "{err}"),
             FilterRepoError::InvalidOptions(msg) => f.write_str(msg),
+            FilterRepoError::Exit(_) => Ok(()),
         }
     }
 }
@@ -35,6 +38,7 @@ impl StdError for FilterRepoError {
             FilterRepoError::Io(err) => Some(err),
             FilterRepoError::Sanity(err) => err.source(),
             FilterRepoError::InvalidOptions(_) => None,
+            FilterRepoError::Exit(_) => None,
         }
     }
 }
@@ -64,6 +68,10 @@ impl FilterRepoError {
     /// Convenience constructor for invalid option failures.
     pub fn invalid_options(msg: impl Into<String>) -> Self {
         FilterRepoError::InvalidOptions(msg.into())
+    }
+
+    pub fn exit(code: i32) -> Self {
+        FilterRepoError::Exit(code)
     }
 }
 

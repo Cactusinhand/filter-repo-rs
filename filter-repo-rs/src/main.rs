@@ -6,6 +6,9 @@ fn main() {
     let opts = match fr::opts::parse_args() {
         Ok(opts) => opts,
         Err(err) => {
+            if let fr::error::FilterRepoError::Exit(code) = err {
+                process::exit(code);
+            }
             eprintln!("{err}");
             let mut source = err.source();
             while let Some(cause) = source {
