@@ -321,13 +321,13 @@ fn process_blob_content(
     let mut data = payload;
     let mut changed = false;
     if let Some(r) = content_replacer {
-        let tmp = r.apply(data.clone());
-        changed = tmp != data;
+        let (tmp, did_change) = r.apply_with_change(data);
+        changed = did_change;
         data = tmp;
     }
     if let Some(rr) = content_regex_replacer {
-        let tmp = rr.apply_regex(data.clone());
-        changed = changed || tmp != data;
+        let (tmp, did_change) = rr.apply_regex_with_change(data);
+        changed = changed || did_change;
         data = tmp;
     }
     (data, changed)
@@ -999,17 +999,13 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                             let mut new_payload = payload;
                             let mut changed = false;
                             if let Some(r) = &content_replacer {
-                                let tmp = r.apply(new_payload.clone());
-                                if !changed {
-                                    changed = tmp != new_payload;
-                                }
+                                let (tmp, did_change) = r.apply_with_change(new_payload);
+                                changed = changed || did_change;
                                 new_payload = tmp;
                             }
                             if let Some(rr) = &content_regex_replacer {
-                                let tmp = rr.apply_regex(new_payload.clone());
-                                if !changed {
-                                    changed = tmp != new_payload;
-                                }
+                                let (tmp, did_change) = rr.apply_regex_with_change(new_payload);
+                                changed = changed || did_change;
                                 new_payload = tmp;
                             }
                             let header = format!("data {}\n", new_payload.len());
@@ -1365,17 +1361,15 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                         // This matches git-filter-repo semantics and avoids
                         // non-terminating chained substitutions.
                         if let Some(r) = &content_replacer {
-                            let before_replace = payload;
-                            let result = r.apply(before_replace.clone());
-                            changed = result != before_replace;
+                            let (result, did_change) = r.apply_with_change(payload);
+                            changed = did_change;
                             new_payload = result;
                         } else {
                             new_payload = payload;
                         }
                         if let Some(rr) = &content_regex_replacer {
-                            let before_regex = new_payload.clone();
-                            let result = rr.apply_regex(before_regex.clone());
-                            changed = changed || result != before_regex;
+                            let (result, did_change) = rr.apply_regex_with_change(new_payload);
+                            changed = changed || did_change;
                             new_payload = result;
                         }
 
