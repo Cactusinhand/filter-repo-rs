@@ -79,6 +79,42 @@ fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
     .into_bytes()
 }
 
+fn rewrite_commit_identity_line(
+    line: &[u8],
+    opts: &Options,
+    author_rewriter: Option<&AuthorRewriter>,
+    committer_rewriter: Option<&AuthorRewriter>,
+    email_rewriter: Option<&AuthorRewriter>,
+    mailmap_rewriter: Option<&MailmapRewriter>,
+) -> Vec<u8> {
+    let is_author_line = line.starts_with(b"author ");
+    let is_committer_line = line.starts_with(b"committer ");
+    if !is_author_line && !is_committer_line {
+        return line.to_vec();
+    }
+
+    let mut rewritten = line.to_vec();
+    if let Some(mailmap) = mailmap_rewriter {
+        rewritten = crate::commit::rewrite_mailmap_line(&rewritten, Some(mailmap));
+    } else {
+        if let Some(email_rw) = email_rewriter {
+            rewritten = crate::commit::rewrite_email_line(&rewritten, Some(email_rw));
+        }
+        if is_author_line {
+            if let Some(author_rw) = author_rewriter {
+                rewritten = crate::commit::rewrite_author_line(&rewritten, Some(author_rw));
+            }
+        }
+        if is_committer_line {
+            if let Some(committer_rw) = committer_rewriter {
+                rewritten = crate::commit::rewrite_author_line(&rewritten, Some(committer_rw));
+            }
+        }
+    }
+
+    rewrite_timestamp_line(&rewritten, opts)
+}
+
 /// Add a path sample to the collection if under limit and not already present.
 fn add_sample(samples: &mut Vec<Vec<u8>>, path: &[u8]) {
     if samples.len() < REPORT_SAMPLE_LIMIT && !samples.iter().any(|p| p == path) {
@@ -333,6 +369,407 @@ fn process_blob_content(
     (data, changed)
 }
 
+struct PendingInlineDataCtx<'a> {
+    opts: &'a Options,
+    fe_out: &'a mut BufReader<std::process::ChildStdout>,
+    orig_file_opt: &'a mut Option<BufWriter<File>>,
+    commit_buf: &'a mut Vec<u8>,
+    commit_has_changes: &'a mut bool,
+    pending_inline: &'a mut Option<(usize, Vec<u8>)>,
+    samples_size: &'a mut Vec<Vec<u8>>,
+    samples_modified: &'a mut Vec<Vec<u8>>,
+    inline_modified_paths: &'a mut HashSet<Vec<u8>>,
+    path_compat_stats: &'a mut PathCompatStats,
+    content_replacer: &'a Option<MessageReplacer>,
+    content_regex_replacer: &'a Option<BlobRegexReplacer>,
+}
+
+fn process_pending_inline_data_line(
+    line: &[u8],
+    ctx: &mut PendingInlineDataCtx<'_>,
+) -> FilterRepoResult<bool> {
+    if !line.starts_with(b"data ") {
+        return Ok(false);
+    }
+    let Some((pos, path_bytes)) = ctx.pending_inline.take() else {
+        return Ok(false);
+    };
+
+    let n = parse_data_size_header(line)?;
+    let mut payload = vec![0u8; n];
+    ctx.fe_out.read_exact(&mut payload)?;
+    if let Some(ref mut f) = ctx.orig_file_opt {
+        f.write_all(&payload)?;
+    }
+
+    let mut drop_inline = false;
+    if let Some(max) = ctx.opts.max_blob_size {
+        if n > max {
+            drop_inline = true;
+        }
+    }
+    if drop_inline {
+        ctx.commit_buf.truncate(pos);
+        let decoded = crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
+        let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
+            &decoded,
+            ctx.opts.path_compat_policy,
+        )
+        .map_err(io::Error::other)?;
+        if let Some(event) = path_event {
+            record_path_compat_event(ctx.path_compat_stats, event);
+        }
+        if let Some(enc) = enc {
+            ctx.commit_buf.extend_from_slice(b"D ");
+            ctx.commit_buf.extend_from_slice(&enc);
+            ctx.commit_buf.push(b'\n');
+            *ctx.commit_has_changes = true;
+        }
+        add_sample(ctx.samples_size, &path_bytes);
+        return Ok(true);
+    }
+
+    if ctx.content_replacer.is_none() && ctx.content_regex_replacer.is_none() {
+        let header = format!("data {}\n", payload.len());
+        ctx.commit_buf.extend_from_slice(header.as_bytes());
+        ctx.commit_buf.extend_from_slice(&payload);
+    } else {
+        let mut new_payload = payload;
+        let mut changed = false;
+        if let Some(r) = ctx.content_replacer {
+            let (tmp, did_change) = r.apply_with_change(new_payload);
+            changed = changed || did_change;
+            new_payload = tmp;
+        }
+        if let Some(rr) = ctx.content_regex_replacer {
+            let (tmp, did_change) = rr.apply_regex_with_change(new_payload);
+            changed = changed || did_change;
+            new_payload = tmp;
+        }
+        let header = format!("data {}\n", new_payload.len());
+        ctx.commit_buf.extend_from_slice(header.as_bytes());
+        ctx.commit_buf.extend_from_slice(&new_payload);
+        if changed {
+            add_sample(ctx.samples_modified, &path_bytes);
+            ctx.inline_modified_paths.insert(path_bytes.clone());
+        }
+    }
+    *ctx.commit_has_changes = true;
+    Ok(true)
+}
+
+fn parse_commit_m_line_id_and_path(line: &[u8]) -> (&[u8], &[u8]) {
+    let mut i = 2;
+    while i < line.len() && line[i] != b' ' {
+        i += 1;
+    }
+    if i < line.len() {
+        i += 1;
+    }
+    let id_start = i;
+    while i < line.len() && line[i] != b' ' {
+        i += 1;
+    }
+    let id_end = i;
+    let path_start = if i < line.len() { i + 1 } else { line.len() };
+    (&line[id_start..id_end], &line[path_start..])
+}
+
+struct CommitMPrecheckCtx<'a> {
+    opts: &'a Options,
+    commit_buf: &'a mut Vec<u8>,
+    commit_has_changes: &'a mut bool,
+    pending_inline: &'a mut Option<(usize, Vec<u8>)>,
+    oversize_marks: &'a HashSet<u32>,
+    oversize_shas: &'a mut HashSet<Vec<u8>>,
+    suppressed_marks_by_size: &'a HashSet<u32>,
+    suppressed_marks_by_sha: &'a HashSet<u32>,
+    suppressed_shas_by_size: &'a mut HashSet<Vec<u8>>,
+    suppressed_shas_by_sha: &'a mut HashSet<Vec<u8>>,
+    modified_marks: &'a HashSet<u32>,
+    samples_size: &'a mut Vec<Vec<u8>>,
+    samples_sha: &'a mut Vec<Vec<u8>>,
+    samples_modified: &'a mut Vec<Vec<u8>>,
+    path_compat_stats: &'a mut PathCompatStats,
+    strip_sha_lookup: &'a StripShaLookup,
+    blob_size_tracker: &'a mut BlobSizeTracker,
+}
+
+fn process_commit_m_line_precheck(line: &[u8], ctx: &mut CommitMPrecheckCtx<'_>) -> FilterRepoResult<bool> {
+    let opts = ctx.opts;
+    let commit_buf = &mut *ctx.commit_buf;
+    let commit_has_changes = &mut *ctx.commit_has_changes;
+    let pending_inline = &mut *ctx.pending_inline;
+    let oversize_marks = ctx.oversize_marks;
+    let oversize_shas = &mut *ctx.oversize_shas;
+    let suppressed_marks_by_size = ctx.suppressed_marks_by_size;
+    let suppressed_marks_by_sha = ctx.suppressed_marks_by_sha;
+    let suppressed_shas_by_size = &mut *ctx.suppressed_shas_by_size;
+    let suppressed_shas_by_sha = &mut *ctx.suppressed_shas_by_sha;
+    let modified_marks = ctx.modified_marks;
+    let samples_size = &mut *ctx.samples_size;
+    let samples_sha = &mut *ctx.samples_sha;
+    let samples_modified = &mut *ctx.samples_modified;
+    let path_compat_stats = &mut *ctx.path_compat_stats;
+    let strip_sha_lookup = ctx.strip_sha_lookup;
+    let blob_size_tracker = &mut *ctx.blob_size_tracker;
+
+    let (id, path_bytes) = parse_commit_m_line_id_and_path(line);
+    if id == b"inline" {
+        let mut p = path_bytes.to_vec();
+        if let Some(last) = p.last() {
+            if *last == b'\n' {
+                p.pop();
+            }
+        }
+        *pending_inline = Some((commit_buf.len(), p));
+    }
+
+    let mut drop_path = false;
+    let mut reason_size = false;
+    let mut reason_sha = false;
+    if id.first().copied() == Some(b':') {
+        let mut num: u32 = 0;
+        let mut seen = false;
+        let mut j = 1;
+        while j < id.len() {
+            let b = id[j];
+            if b.is_ascii_digit() {
+                seen = true;
+                num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
+            } else {
+                break;
+            }
+            j += 1;
+        }
+        if seen && oversize_marks.contains(&num) {
+            drop_path = true;
+            add_sample(samples_size, path_bytes);
+            reason_size = suppressed_marks_by_size.contains(&num);
+            reason_sha = suppressed_marks_by_sha.contains(&num);
+        }
+        if seen && modified_marks.contains(&num) {
+            add_sample(samples_modified, path_bytes);
+        }
+    } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
+        let sha = id.to_vec();
+        if strip_sha_lookup.contains_hex(&sha)? {
+            drop_path = true;
+            reason_sha = true;
+            suppressed_shas_by_sha.insert(sha.clone());
+        }
+        if blob_size_tracker.is_oversize(&sha) {
+            oversize_shas.insert(sha.clone());
+            suppressed_shas_by_size.insert(sha);
+            drop_path = true;
+            reason_size = true;
+            let path_buf = path_bytes.to_vec();
+            if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == &path_buf) {
+                samples_size.push(path_buf);
+            }
+        }
+    }
+
+    if !drop_path {
+        return Ok(false);
+    }
+
+    let decoded = crate::pathutil::decode_fast_export_path_bytes(path_bytes);
+    let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
+        &decoded,
+        opts.path_compat_policy,
+    )
+    .map_err(io::Error::other)?;
+    if let Some(event) = path_event {
+        record_path_compat_event(path_compat_stats, event);
+    }
+    if let Some(enc) = enc {
+        commit_buf.extend_from_slice(b"D ");
+        commit_buf.extend_from_slice(&enc);
+        commit_buf.push(b'\n');
+        *commit_has_changes = true;
+    }
+    let (mut r_size, mut r_sha) = (reason_size, reason_sha);
+    if !r_size && !r_sha {
+        if opts.max_blob_size.is_some() {
+            r_size = true;
+        } else {
+            r_sha = true;
+        }
+    }
+    if r_size {
+        add_sample(samples_size, path_bytes);
+    } else if r_sha {
+        add_sample(samples_sha, path_bytes);
+    }
+    Ok(true)
+}
+
+struct BlobPayloadCtx<'a> {
+    opts: &'a Options,
+    filt_file: &'a mut BufWriter<File>,
+    fi_in_opt: &'a mut Option<BufWriter<std::process::ChildStdin>>,
+    content_replacer: &'a Option<MessageReplacer>,
+    content_regex_replacer: &'a Option<BlobRegexReplacer>,
+    in_blob: &'a mut bool,
+    blob_buf: &'a mut Vec<Vec<u8>>,
+    last_blob_mark: &'a mut Option<u32>,
+    last_blob_orig_sha: &'a mut Option<Vec<u8>>,
+    oversize_marks: &'a mut HashSet<u32>,
+    oversize_shas: &'a mut HashSet<Vec<u8>>,
+    suppressed_marks_by_size: &'a mut HashSet<u32>,
+    suppressed_marks_by_sha: &'a mut HashSet<u32>,
+    suppressed_shas_by_size: &'a mut HashSet<Vec<u8>>,
+    suppressed_shas_by_sha: &'a mut HashSet<Vec<u8>>,
+    modified_marks: &'a mut HashSet<u32>,
+    emitted_marks: &'a mut HashSet<u32>,
+    import_broken: &'a mut bool,
+    strip_sha_lookup: &'a StripShaLookup,
+}
+
+fn process_blob_data_payload(payload: Vec<u8>, ctx: &mut BlobPayloadCtx<'_>) -> FilterRepoResult<()> {
+    let opts = ctx.opts;
+    let filt_file = &mut *ctx.filt_file;
+    let fi_in_opt = &mut *ctx.fi_in_opt;
+    let content_replacer = ctx.content_replacer;
+    let content_regex_replacer = ctx.content_regex_replacer;
+    let in_blob = &mut *ctx.in_blob;
+    let blob_buf = &mut *ctx.blob_buf;
+    let last_blob_mark = &mut *ctx.last_blob_mark;
+    let last_blob_orig_sha = &mut *ctx.last_blob_orig_sha;
+    let oversize_marks = &mut *ctx.oversize_marks;
+    let oversize_shas = &mut *ctx.oversize_shas;
+    let suppressed_marks_by_size = &mut *ctx.suppressed_marks_by_size;
+    let suppressed_marks_by_sha = &mut *ctx.suppressed_marks_by_sha;
+    let suppressed_shas_by_size = &mut *ctx.suppressed_shas_by_size;
+    let suppressed_shas_by_sha = &mut *ctx.suppressed_shas_by_sha;
+    let modified_marks = &mut *ctx.modified_marks;
+    let emitted_marks = &mut *ctx.emitted_marks;
+    let import_broken = &mut *ctx.import_broken;
+    let strip_sha_lookup = ctx.strip_sha_lookup;
+
+    let n = payload.len();
+    let mut skip_blob = false;
+    let mut reason_size = false;
+    let mut reason_sha = false;
+    if let Some(max) = opts.max_blob_size {
+        if n > max {
+            if let Some(m) = *last_blob_mark {
+                oversize_marks.insert(m);
+                suppressed_marks_by_size.insert(m);
+            }
+            if let Some(ref s) = *last_blob_orig_sha {
+                oversize_shas.insert(s.clone());
+                suppressed_shas_by_size.insert(s.clone());
+            }
+            skip_blob = true;
+            reason_size = true;
+        }
+    }
+    if !skip_blob {
+        if let Some(ref s) = *last_blob_orig_sha {
+            if strip_sha_lookup.contains_hex(s)? {
+                skip_blob = true;
+                reason_sha = true;
+            }
+        }
+    }
+    if skip_blob {
+        if let Some(m) = last_blob_mark.take() {
+            oversize_marks.insert(m);
+            if reason_size {
+                suppressed_marks_by_size.insert(m);
+            } else if reason_sha {
+                suppressed_marks_by_sha.insert(m);
+            }
+        }
+        if let Some(sha) = last_blob_orig_sha.take() {
+            oversize_shas.insert(sha.clone());
+            if reason_size {
+                suppressed_shas_by_size.insert(sha);
+            } else if reason_sha {
+                suppressed_shas_by_sha.insert(sha);
+            }
+        }
+        *in_blob = false;
+        blob_buf.clear();
+        *last_blob_mark = None;
+        return Ok(());
+    }
+
+    for h in blob_buf.drain(..) {
+        filt_file.write_all(&h)?;
+        if let Some(ref mut fi_in) = fi_in_opt {
+            if let Err(e) = fi_in.write_all(&h) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    *import_broken = true;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+    if content_replacer.is_none() && content_regex_replacer.is_none() {
+        let header = format!("data {}\n", n);
+        filt_file.write_all(header.as_bytes())?;
+        if let Some(ref mut fi_in) = fi_in_opt {
+            if let Err(e) = fi_in.write_all(header.as_bytes()) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    *import_broken = true;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+        filt_file.write_all(&payload)?;
+        if let Some(ref mut fi_in) = fi_in_opt {
+            if let Err(e) = fi_in.write_all(&payload) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    *import_broken = true;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    } else {
+        let (new_payload, changed) =
+            process_blob_content(payload, content_replacer, content_regex_replacer);
+        let header = format!("data {}\n", new_payload.len());
+        filt_file.write_all(header.as_bytes())?;
+        if let Some(ref mut fi_in) = fi_in_opt {
+            if let Err(e) = fi_in.write_all(header.as_bytes()) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    *import_broken = true;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+        filt_file.write_all(&new_payload)?;
+        if let Some(ref mut fi_in) = fi_in_opt {
+            if let Err(e) = fi_in.write_all(&new_payload) {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    *import_broken = true;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+        if changed {
+            if let Some(m) = *last_blob_mark {
+                modified_marks.insert(m);
+            }
+        }
+    }
+    if let Some(m) = *last_blob_mark {
+        emitted_marks.insert(m);
+    }
+    *in_blob = false;
+    *last_blob_mark = None;
+
+    Ok(())
+}
+
 pub(crate) struct BlobSizeTracker {
     source: PathBuf,
     max_blob_size: Option<usize>,
@@ -550,116 +987,316 @@ impl Drop for BatchCat {
     }
 }
 
-pub fn run(opts: &Options) -> FilterRepoResult<()> {
-    let target_git_dir = git_dir(&opts.target).map_err(|e| {
-        io::Error::other(format!("Target {:?} is not a git repo: {e}", opts.target))
-    })?;
-    let _ = git_dir(&opts.source).map_err(|e| {
-        io::Error::other(format!("Source {:?} is not a git repo: {e}", opts.source))
-    })?;
+struct StreamProcessor<'a> {
+    opts: &'a Options,
+    debug_dir: PathBuf,
+}
 
-    let debug_dir = target_git_dir.join("filter-repo");
-    if !debug_dir.exists() {
-        create_dir_all(&debug_dir)?;
+impl<'a> StreamProcessor<'a> {
+    fn new(opts: &'a Options) -> io::Result<Self> {
+        let target_git_dir = git_dir(&opts.target).map_err(|e| {
+            io::Error::other(format!("Target {:?} is not a git repo: {e}", opts.target))
+        })?;
+        let _ = git_dir(&opts.source).map_err(|e| {
+            io::Error::other(format!("Source {:?} is not a git repo: {e}", opts.source))
+        })?;
+
+        let debug_dir = target_git_dir.join("filter-repo");
+        if !debug_dir.exists() {
+            create_dir_all(&debug_dir)?;
+        }
+
+        Ok(Self { opts, debug_dir })
     }
-    // Always produce filtered stream for downstream tooling/tests
-    let mut filt_file = BufWriter::new(File::create(debug_dir.join("fast-export.filtered"))?);
-    // Original stream is heavy I/O; only write when useful for debugging/reporting
-    let write_original = opts.debug_mode || opts.write_report;
-    let mut orig_file_opt: Option<BufWriter<File>> = if write_original {
-        Some(BufWriter::new(File::create(
-            debug_dir.join("fast-export.original"),
-        )?))
-    } else {
-        None
-    };
 
-    let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
-    let mut fe = fe_cmd
-        .spawn()
-        .map_err(|e| io::Error::other(format!("failed to spawn git fast-export: {e}")))?;
-    let mut fi = if opts.dry_run {
-        None
-    } else {
-        Some(
-            crate::pipes::build_fast_import_cmd(opts)
-                .spawn()
-                .map_err(|e| io::Error::other(format!("failed to spawn git fast-import: {e}")))?,
-        )
-    };
-
-    let mut fe_out = BufReader::new(
-        fe.stdout
-            .take()
-            .ok_or_else(|| io::Error::other("git fast-export produced no stdout"))?,
-    );
-    let mut fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
-    {
-        child.stdin.take().map(BufWriter::new)
-    } else {
-        None
-    };
-    let mut fi_out_opt: Option<BufReader<std::process::ChildStdout>> =
-        if let Some(ref mut child) = fi {
-            child.stdout.take().map(BufReader::new)
+    fn init_stream_io(
+        &self,
+    ) -> io::Result<(
+        BufWriter<File>,
+        Option<BufWriter<File>>,
+        std::process::Child,
+        Option<std::process::Child>,
+        BufReader<std::process::ChildStdout>,
+        Option<BufWriter<std::process::ChildStdin>>,
+        Option<BufReader<std::process::ChildStdout>>,
+    )> {
+        let opts = self.opts;
+        let debug_dir = &self.debug_dir;
+        let filt_file = BufWriter::new(File::create(debug_dir.join("fast-export.filtered"))?);
+        let write_original = opts.debug_mode || opts.write_report;
+        let orig_file_opt: Option<BufWriter<File>> = if write_original {
+            Some(BufWriter::new(File::create(
+                debug_dir.join("fast-export.original"),
+            )?))
         } else {
             None
         };
 
-    let replacer = match &opts.replace_message_file {
-        Some(p) => Some(
-            MessageReplacer::from_file(p)
-                .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
-        ),
-        None => None,
-    };
-    let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
-        Some(p) => MsgRegexReplacer::from_file(p)
-            .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
-        None => None,
-    };
-    let mut short_hash_mapper = ShortHashMapper::from_debug_dir(&debug_dir)?;
-    let content_replacer = match &opts.replace_text_file {
-        Some(p) => Some(
-            MessageReplacer::from_file(p)
-                .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
-        ),
-        None => None,
-    };
-    let content_regex_replacer: Option<BlobRegexReplacer> = match &opts.replace_text_file {
-        Some(p) => BlobRegexReplacer::from_file(p)
-            .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
-        None => None,
-    };
+        let mut fe_cmd = crate::pipes::build_fast_export_cmd(opts)?;
+        let mut fe = fe_cmd
+            .spawn()
+            .map_err(|e| io::Error::other(format!("failed to spawn git fast-export: {e}")))?;
+        let mut fi = if opts.dry_run {
+            None
+        } else {
+            Some(
+                crate::pipes::build_fast_import_cmd(opts).spawn().map_err(|e| {
+                    io::Error::other(format!("failed to spawn git fast-import: {e}"))
+                })?,
+            )
+        };
 
-    let author_rewriter = match &opts.author_rewrite_file {
-        Some(p) => Some(
-            AuthorRewriter::from_file(p)
-                .map_err(|e| io::Error::other(format!("failed to read --author-rewrite: {e}")))?,
-        ),
-        None => None,
-    };
-    let committer_rewriter =
-        match &opts.committer_rewrite_file {
+        let fe_out = BufReader::new(
+            fe.stdout
+                .take()
+                .ok_or_else(|| io::Error::other("git fast-export produced no stdout"))?,
+        );
+        let fi_in_opt: Option<BufWriter<std::process::ChildStdin>> =
+            if let Some(ref mut child) = fi {
+                child.stdin.take().map(BufWriter::new)
+            } else {
+                None
+            };
+        let fi_out_opt: Option<BufReader<std::process::ChildStdout>> =
+            if let Some(ref mut child) = fi {
+                child.stdout.take().map(BufReader::new)
+            } else {
+                None
+            };
+
+        Ok((filt_file, orig_file_opt, fe, fi, fe_out, fi_in_opt, fi_out_opt))
+    }
+
+    fn init_rewriters(
+        &self,
+    ) -> io::Result<(
+        Option<MessageReplacer>,
+        Option<MsgRegexReplacer>,
+        Option<ShortHashMapper>,
+        Option<MessageReplacer>,
+        Option<BlobRegexReplacer>,
+        Option<AuthorRewriter>,
+        Option<AuthorRewriter>,
+        Option<AuthorRewriter>,
+        Option<MailmapRewriter>,
+    )> {
+        let opts = self.opts;
+        let debug_dir = &self.debug_dir;
+
+        let replacer = match &opts.replace_message_file {
+            Some(p) => Some(
+                MessageReplacer::from_file(p).map_err(|e| {
+                    io::Error::other(format!("failed to read --replace-message: {e}"))
+                })?,
+            ),
+            None => None,
+        };
+        let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
+            Some(p) => MsgRegexReplacer::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
+            None => None,
+        };
+        let short_hash_mapper = ShortHashMapper::from_debug_dir(debug_dir)?;
+        let content_replacer = match &opts.replace_text_file {
+            Some(p) => Some(
+                MessageReplacer::from_file(p)
+                    .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
+            ),
+            None => None,
+        };
+        let content_regex_replacer: Option<BlobRegexReplacer> = match &opts.replace_text_file {
+            Some(p) => BlobRegexReplacer::from_file(p)
+                .map_err(|e| io::Error::other(format!("failed to read --replace-text: {e}")))?,
+            None => None,
+        };
+
+        let author_rewriter = match &opts.author_rewrite_file {
+            Some(p) => Some(
+                AuthorRewriter::from_file(p).map_err(|e| {
+                    io::Error::other(format!("failed to read --author-rewrite: {e}"))
+                })?,
+            ),
+            None => None,
+        };
+        let committer_rewriter = match &opts.committer_rewrite_file {
             Some(p) => Some(AuthorRewriter::from_file(p).map_err(|e| {
                 io::Error::other(format!("failed to read --committer-rewrite: {e}"))
             })?),
             None => None,
         };
-    let email_rewriter = match &opts.email_rewrite_file {
-        Some(p) => Some(
-            AuthorRewriter::from_file(p)
-                .map_err(|e| io::Error::other(format!("failed to read --email-rewrite: {e}")))?,
-        ),
-        None => None,
-    };
-    let mailmap_rewriter = match &opts.mailmap_file {
-        Some(p) => Some(
-            MailmapRewriter::from_file(p)
-                .map_err(|e| io::Error::other(format!("failed to read --mailmap: {e}")))?,
-        ),
-        None => None,
-    };
+        let email_rewriter = match &opts.email_rewrite_file {
+            Some(p) => Some(
+                AuthorRewriter::from_file(p).map_err(|e| {
+                    io::Error::other(format!("failed to read --email-rewrite: {e}"))
+                })?,
+            ),
+            None => None,
+        };
+        let mailmap_rewriter = match &opts.mailmap_file {
+            Some(p) => Some(
+                MailmapRewriter::from_file(p)
+                    .map_err(|e| io::Error::other(format!("failed to read --mailmap: {e}")))?,
+            ),
+            None => None,
+        };
+
+        Ok((
+            replacer,
+            msg_regex_replacer,
+            short_hash_mapper,
+            content_replacer,
+            content_regex_replacer,
+            author_rewriter,
+            committer_rewriter,
+            email_rewriter,
+            mailmap_rewriter,
+        ))
+    }
+
+    fn finalize_stream(
+        &self,
+        opts: &Options,
+        filt_file: &mut BufWriter<File>,
+        orig_file_opt: &mut Option<BufWriter<File>>,
+        fi_in_opt: &mut Option<BufWriter<std::process::ChildStdin>>,
+        fe: &mut std::process::Child,
+        fi: &mut Option<std::process::Child>,
+        import_broken: bool,
+        ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)>,
+        commit_pairs: Vec<(Vec<u8>, Option<u32>)>,
+        buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)>,
+        annotated_tag_refs: BTreeSet<Vec<u8>>,
+        updated_branch_refs: BTreeSet<Vec<u8>>,
+        branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
+        suppressed_shas_by_size: HashSet<Vec<u8>>,
+        suppressed_marks_by_size: HashSet<u32>,
+        suppressed_shas_by_sha: HashSet<Vec<u8>>,
+        suppressed_marks_by_sha: HashSet<u32>,
+        modified_marks: HashSet<u32>,
+        inline_modified_paths: HashSet<Vec<u8>>,
+        total_commits: usize,
+        total_blobs: usize,
+        samples_size: Vec<Vec<u8>>,
+        samples_sha: Vec<Vec<u8>>,
+        samples_modified: Vec<Vec<u8>>,
+        path_compat_stats: PathCompatStats,
+        blob_size_tracker: &BlobSizeTracker,
+    ) -> FilterRepoResult<()> {
+        if let Some(ref mut of) = orig_file_opt {
+            of.flush()?;
+        }
+        let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
+        let fi_writer_for_finalize: Option<Box<dyn Write>> =
+            fi_in_opt.take().map(|bw| Box::new(bw) as Box<dyn Write>);
+        let total_refs_rewritten = ref_renames.len();
+
+        crate::finalize::finalize(
+            opts,
+            &self.debug_dir,
+            ref_renames,
+            commit_pairs,
+            buffered_tag_resets,
+            annotated_tag_refs,
+            updated_branch_refs,
+            branch_reset_targets,
+            filt_file as &mut dyn Write,
+            fi_writer_for_finalize,
+            fe,
+            fi.as_mut(),
+            import_broken,
+            allow_flush_tag_resets,
+            {
+                use crate::finalize::{
+                    Metadata, ReportData, Samples, Statistics, Summary, WindowsPathReport,
+                    WindowsPathSamples, WindowsPathSummary,
+                };
+                Some(ReportData {
+                    summary: Summary {
+                        blobs_stripped_by_size: suppressed_shas_by_size
+                            .len()
+                            .max(suppressed_marks_by_size.len()),
+                        blobs_stripped_by_sha: suppressed_shas_by_sha
+                            .len()
+                            .max(suppressed_marks_by_sha.len()),
+                        blobs_modified: modified_marks.len() + inline_modified_paths.len(),
+                    },
+                    statistics: Statistics {
+                        commits_processed: total_commits,
+                        blobs_processed: total_blobs,
+                        refs_rewritten: total_refs_rewritten,
+                    },
+                    samples: Samples {
+                        by_size: samples_size
+                            .into_iter()
+                            .map(|p| String::from_utf8_lossy(&p).into_owned())
+                            .collect(),
+                        by_sha: samples_sha
+                            .into_iter()
+                            .map(|p| String::from_utf8_lossy(&p).into_owned())
+                            .collect(),
+                        modified: samples_modified
+                            .into_iter()
+                            .map(|p| String::from_utf8_lossy(&p).into_owned())
+                            .collect(),
+                    },
+                    windows_path: if path_compat_stats.sanitized + path_compat_stats.skipped > 0 {
+                        Some(WindowsPathReport {
+                            summary: WindowsPathSummary {
+                                policy: path_compat_stats.policy,
+                                sanitized: path_compat_stats.sanitized,
+                                skipped: path_compat_stats.skipped,
+                            },
+                            samples: if path_compat_stats.sanitized_samples.is_empty()
+                                && path_compat_stats.skipped_samples.is_empty()
+                            {
+                                None
+                            } else {
+                                Some(WindowsPathSamples {
+                                    sanitized: path_compat_stats.sanitized_samples,
+                                    skipped: path_compat_stats.skipped_samples,
+                                })
+                            },
+                        })
+                    } else {
+                        None
+                    },
+                    metadata: Metadata {
+                        version: env!("CARGO_PKG_VERSION").to_string(),
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs().to_string())
+                            .unwrap_or_default(),
+                    },
+                })
+            },
+            blob_size_tracker,
+        )?;
+
+        Ok(())
+    }
+
+    fn process(&self) -> FilterRepoResult<()> {
+        let opts = self.opts;
+        let (
+            mut filt_file,
+            mut orig_file_opt,
+            mut fe,
+            mut fi,
+            mut fe_out,
+            mut fi_in_opt,
+            mut fi_out_opt,
+        ) = self.init_stream_io()?;
+        let (
+            replacer,
+            msg_regex_replacer,
+            mut short_hash_mapper,
+            content_replacer,
+            content_regex_replacer,
+            author_rewriter,
+            committer_rewriter,
+            email_rewriter,
+            mailmap_rewriter,
+        ) = self.init_rewriters()?;
 
     // minimal stream state is tracked via local booleans and buffers
     // Commit buffering state for pruning
@@ -951,248 +1588,59 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
             }
         }
         if in_commit {
-            // If the previous M-line declared inline content, handle its following data block here
-            if line.starts_with(b"data ") {
-                if let Some((pos, path_bytes)) = pending_inline.take() {
-                    // Parse size and read payload
-                    let n = parse_data_size_header(&line)?;
-                    let mut payload = vec![0u8; n];
-                    fe_out.read_exact(&mut payload)?;
-                    // Mirror original payload to debug file (when enabled)
-                    if let Some(ref mut f) = orig_file_opt {
-                        f.write_all(&payload)?;
-                    }
-                    let mut drop_inline = false;
-                    if let Some(max) = opts.max_blob_size {
-                        if n > max {
-                            drop_inline = true;
-                        }
-                    }
-                    if drop_inline {
-                        // Replace previously appended M inline line with a sanitized deletion
-                        commit_buf.truncate(pos);
-                        let decoded = crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
-                        let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
-                            &decoded,
-                            opts.path_compat_policy,
-                        )
-                        .map_err(io::Error::other)?;
-                        if let Some(event) = path_event {
-                            record_path_compat_event(&mut path_compat_stats, event);
-                        }
-                        if let Some(enc) = enc {
-                            commit_buf.extend_from_slice(b"D ");
-                            commit_buf.extend_from_slice(&enc);
-                            commit_buf.push(b'\n');
-                            commit_has_changes = true;
-                        }
-                        // Record report sample for size-based strip
-                        add_sample(&mut samples_size, &path_bytes);
-                        continue;
-                    } else {
-                        // Keep inline content: apply --replace-text (literal then regex) and append
-                        if content_replacer.is_none() && content_regex_replacer.is_none() {
-                            let header = format!("data {}\n", payload.len());
-                            commit_buf.extend_from_slice(header.as_bytes());
-                            commit_buf.extend_from_slice(&payload);
-                        } else {
-                            let mut new_payload = payload;
-                            let mut changed = false;
-                            if let Some(r) = &content_replacer {
-                                let (tmp, did_change) = r.apply_with_change(new_payload);
-                                changed = changed || did_change;
-                                new_payload = tmp;
-                            }
-                            if let Some(rr) = &content_regex_replacer {
-                                let (tmp, did_change) = rr.apply_regex_with_change(new_payload);
-                                changed = changed || did_change;
-                                new_payload = tmp;
-                            }
-                            let header = format!("data {}\n", new_payload.len());
-                            commit_buf.extend_from_slice(header.as_bytes());
-                            commit_buf.extend_from_slice(&new_payload);
-                            if changed {
-                                add_sample(&mut samples_modified, &path_bytes);
-                                inline_modified_paths.insert(path_bytes.clone());
-                            }
-                        }
-                        commit_has_changes = true;
-                        continue;
-                    }
-                }
+            let mut pending_inline_ctx = PendingInlineDataCtx {
+                opts,
+                fe_out: &mut fe_out,
+                orig_file_opt: &mut orig_file_opt,
+                commit_buf: &mut commit_buf,
+                commit_has_changes: &mut commit_has_changes,
+                pending_inline: &mut pending_inline,
+                samples_size: &mut samples_size,
+                samples_modified: &mut samples_modified,
+                inline_modified_paths: &mut inline_modified_paths,
+                path_compat_stats: &mut path_compat_stats,
+                content_replacer: &content_replacer,
+                content_regex_replacer: &content_regex_replacer,
+            };
+            if process_pending_inline_data_line(&line, &mut pending_inline_ctx)? {
+                continue;
             }
-            // Pre-check for oversized blobs referenced by this filechange
-            if line.starts_with(b"M ") {
-                // Detect inline and record path for the immediately following data block
-                {
-                    let bytes = &line;
-                    // find end of mode and id
-                    let mut i = 2; // after 'M '
-                    while i < bytes.len() && bytes[i] != b' ' {
-                        i += 1;
-                    } // end of mode
-                    if i < bytes.len() {
-                        i += 1;
-                    }
-                    let id_start = i;
-                    while i < bytes.len() && bytes[i] != b' ' {
-                        i += 1;
-                    }
-                    let id_end = i;
-                    let path_start = if i < bytes.len() { i + 1 } else { bytes.len() };
-                    let id = &bytes[id_start..id_end];
-                    if id == b"inline" {
-                        // store commit_buf position before M-line is appended by process_commit_line, and raw path bytes (without trailing \n)
-                        let mut p = bytes[path_start..].to_vec();
-                        if let Some(last) = p.last() {
-                            if *last == b'\n' {
-                                p.pop();
-                            }
-                        }
-                        pending_inline = Some((commit_buf.len(), p));
-                    }
+            if line.starts_with(b"M ")
+                && {
+                    let mut ctx = CommitMPrecheckCtx {
+                        opts,
+                        commit_buf: &mut commit_buf,
+                        commit_has_changes: &mut commit_has_changes,
+                        pending_inline: &mut pending_inline,
+                        oversize_marks: &oversize_marks,
+                        oversize_shas: &mut oversize_shas,
+                        suppressed_marks_by_size: &suppressed_marks_by_size,
+                        suppressed_marks_by_sha: &suppressed_marks_by_sha,
+                        suppressed_shas_by_size: &mut suppressed_shas_by_size,
+                        suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
+                        modified_marks: &modified_marks,
+                        samples_size: &mut samples_size,
+                        samples_sha: &mut samples_sha,
+                        samples_modified: &mut samples_modified,
+                        path_compat_stats: &mut path_compat_stats,
+                        strip_sha_lookup: &strip_sha_lookup,
+                        blob_size_tracker: &mut blob_size_tracker,
+                    };
+                    process_commit_m_line_precheck(&line, &mut ctx)?
                 }
-                let bytes = &line;
-                // find end of mode and id
-                let mut i = 2; // after 'M '
-                while i < bytes.len() && bytes[i] != b' ' {
-                    i += 1;
-                } // end of mode
-                if i < bytes.len() {
-                    i += 1;
-                }
-                let id_start = i;
-                while i < bytes.len() && bytes[i] != b' ' {
-                    i += 1;
-                }
-                let id_end = i;
-                let path_start = if i < bytes.len() { i + 1 } else { bytes.len() };
-                let id = &bytes[id_start..id_end];
-                let mut drop_path = false;
-                let mut reason_size = false;
-                let mut reason_sha = false;
-                if id.first().copied() == Some(b':') {
-                    // mark
-                    let mut num: u32 = 0;
-                    let mut seen = false;
-                    let mut j = 1;
-                    while j < id.len() {
-                        let b = id[j];
-                        if b.is_ascii_digit() {
-                            seen = true;
-                            num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
-                        } else {
-                            break;
-                        }
-                        j += 1;
-                    }
-                    if seen && oversize_marks.contains(&num) {
-                        drop_path = true;
-                        // Record size sample path eagerly
-                        let path_bytes = &bytes[path_start..];
-                        add_sample(&mut samples_size, path_bytes);
-                        reason_size = suppressed_marks_by_size.contains(&num);
-                        reason_sha = suppressed_marks_by_sha.contains(&num);
-                    }
-                    if seen && modified_marks.contains(&num) {
-                        let path_bytes = &bytes[path_start..];
-                        add_sample(&mut samples_modified, path_bytes);
-                    }
-                } else if id.len() == 40 && id.iter().all(|b| b.is_ascii_hexdigit()) {
-                    // } else if id.len() == 40 && id.iter().all(|b| (b'0'..=b'9').contains(b) || (b'a'..=b'f').contains(b)) {
-                    // sha1
-                    let sha = id.to_vec();
-                    if strip_sha_lookup.contains_hex(&sha)? {
-                        drop_path = true;
-                        reason_sha = true;
-                        suppressed_shas_by_sha.insert(sha.clone());
-                    }
-                    if blob_size_tracker.is_oversize(&sha) {
-                        oversize_shas.insert(sha.clone());
-                        suppressed_shas_by_size.insert(sha);
-                        drop_path = true;
-                        reason_size = true;
-                        // Record size sample path eagerly
-                        let path_bytes = &bytes[path_start..].to_vec();
-                        if samples_size.len() < REPORT_SAMPLE_LIMIT
-                            && !samples_size.iter().any(|p| p == path_bytes)
-                        {
-                            samples_size.push(path_bytes.clone());
-                        }
-                    }
-                }
-                if drop_path {
-                    // Emit deletion for the path (sanitize + quote)
-                    let raw = &bytes[path_start..];
-                    let decoded = crate::pathutil::decode_fast_export_path_bytes(raw);
-                    let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
-                        &decoded,
-                        opts.path_compat_policy,
-                    )
-                    .map_err(io::Error::other)?;
-                    if let Some(event) = path_event {
-                        record_path_compat_event(&mut path_compat_stats, event);
-                    }
-                    if let Some(enc) = enc {
-                        commit_buf.extend_from_slice(b"D ");
-                        commit_buf.extend_from_slice(&enc);
-                        commit_buf.push(b'\n');
-                        commit_has_changes = true;
-                    }
-                    let path_bytes = &bytes[path_start..];
-                    let (mut r_size, mut r_sha) = (reason_size, reason_sha);
-                    if !r_size && !r_sha {
-                        if opts.max_blob_size.is_some() {
-                            r_size = true;
-                        } else {
-                            r_sha = true;
-                        }
-                    }
-                    if r_size {
-                        add_sample(&mut samples_size, path_bytes);
-                    } else if r_sha {
-                        add_sample(&mut samples_sha, path_bytes);
-                    }
-                    continue;
-                }
+            {
+                continue;
             }
 
             let processed_line = if in_commit {
-                let is_author_line = line.starts_with(b"author ");
-                let is_committer_line = line.starts_with(b"committer ");
-
-                if is_author_line || is_committer_line {
-                    let mut rewritten = line.clone();
-
-                    if let Some(mailmap) = mailmap_rewriter.as_ref() {
-                        rewritten = crate::commit::rewrite_mailmap_line(&rewritten, Some(mailmap));
-                    } else {
-                        if let Some(email_rw) = email_rewriter.as_ref() {
-                            rewritten =
-                                crate::commit::rewrite_email_line(&rewritten, Some(email_rw));
-                        }
-                        if is_author_line {
-                            if let Some(author_rw) = author_rewriter.as_ref() {
-                                rewritten =
-                                    crate::commit::rewrite_author_line(&rewritten, Some(author_rw));
-                            }
-                        }
-                        if is_committer_line {
-                            if let Some(committer_rw) = committer_rewriter.as_ref() {
-                                rewritten = crate::commit::rewrite_author_line(
-                                    &rewritten,
-                                    Some(committer_rw),
-                                );
-                            }
-                        }
-                    }
-
-                    rewritten = rewrite_timestamp_line(&rewritten, opts);
-
-                    rewritten
-                } else {
-                    line.clone()
-                }
+                rewrite_commit_identity_line(
+                    &line,
+                    opts,
+                    author_rewriter.as_ref(),
+                    committer_rewriter.as_ref(),
+                    email_rewriter.as_ref(),
+                    mailmap_rewriter.as_ref(),
+                )
             } else {
                 line.clone()
             };
@@ -1267,147 +1715,29 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
                 f.write_all(&payload)?;
             }
             if in_blob {
-                let mut skip_blob = false;
-                let mut reason_size = false;
-                let mut reason_sha = false;
-                if let Some(max) = opts.max_blob_size {
-                    if n > max {
-                        // Pre-record oversize by mark/sha so commit M-lines using marks can be dropped later.
-                        if let Some(m) = last_blob_mark {
-                            oversize_marks.insert(m);
-                            suppressed_marks_by_size.insert(m);
-                        }
-                        if let Some(ref s) = last_blob_orig_sha {
-                            oversize_shas.insert(s.clone());
-                            suppressed_shas_by_size.insert(s.clone());
-                        }
-                        skip_blob = true;
-                        reason_size = true;
-                    }
-                }
-                if !skip_blob {
-                    if let Some(ref s) = last_blob_orig_sha {
-                        if strip_sha_lookup.contains_hex(s)? {
-                            skip_blob = true;
-                            reason_sha = true;
-                        }
-                    }
-                }
-                if skip_blob {
-                    if let Some(m) = last_blob_mark.take() {
-                        oversize_marks.insert(m);
-                        if reason_size {
-                            suppressed_marks_by_size.insert(m);
-                        } else if reason_sha {
-                            suppressed_marks_by_sha.insert(m);
-                        }
-                    }
-                    if let Some(sha) = last_blob_orig_sha.take() {
-                        oversize_shas.insert(sha.clone());
-                        if reason_size {
-                            suppressed_shas_by_size.insert(sha);
-                        } else if reason_sha {
-                            suppressed_shas_by_sha.insert(sha);
-                        }
-                    }
-                    in_blob = false;
-                    blob_buf.clear();
-                    last_blob_mark = None;
-                    // Do not forward to filtered/import
-                    continue;
-                } else {
-                    // Emit buffered blob header lines, then header and payload
-                    for h in blob_buf.drain(..) {
-                        filt_file.write_all(&h)?;
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            if let Err(e) = fi_in.write_all(&h) {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    import_broken = true;
-                                } else {
-                                    return Err(e.into());
-                                }
-                            }
-                        }
-                    }
-                    if content_replacer.is_none() && content_regex_replacer.is_none() {
-                        let header = format!("data {}\n", payload.len());
-                        filt_file.write_all(header.as_bytes())?;
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            if let Err(e) = fi_in.write_all(header.as_bytes()) {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    import_broken = true;
-                                } else {
-                                    return Err(e.into());
-                                }
-                            }
-                        }
-                        filt_file.write_all(&payload)?;
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            if let Err(e) = fi_in.write_all(&payload) {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    import_broken = true;
-                                } else {
-                                    return Err(e.into());
-                                }
-                            }
-                        }
-                    } else {
-                        // Forward header/payload with replacements; track whether modified
-
-                        let mut new_payload;
-                        let mut changed = false;
-
-                        // Use deterministic single-pass replacements in rule order.
-                        // This matches git-filter-repo semantics and avoids
-                        // non-terminating chained substitutions.
-                        if let Some(r) = &content_replacer {
-                            let (result, did_change) = r.apply_with_change(payload);
-                            changed = did_change;
-                            new_payload = result;
-                        } else {
-                            new_payload = payload;
-                        }
-                        if let Some(rr) = &content_regex_replacer {
-                            let (result, did_change) = rr.apply_regex_with_change(new_payload);
-                            changed = changed || did_change;
-                            new_payload = result;
-                        }
-
-                        let header = format!("data {}\n", new_payload.len());
-                        filt_file.write_all(header.as_bytes())?;
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            if let Err(e) = fi_in.write_all(header.as_bytes()) {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    import_broken = true;
-                                } else {
-                                    return Err(e.into());
-                                }
-                            }
-                        }
-                        filt_file.write_all(&new_payload)?;
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            if let Err(e) = fi_in.write_all(&new_payload) {
-                                if e.kind() == io::ErrorKind::BrokenPipe {
-                                    import_broken = true;
-                                } else {
-                                    return Err(e.into());
-                                }
-                            }
-                        }
-                        if changed {
-                            if let Some(m) = last_blob_mark {
-                                modified_marks.insert(m);
-                            }
-                        }
-                    }
-                    // Record emitted blob mark
-                    if let Some(m) = last_blob_mark {
-                        emitted_marks.insert(m);
-                    }
-                    in_blob = false;
-                    last_blob_mark = None;
-                    continue;
-                }
+                let mut ctx = BlobPayloadCtx {
+                    opts,
+                    filt_file: &mut filt_file,
+                    fi_in_opt: &mut fi_in_opt,
+                    content_replacer: &content_replacer,
+                    content_regex_replacer: &content_regex_replacer,
+                    in_blob: &mut in_blob,
+                    blob_buf: &mut blob_buf,
+                    last_blob_mark: &mut last_blob_mark,
+                    last_blob_orig_sha: &mut last_blob_orig_sha,
+                    oversize_marks: &mut oversize_marks,
+                    oversize_shas: &mut oversize_shas,
+                    suppressed_marks_by_size: &mut suppressed_marks_by_size,
+                    suppressed_marks_by_sha: &mut suppressed_marks_by_sha,
+                    suppressed_shas_by_size: &mut suppressed_shas_by_size,
+                    suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
+                    modified_marks: &mut modified_marks,
+                    emitted_marks: &mut emitted_marks,
+                    import_broken: &mut import_broken,
+                    strip_sha_lookup: &strip_sha_lookup,
+                };
+                process_blob_data_payload(payload, &mut ctx)?;
+                continue;
             } else {
                 // Not a blob payload (should be rare here); forward as-is
                 filt_file.write_all(&line)?;
@@ -1530,99 +1860,32 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
     }
 
     drop(fi_out_opt);
-
-    // Finalize run: flush buffered tags (if any remain), wait, write maps, optional reset
-    // Flush original stream (if present) so finalize can read it for reporting/sampling
-    if let Some(ref mut of) = orig_file_opt {
-        of.flush()?;
-    }
-    let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
-    // Pass buffered writer into finalize to flush tag resets and drop
-    let fi_writer_for_finalize: Option<Box<dyn Write>> =
-        fi_in_opt.take().map(|bw| Box::new(bw) as Box<dyn Write>);
-
-    // Capture ref count before moving ref_renames
-    let total_refs_rewritten = ref_renames.len();
-
-    crate::finalize::finalize(
+    self.finalize_stream(
         opts,
-        &debug_dir,
+        &mut filt_file,
+        &mut orig_file_opt,
+        &mut fi_in_opt,
+        &mut fe,
+        &mut fi,
+        import_broken,
         ref_renames,
         commit_pairs,
         buffered_tag_resets,
         annotated_tag_refs,
         updated_branch_refs,
         branch_reset_targets,
-        &mut filt_file as &mut dyn Write,
-        fi_writer_for_finalize,
-        &mut fe,
-        fi.as_mut(),
-        import_broken,
-        allow_flush_tag_resets,
-        {
-            use crate::finalize::{
-                Metadata, ReportData, Samples, Statistics, Summary, WindowsPathReport,
-                WindowsPathSamples, WindowsPathSummary,
-            };
-            Some(ReportData {
-                summary: Summary {
-                    blobs_stripped_by_size: suppressed_shas_by_size
-                        .len()
-                        .max(suppressed_marks_by_size.len()),
-                    blobs_stripped_by_sha: suppressed_shas_by_sha
-                        .len()
-                        .max(suppressed_marks_by_sha.len()),
-                    blobs_modified: modified_marks.len() + inline_modified_paths.len(),
-                },
-                statistics: Statistics {
-                    commits_processed: total_commits,
-                    blobs_processed: total_blobs,
-                    refs_rewritten: total_refs_rewritten,
-                },
-                samples: Samples {
-                    by_size: samples_size
-                        .into_iter()
-                        .map(|p| String::from_utf8_lossy(&p).into_owned())
-                        .collect(),
-                    by_sha: samples_sha
-                        .into_iter()
-                        .map(|p| String::from_utf8_lossy(&p).into_owned())
-                        .collect(),
-                    modified: samples_modified
-                        .into_iter()
-                        .map(|p| String::from_utf8_lossy(&p).into_owned())
-                        .collect(),
-                },
-                windows_path: if path_compat_stats.sanitized + path_compat_stats.skipped > 0 {
-                    Some(WindowsPathReport {
-                        summary: WindowsPathSummary {
-                            policy: path_compat_stats.policy,
-                            sanitized: path_compat_stats.sanitized,
-                            skipped: path_compat_stats.skipped,
-                        },
-                        samples: if path_compat_stats.sanitized_samples.is_empty()
-                            && path_compat_stats.skipped_samples.is_empty()
-                        {
-                            None
-                        } else {
-                            Some(WindowsPathSamples {
-                                sanitized: path_compat_stats.sanitized_samples,
-                                skipped: path_compat_stats.skipped_samples,
-                            })
-                        },
-                    })
-                } else {
-                    None
-                },
-                metadata: Metadata {
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs().to_string())
-                        .unwrap_or_default(),
-                },
-            })
-        },
+        suppressed_shas_by_size,
+        suppressed_marks_by_size,
+        suppressed_shas_by_sha,
+        suppressed_marks_by_sha,
+        modified_marks,
+        inline_modified_paths,
+        total_commits,
+        total_blobs,
+        samples_size,
+        samples_sha,
+        samples_modified,
+        path_compat_stats,
         &blob_size_tracker,
     )?;
 
@@ -1632,7 +1895,12 @@ pub fn run(opts: &Options) -> FilterRepoResult<()> {
         let _ = child.wait()?;
     }
 
-    Ok(())
+        Ok(())
+    }
+}
+
+pub fn run(opts: &Options) -> FilterRepoResult<()> {
+    StreamProcessor::new(opts)?.process()
 }
 
 fn resolve_mark_oid(
