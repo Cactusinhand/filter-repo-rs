@@ -411,11 +411,9 @@ fn process_pending_inline_data_line(
     if drop_inline {
         ctx.commit_buf.truncate(pos);
         let decoded = crate::pathutil::decode_fast_export_path_bytes(&path_bytes);
-        let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
-            &decoded,
-            ctx.opts.path_compat_policy,
-        )
-        .map_err(io::Error::other)?;
+        let (enc, path_event) =
+            crate::pathutil::encode_path_for_fi_with_policy(&decoded, ctx.opts.path_compat_policy)
+                .map_err(io::Error::other)?;
         if let Some(event) = path_event {
             record_path_compat_event(ctx.path_compat_stats, event);
         }
@@ -495,7 +493,10 @@ struct CommitMPrecheckCtx<'a> {
     blob_size_tracker: &'a mut BlobSizeTracker,
 }
 
-fn process_commit_m_line_precheck(line: &[u8], ctx: &mut CommitMPrecheckCtx<'_>) -> FilterRepoResult<bool> {
+fn process_commit_m_line_precheck(
+    line: &[u8],
+    ctx: &mut CommitMPrecheckCtx<'_>,
+) -> FilterRepoResult<bool> {
     let opts = ctx.opts;
     let commit_buf = &mut *ctx.commit_buf;
     let commit_has_changes = &mut *ctx.commit_has_changes;
@@ -564,7 +565,9 @@ fn process_commit_m_line_precheck(line: &[u8], ctx: &mut CommitMPrecheckCtx<'_>)
             drop_path = true;
             reason_size = true;
             let path_buf = path_bytes.to_vec();
-            if samples_size.len() < REPORT_SAMPLE_LIMIT && !samples_size.iter().any(|p| p == &path_buf) {
+            if samples_size.len() < REPORT_SAMPLE_LIMIT
+                && !samples_size.iter().any(|p| p == &path_buf)
+            {
                 samples_size.push(path_buf);
             }
         }
@@ -575,11 +578,9 @@ fn process_commit_m_line_precheck(line: &[u8], ctx: &mut CommitMPrecheckCtx<'_>)
     }
 
     let decoded = crate::pathutil::decode_fast_export_path_bytes(path_bytes);
-    let (enc, path_event) = crate::pathutil::encode_path_for_fi_with_policy(
-        &decoded,
-        opts.path_compat_policy,
-    )
-    .map_err(io::Error::other)?;
+    let (enc, path_event) =
+        crate::pathutil::encode_path_for_fi_with_policy(&decoded, opts.path_compat_policy)
+            .map_err(io::Error::other)?;
     if let Some(event) = path_event {
         record_path_compat_event(path_compat_stats, event);
     }
@@ -627,7 +628,10 @@ struct BlobPayloadCtx<'a> {
     strip_sha_lookup: &'a StripShaLookup,
 }
 
-fn process_blob_data_payload(payload: Vec<u8>, ctx: &mut BlobPayloadCtx<'_>) -> FilterRepoResult<()> {
+fn process_blob_data_payload(
+    payload: Vec<u8>,
+    ctx: &mut BlobPayloadCtx<'_>,
+) -> FilterRepoResult<()> {
     let opts = ctx.opts;
     let filt_file = &mut *ctx.filt_file;
     let fi_in_opt = &mut *ctx.fi_in_opt;
@@ -1040,9 +1044,11 @@ impl<'a> StreamProcessor<'a> {
             None
         } else {
             Some(
-                crate::pipes::build_fast_import_cmd(opts).spawn().map_err(|e| {
-                    io::Error::other(format!("failed to spawn git fast-import: {e}"))
-                })?,
+                crate::pipes::build_fast_import_cmd(opts)
+                    .spawn()
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to spawn git fast-import: {e}"))
+                    })?,
             )
         };
 
@@ -1051,12 +1057,12 @@ impl<'a> StreamProcessor<'a> {
                 .take()
                 .ok_or_else(|| io::Error::other("git fast-export produced no stdout"))?,
         );
-        let fi_in_opt: Option<BufWriter<std::process::ChildStdin>> =
-            if let Some(ref mut child) = fi {
-                child.stdin.take().map(BufWriter::new)
-            } else {
-                None
-            };
+        let fi_in_opt: Option<BufWriter<std::process::ChildStdin>> = if let Some(ref mut child) = fi
+        {
+            child.stdin.take().map(BufWriter::new)
+        } else {
+            None
+        };
         let fi_out_opt: Option<BufReader<std::process::ChildStdout>> =
             if let Some(ref mut child) = fi {
                 child.stdout.take().map(BufReader::new)
@@ -1064,7 +1070,15 @@ impl<'a> StreamProcessor<'a> {
                 None
             };
 
-        Ok((filt_file, orig_file_opt, fe, fi, fe_out, fi_in_opt, fi_out_opt))
+        Ok((
+            filt_file,
+            orig_file_opt,
+            fe,
+            fi,
+            fe_out,
+            fi_in_opt,
+            fi_out_opt,
+        ))
     }
 
     fn init_rewriters(
@@ -1083,14 +1097,13 @@ impl<'a> StreamProcessor<'a> {
         let opts = self.opts;
         let debug_dir = &self.debug_dir;
 
-        let replacer = match &opts.replace_message_file {
-            Some(p) => Some(
-                MessageReplacer::from_file(p).map_err(|e| {
+        let replacer =
+            match &opts.replace_message_file {
+                Some(p) => Some(MessageReplacer::from_file(p).map_err(|e| {
                     io::Error::other(format!("failed to read --replace-message: {e}"))
-                })?,
-            ),
-            None => None,
-        };
+                })?),
+                None => None,
+            };
         let msg_regex_replacer: Option<MsgRegexReplacer> = match &opts.replace_message_file {
             Some(p) => MsgRegexReplacer::from_file(p)
                 .map_err(|e| io::Error::other(format!("failed to read --replace-message: {e}")))?,
@@ -1110,28 +1123,26 @@ impl<'a> StreamProcessor<'a> {
             None => None,
         };
 
-        let author_rewriter = match &opts.author_rewrite_file {
-            Some(p) => Some(
-                AuthorRewriter::from_file(p).map_err(|e| {
+        let author_rewriter =
+            match &opts.author_rewrite_file {
+                Some(p) => Some(AuthorRewriter::from_file(p).map_err(|e| {
                     io::Error::other(format!("failed to read --author-rewrite: {e}"))
-                })?,
-            ),
-            None => None,
-        };
+                })?),
+                None => None,
+            };
         let committer_rewriter = match &opts.committer_rewrite_file {
             Some(p) => Some(AuthorRewriter::from_file(p).map_err(|e| {
                 io::Error::other(format!("failed to read --committer-rewrite: {e}"))
             })?),
             None => None,
         };
-        let email_rewriter = match &opts.email_rewrite_file {
-            Some(p) => Some(
-                AuthorRewriter::from_file(p).map_err(|e| {
+        let email_rewriter =
+            match &opts.email_rewrite_file {
+                Some(p) => Some(AuthorRewriter::from_file(p).map_err(|e| {
                     io::Error::other(format!("failed to read --email-rewrite: {e}"))
-                })?,
-            ),
-            None => None,
-        };
+                })?),
+                None => None,
+            };
         let mailmap_rewriter = match &opts.mailmap_file {
             Some(p) => Some(
                 MailmapRewriter::from_file(p)
@@ -1298,247 +1309,362 @@ impl<'a> StreamProcessor<'a> {
             mailmap_rewriter,
         ) = self.init_rewriters()?;
 
-    // minimal stream state is tracked via local booleans and buffers
-    // Commit buffering state for pruning
-    let mut in_commit = false;
-    let mut commit_buf: Vec<u8> = Vec::with_capacity(8192);
-    let mut commit_has_changes = false;
-    let mut commit_mark: Option<u32> = None;
-    let mut first_parent_mark: Option<u32> = None;
-    let mut commit_original_oid: Option<Vec<u8>> = None;
-    let mut parent_count: usize = 0;
-    let mut commit_pairs: Vec<(Vec<u8>, Option<u32>)> = Vec::new();
-    let mut parent_lines: Vec<crate::commit::ParentLine> = Vec::new();
-    let mut alias_map: HashMap<u32, u32> = HashMap::new();
-    let mut import_broken = false;
-    // If we skip a duplicate annotated tag header, swallow the rest of its block
-    let mut skipping_tag_block: bool = false;
-    let mut ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)> = BTreeSet::new();
-    // Track which refs we have updated (to avoid multiple updates of same ref via tag blocks)
-    let mut updated_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
-    // Prefer annotated tags: track which tag refs were created by `tag <name>` blocks
-    let mut annotated_tag_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
-    // Track updated branch refs (refs/heads/*) to help finalize HEAD
-    let mut updated_branch_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
-    // Track branch reset targets to feed finalize phase (ref -> mark/oid spec)
-    let mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-    // Buffer lightweight tag resets (ref, from-line)
-    let mut buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-    // After seeing a reset refs/tags/<name>, capture the following 'from ...' line
-    let mut pending_tag_reset: Option<Vec<u8>> = None;
-    // After seeing a branch reset, capture the following 'from ...' line
-    let mut pending_branch_reset: Option<Vec<u8>> = None;
-    // Blob filtering state for --max-blob-size
-    let mut in_blob: bool = false;
-    let mut blob_buf: Vec<Vec<u8>> = Vec::new();
-    let mut last_blob_mark: Option<u32> = None;
-    let mut oversize_marks: HashSet<u32> = HashSet::new();
-    let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
-    let strip_sha_lookup = match &opts.strip_blobs_with_ids {
-        Some(path) => StripShaLookup::from_path(path)
-            .map_err(|e| io::Error::other(format!("failed to load --strip-blobs-with-ids: {e}")))?,
-        None => StripShaLookup::empty(),
-    };
-    let mut last_blob_orig_sha: Option<Vec<u8>> = None;
-    let mut blob_size_tracker = BlobSizeTracker::new(opts);
-    // Reporting accumulators
-    let mut suppressed_marks_by_size: HashSet<u32> = HashSet::new();
-    let mut suppressed_marks_by_sha: HashSet<u32> = HashSet::new();
-    let mut suppressed_shas_by_size: HashSet<Vec<u8>> = HashSet::new();
-    let mut suppressed_shas_by_sha: HashSet<Vec<u8>> = HashSet::new();
-    let mut modified_marks: HashSet<u32> = HashSet::new();
-    let mut samples_size: Vec<Vec<u8>> = Vec::new();
-    // Statistics counters
-    let mut total_commits: usize = 0;
-    let mut total_blobs: usize = 0;
-    let mut samples_sha: Vec<Vec<u8>> = Vec::new();
-    let mut samples_modified: Vec<Vec<u8>> = Vec::new();
-    let mut inline_modified_paths: HashSet<Vec<u8>> = HashSet::new();
-    let mut path_compat_stats = PathCompatStats {
-        policy: opts.path_compat_policy.as_str().to_string(),
-        ..PathCompatStats::default()
-    };
-    let mut line = Vec::with_capacity(8192);
-    // Track if the previous M-line used inline content; store commit_buf position and path bytes
-    let mut pending_inline: Option<(usize, Vec<u8>)> = None;
-    // Track marks that have been emitted to avoid referencing undeclared marks in aliases
-    let mut emitted_marks: HashSet<u32> = HashSet::new();
+        // minimal stream state is tracked via local booleans and buffers
+        // Commit buffering state for pruning
+        let mut in_commit = false;
+        let mut commit_buf: Vec<u8> = Vec::with_capacity(8192);
+        let mut commit_has_changes = false;
+        let mut commit_mark: Option<u32> = None;
+        let mut first_parent_mark: Option<u32> = None;
+        let mut commit_original_oid: Option<Vec<u8>> = None;
+        let mut parent_count: usize = 0;
+        let mut commit_pairs: Vec<(Vec<u8>, Option<u32>)> = Vec::new();
+        let mut parent_lines: Vec<crate::commit::ParentLine> = Vec::new();
+        let mut alias_map: HashMap<u32, u32> = HashMap::new();
+        let mut import_broken = false;
+        // If we skip a duplicate annotated tag header, swallow the rest of its block
+        let mut skipping_tag_block: bool = false;
+        let mut ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)> = BTreeSet::new();
+        // Track which refs we have updated (to avoid multiple updates of same ref via tag blocks)
+        let mut updated_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
+        // Prefer annotated tags: track which tag refs were created by `tag <name>` blocks
+        let mut annotated_tag_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
+        // Track updated branch refs (refs/heads/*) to help finalize HEAD
+        let mut updated_branch_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
+        // Track branch reset targets to feed finalize phase (ref -> mark/oid spec)
+        let mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        // Buffer lightweight tag resets (ref, from-line)
+        let mut buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        // After seeing a reset refs/tags/<name>, capture the following 'from ...' line
+        let mut pending_tag_reset: Option<Vec<u8>> = None;
+        // After seeing a branch reset, capture the following 'from ...' line
+        let mut pending_branch_reset: Option<Vec<u8>> = None;
+        // Blob filtering state for --max-blob-size
+        let mut in_blob: bool = false;
+        let mut blob_buf: Vec<Vec<u8>> = Vec::new();
+        let mut last_blob_mark: Option<u32> = None;
+        let mut oversize_marks: HashSet<u32> = HashSet::new();
+        let mut oversize_shas: HashSet<Vec<u8>> = HashSet::new();
+        let strip_sha_lookup = match &opts.strip_blobs_with_ids {
+            Some(path) => StripShaLookup::from_path(path).map_err(|e| {
+                io::Error::other(format!("failed to load --strip-blobs-with-ids: {e}"))
+            })?,
+            None => StripShaLookup::empty(),
+        };
+        let mut last_blob_orig_sha: Option<Vec<u8>> = None;
+        let mut blob_size_tracker = BlobSizeTracker::new(opts);
+        // Reporting accumulators
+        let mut suppressed_marks_by_size: HashSet<u32> = HashSet::new();
+        let mut suppressed_marks_by_sha: HashSet<u32> = HashSet::new();
+        let mut suppressed_shas_by_size: HashSet<Vec<u8>> = HashSet::new();
+        let mut suppressed_shas_by_sha: HashSet<Vec<u8>> = HashSet::new();
+        let mut modified_marks: HashSet<u32> = HashSet::new();
+        let mut samples_size: Vec<Vec<u8>> = Vec::new();
+        // Statistics counters
+        let mut total_commits: usize = 0;
+        let mut total_blobs: usize = 0;
+        let mut samples_sha: Vec<Vec<u8>> = Vec::new();
+        let mut samples_modified: Vec<Vec<u8>> = Vec::new();
+        let mut inline_modified_paths: HashSet<Vec<u8>> = HashSet::new();
+        let mut path_compat_stats = PathCompatStats {
+            policy: opts.path_compat_policy.as_str().to_string(),
+            ..PathCompatStats::default()
+        };
+        let mut line = Vec::with_capacity(8192);
+        // Track if the previous M-line used inline content; store commit_buf position and path bytes
+        let mut pending_inline: Option<(usize, Vec<u8>)> = None;
+        // Track marks that have been emitted to avoid referencing undeclared marks in aliases
+        let mut emitted_marks: HashSet<u32> = HashSet::new();
 
-    loop {
-        line.clear();
-        let read = fe_out.read_until(b'\n', &mut line)?;
-        if read == 0 {
-            break;
-        }
+        loop {
+            line.clear();
+            let read = fe_out.read_until(b'\n', &mut line)?;
+            if read == 0 {
+                break;
+            }
 
-        // Mirror original header/line when enabled
-        if let Some(ref mut f) = orig_file_opt {
-            f.write_all(&line)?;
-        }
+            // Mirror original header/line when enabled
+            if let Some(ref mut f) = orig_file_opt {
+                f.write_all(&line)?;
+            }
 
-        // If swallowing a skipped annotated tag block, consume its lines and payload
-        if skipping_tag_block {
-            if line.starts_with(b"data ") {
-                let n = parse_data_size_header(&line)?;
-                let mut payload = vec![0u8; n];
-                fe_out.read_exact(&mut payload)?;
-                // Mirror original payload to debug file (when enabled)
-                if let Some(ref mut f) = orig_file_opt {
-                    f.write_all(&payload)?;
+            // If swallowing a skipped annotated tag block, consume its lines and payload
+            if skipping_tag_block {
+                if line.starts_with(b"data ") {
+                    let n = parse_data_size_header(&line)?;
+                    let mut payload = vec![0u8; n];
+                    fe_out.read_exact(&mut payload)?;
+                    // Mirror original payload to debug file (when enabled)
+                    if let Some(ref mut f) = orig_file_opt {
+                        f.write_all(&payload)?;
+                    }
+                    // Done skipping this tag block
+                    skipping_tag_block = false;
                 }
-                // Done skipping this tag block
-                skipping_tag_block = false;
+                continue;
             }
-            continue;
-        }
 
-        // Pre-check for duplicate annotated tag: if target ref already updated, swallow this tag block
-        if crate::tag::precheck_duplicate_tag(&line, opts, &updated_refs) {
-            skipping_tag_block = true;
-            continue;
-        }
-
-        // In blob header: record and ignore original-oid lines (fast-import does not accept them outside commits/tags)
-        if in_blob && line.starts_with(b"original-oid ") {
-            let mut v = line[b"original-oid ".len()..].to_vec();
-            if let Some(last) = v.last() {
-                if *last == b'\n' {
-                    v.pop();
-                }
+            // Pre-check for duplicate annotated tag: if target ref already updated, swallow this tag block
+            if crate::tag::precheck_duplicate_tag(&line, opts, &updated_refs) {
+                skipping_tag_block = true;
+                continue;
             }
-            for b in &mut v {
-                if *b >= b'A' && *b <= b'F' {
-                    *b += 32;
-                }
-            }
-            last_blob_orig_sha = Some(v);
-            continue;
-        }
 
-        // Blob begin
-        if line == b"blob\n" {
-            in_blob = true;
-            blob_buf.clear();
-            blob_buf.push(line.clone());
-            last_blob_mark = None;
-            total_blobs += 1;
-            continue;
-        }
-        // Blob mark
-        if in_blob && line.starts_with(b"mark :") {
-            let mut num: u32 = 0;
-            let mut seen = false;
-            for &b in line[b"mark :".len()..].iter() {
-                if b.is_ascii_digit() {
-                    seen = true;
-                    num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
-                } else {
-                    break;
-                }
-            }
-            if seen {
-                last_blob_mark = Some(num);
-            }
-            blob_buf.push(line.clone());
-            continue;
-        }
-
-        // If a lightweight tag reset is pending, capture its 'from ' line
-        if crate::tag::maybe_capture_pending_tag_reset(
-            &mut pending_tag_reset,
-            &line,
-            &mut buffered_tag_resets,
-        ) {
-            continue;
-        }
-
-        // Capture branch reset targets (reset refs/heads/<name> -> from ...)
-        if let Some(ref_name) = pending_branch_reset.take() {
-            if !in_commit && line.starts_with(b"from ") {
-                let mut target = line[b"from ".len()..].to_vec();
-                if let Some(last) = target.last() {
+            // In blob header: record and ignore original-oid lines (fast-import does not accept them outside commits/tags)
+            if in_blob && line.starts_with(b"original-oid ") {
+                let mut v = line[b"original-oid ".len()..].to_vec();
+                if let Some(last) = v.last() {
                     if *last == b'\n' {
-                        target.pop();
+                        v.pop();
                     }
                 }
-                if !target.is_empty() {
-                    branch_reset_targets.push((ref_name, target));
+                for b in &mut v {
+                    if *b >= b'A' && *b <= b'F' {
+                        *b += 32;
+                    }
                 }
-            } else {
-                pending_branch_reset = Some(ref_name);
+                last_blob_orig_sha = Some(v);
+                continue;
             }
-        }
 
-        // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
-        if line.starts_with(b"tag ") {
-            let short_mapper = short_hash_mapper.as_ref();
-            crate::tag::process_tag_block(
-                &line,
-                crate::tag::TagProcessContext {
-                    fe_out: &mut fe_out,
-                    orig_file: orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                    filt_file: &mut filt_file as &mut dyn Write,
-                    fi_in: if let Some(ref mut fi_in) = fi_in_opt {
-                        Some(fi_in as &mut dyn Write)
+            // Blob begin
+            if line == b"blob\n" {
+                in_blob = true;
+                blob_buf.clear();
+                blob_buf.push(line.clone());
+                last_blob_mark = None;
+                total_blobs += 1;
+                continue;
+            }
+            // Blob mark
+            if in_blob && line.starts_with(b"mark :") {
+                let mut num: u32 = 0;
+                let mut seen = false;
+                for &b in line[b"mark :".len()..].iter() {
+                    if b.is_ascii_digit() {
+                        seen = true;
+                        num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
                     } else {
-                        None
-                    },
-                    replacer: &replacer,
-                    msg_regex: msg_regex_replacer.as_ref(),
-                    short_mapper,
-                    opts,
-                    updated_refs: &mut updated_refs,
-                    annotated_tag_refs: &mut annotated_tag_refs,
-                    ref_renames: &mut ref_renames,
-                    emitted_marks: &mut emitted_marks,
-                },
-            )?;
-            continue;
-        }
+                        break;
+                    }
+                }
+                if seen {
+                    last_blob_mark = Some(num);
+                }
+                blob_buf.push(line.clone());
+                continue;
+            }
 
-        if line.starts_with(b"commit ") {
-            // Start buffering a commit using possibly renamed header
-            in_commit = true;
-            commit_buf.clear();
-            commit_has_changes = false;
-            commit_mark = None;
-            first_parent_mark = None;
-            parent_lines.clear();
-            total_commits += 1;
-            let hdr = crate::commit::rename_commit_header_ref(&line, opts, &mut ref_renames);
-            commit_buf.extend_from_slice(&hdr);
-            // Track final branch ref (post-rename) for HEAD updates
-            let mut refname = &hdr[b"commit ".len()..];
-            if let Some(&last) = refname.last() {
-                if last == b'\n' {
-                    refname = &refname[..refname.len() - 1];
+            // If a lightweight tag reset is pending, capture its 'from ' line
+            if crate::tag::maybe_capture_pending_tag_reset(
+                &mut pending_tag_reset,
+                &line,
+                &mut buffered_tag_resets,
+            ) {
+                continue;
+            }
+
+            // Capture branch reset targets (reset refs/heads/<name> -> from ...)
+            if let Some(ref_name) = pending_branch_reset.take() {
+                if !in_commit && line.starts_with(b"from ") {
+                    let mut target = line[b"from ".len()..].to_vec();
+                    if let Some(last) = target.last() {
+                        if *last == b'\n' {
+                            target.pop();
+                        }
+                    }
+                    if !target.is_empty() {
+                        branch_reset_targets.push((ref_name, target));
+                    }
+                } else {
+                    pending_branch_reset = Some(ref_name);
                 }
             }
-            if refname.starts_with(b"refs/heads/") {
-                updated_branch_refs.insert(refname.to_vec());
-            }
-            continue;
-        }
 
-        // If we are buffering a commit, process its content
-        if in_commit {
-            // End of commit is implicit: a new object starts.
-            if line.starts_with(b"commit ")
-                || line.starts_with(b"tag ")
-                || line.starts_with(b"reset ")
-                || line.starts_with(b"blob")
-                || line == b"done\n"
-            {
+            // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
+            if line.starts_with(b"tag ") {
+                let short_mapper = short_hash_mapper.as_ref();
+                crate::tag::process_tag_block(
+                    &line,
+                    crate::tag::TagProcessContext {
+                        fe_out: &mut fe_out,
+                        orig_file: orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                        filt_file: &mut filt_file as &mut dyn Write,
+                        fi_in: if let Some(ref mut fi_in) = fi_in_opt {
+                            Some(fi_in as &mut dyn Write)
+                        } else {
+                            None
+                        },
+                        replacer: &replacer,
+                        msg_regex: msg_regex_replacer.as_ref(),
+                        short_mapper,
+                        opts,
+                        updated_refs: &mut updated_refs,
+                        annotated_tag_refs: &mut annotated_tag_refs,
+                        ref_renames: &mut ref_renames,
+                        emitted_marks: &mut emitted_marks,
+                    },
+                )?;
+                continue;
+            }
+
+            if line.starts_with(b"commit ") {
+                // Start buffering a commit using possibly renamed header
+                in_commit = true;
+                commit_buf.clear();
+                commit_has_changes = false;
+                commit_mark = None;
+                first_parent_mark = None;
+                parent_lines.clear();
+                total_commits += 1;
+                let hdr = crate::commit::rename_commit_header_ref(&line, opts, &mut ref_renames);
+                commit_buf.extend_from_slice(&hdr);
+                // Track final branch ref (post-rename) for HEAD updates
+                let mut refname = &hdr[b"commit ".len()..];
+                if let Some(&last) = refname.last() {
+                    if last == b'\n' {
+                        refname = &refname[..refname.len() - 1];
+                    }
+                }
+                if refname.starts_with(b"refs/heads/") {
+                    updated_branch_refs.insert(refname.to_vec());
+                }
+                continue;
+            }
+
+            // If we are buffering a commit, process its content
+            if in_commit {
+                // End of commit is implicit: a new object starts.
+                if line.starts_with(b"commit ")
+                    || line.starts_with(b"tag ")
+                    || line.starts_with(b"reset ")
+                    || line.starts_with(b"blob")
+                    || line == b"done\n"
+                {
+                    let short_mapper = short_hash_mapper.as_ref();
+                    let mut path_events = Vec::new();
+                    match crate::commit::process_commit_line(
+                        b"\n",
+                        opts,
+                        &mut fe_out,
+                        orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                        &mut filt_file as &mut dyn Write,
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            Some(fi_in as &mut dyn Write)
+                        } else {
+                            None
+                        },
+                        &replacer,
+                        msg_regex_replacer.as_ref(),
+                        short_mapper,
+                        &mut commit_buf,
+                        &mut commit_has_changes,
+                        &mut commit_mark,
+                        &mut first_parent_mark,
+                        &mut commit_original_oid,
+                        &mut parent_count,
+                        &mut commit_pairs,
+                        &mut import_broken,
+                        &mut parent_lines,
+                        &mut alias_map,
+                        &emitted_marks,
+                        &mut path_events,
+                    )? {
+                        crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
+                        crate::commit::CommitAction::Ended => {
+                            // Record emitted commit mark
+                            if let Some(m) = commit_mark {
+                                emitted_marks.insert(m);
+                                if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
+                                    short_hash_mapper.as_mut(),
+                                    fi_in_opt.as_mut(),
+                                    fi_out_opt.as_mut(),
+                                ) {
+                                    if let Some((old, Some(mark))) = commit_pairs.last() {
+                                        if *mark == m {
+                                            if let Some(new_id) =
+                                                resolve_mark_oid(fi_in, fi_out, *mark)?
+                                            {
+                                                mapper.update_mapping(old, &new_id);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            in_commit = false;
+                        }
+                    }
+                    for event in path_events {
+                        record_path_compat_event(&mut path_compat_stats, event);
+                    }
+                }
+            }
+            if in_commit {
+                let mut pending_inline_ctx = PendingInlineDataCtx {
+                    opts,
+                    fe_out: &mut fe_out,
+                    orig_file_opt: &mut orig_file_opt,
+                    commit_buf: &mut commit_buf,
+                    commit_has_changes: &mut commit_has_changes,
+                    pending_inline: &mut pending_inline,
+                    samples_size: &mut samples_size,
+                    samples_modified: &mut samples_modified,
+                    inline_modified_paths: &mut inline_modified_paths,
+                    path_compat_stats: &mut path_compat_stats,
+                    content_replacer: &content_replacer,
+                    content_regex_replacer: &content_regex_replacer,
+                };
+                if process_pending_inline_data_line(&line, &mut pending_inline_ctx)? {
+                    continue;
+                }
+                if line.starts_with(b"M ") && {
+                    let mut ctx = CommitMPrecheckCtx {
+                        opts,
+                        commit_buf: &mut commit_buf,
+                        commit_has_changes: &mut commit_has_changes,
+                        pending_inline: &mut pending_inline,
+                        oversize_marks: &oversize_marks,
+                        oversize_shas: &mut oversize_shas,
+                        suppressed_marks_by_size: &suppressed_marks_by_size,
+                        suppressed_marks_by_sha: &suppressed_marks_by_sha,
+                        suppressed_shas_by_size: &mut suppressed_shas_by_size,
+                        suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
+                        modified_marks: &modified_marks,
+                        samples_size: &mut samples_size,
+                        samples_sha: &mut samples_sha,
+                        samples_modified: &mut samples_modified,
+                        path_compat_stats: &mut path_compat_stats,
+                        strip_sha_lookup: &strip_sha_lookup,
+                        blob_size_tracker: &mut blob_size_tracker,
+                    };
+                    process_commit_m_line_precheck(&line, &mut ctx)?
+                } {
+                    continue;
+                }
+
+                let processed_line = if in_commit {
+                    rewrite_commit_identity_line(
+                        &line,
+                        opts,
+                        author_rewriter.as_ref(),
+                        committer_rewriter.as_ref(),
+                        email_rewriter.as_ref(),
+                        mailmap_rewriter.as_ref(),
+                    )
+                } else {
+                    line.clone()
+                };
+
                 let short_mapper = short_hash_mapper.as_ref();
                 let mut path_events = Vec::new();
                 match crate::commit::process_commit_line(
-                    b"\n",
+                    &processed_line,
                     opts,
                     &mut fe_out,
                     orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
                     &mut filt_file as &mut dyn Write,
                     if let Some(ref mut fi_in) = fi_in_opt {
-                        Some(fi_in as &mut dyn Write)
+                        Some(fi_in)
                     } else {
                         None
                     },
@@ -1558,9 +1684,16 @@ impl<'a> StreamProcessor<'a> {
                     &emitted_marks,
                     &mut path_events,
                 )? {
-                    crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
+                    crate::commit::CommitAction::Consumed => {
+                        for event in path_events {
+                            record_path_compat_event(&mut path_compat_stats, event);
+                        }
+                        continue;
+                    }
                     crate::commit::CommitAction::Ended => {
-                        // Record emitted commit mark
+                        for event in path_events {
+                            record_path_compat_event(&mut path_compat_stats, event);
+                        }
                         if let Some(m) = commit_mark {
                             emitted_marks.insert(m);
                             if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
@@ -1582,164 +1715,80 @@ impl<'a> StreamProcessor<'a> {
                         in_commit = false;
                     }
                 }
-                for event in path_events {
-                    record_path_compat_event(&mut path_compat_stats, event);
+            }
+
+            // Generic data blocks (e.g., blob): forward exact payload bytes
+            if line.starts_with(b"data ") {
+                let n = parse_data_size_header(&line)?;
+                let mut payload = vec![0u8; n];
+                fe_out.read_exact(&mut payload)?;
+                // Always mirror to original (when enabled)
+                if let Some(ref mut f) = orig_file_opt {
+                    f.write_all(&payload)?;
                 }
-            }
-        }
-        if in_commit {
-            let mut pending_inline_ctx = PendingInlineDataCtx {
-                opts,
-                fe_out: &mut fe_out,
-                orig_file_opt: &mut orig_file_opt,
-                commit_buf: &mut commit_buf,
-                commit_has_changes: &mut commit_has_changes,
-                pending_inline: &mut pending_inline,
-                samples_size: &mut samples_size,
-                samples_modified: &mut samples_modified,
-                inline_modified_paths: &mut inline_modified_paths,
-                path_compat_stats: &mut path_compat_stats,
-                content_replacer: &content_replacer,
-                content_regex_replacer: &content_regex_replacer,
-            };
-            if process_pending_inline_data_line(&line, &mut pending_inline_ctx)? {
-                continue;
-            }
-            if line.starts_with(b"M ")
-                && {
-                    let mut ctx = CommitMPrecheckCtx {
+                if in_blob {
+                    let mut ctx = BlobPayloadCtx {
                         opts,
-                        commit_buf: &mut commit_buf,
-                        commit_has_changes: &mut commit_has_changes,
-                        pending_inline: &mut pending_inline,
-                        oversize_marks: &oversize_marks,
+                        filt_file: &mut filt_file,
+                        fi_in_opt: &mut fi_in_opt,
+                        content_replacer: &content_replacer,
+                        content_regex_replacer: &content_regex_replacer,
+                        in_blob: &mut in_blob,
+                        blob_buf: &mut blob_buf,
+                        last_blob_mark: &mut last_blob_mark,
+                        last_blob_orig_sha: &mut last_blob_orig_sha,
+                        oversize_marks: &mut oversize_marks,
                         oversize_shas: &mut oversize_shas,
-                        suppressed_marks_by_size: &suppressed_marks_by_size,
-                        suppressed_marks_by_sha: &suppressed_marks_by_sha,
+                        suppressed_marks_by_size: &mut suppressed_marks_by_size,
+                        suppressed_marks_by_sha: &mut suppressed_marks_by_sha,
                         suppressed_shas_by_size: &mut suppressed_shas_by_size,
                         suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
-                        modified_marks: &modified_marks,
-                        samples_size: &mut samples_size,
-                        samples_sha: &mut samples_sha,
-                        samples_modified: &mut samples_modified,
-                        path_compat_stats: &mut path_compat_stats,
+                        modified_marks: &mut modified_marks,
+                        emitted_marks: &mut emitted_marks,
+                        import_broken: &mut import_broken,
                         strip_sha_lookup: &strip_sha_lookup,
-                        blob_size_tracker: &mut blob_size_tracker,
                     };
-                    process_commit_m_line_precheck(&line, &mut ctx)?
-                }
-            {
-                continue;
-            }
-
-            let processed_line = if in_commit {
-                rewrite_commit_identity_line(
-                    &line,
-                    opts,
-                    author_rewriter.as_ref(),
-                    committer_rewriter.as_ref(),
-                    email_rewriter.as_ref(),
-                    mailmap_rewriter.as_ref(),
-                )
-            } else {
-                line.clone()
-            };
-
-            let short_mapper = short_hash_mapper.as_ref();
-            let mut path_events = Vec::new();
-            match crate::commit::process_commit_line(
-                &processed_line,
-                opts,
-                &mut fe_out,
-                orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                &mut filt_file as &mut dyn Write,
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    Some(fi_in)
-                } else {
-                    None
-                },
-                &replacer,
-                msg_regex_replacer.as_ref(),
-                short_mapper,
-                &mut commit_buf,
-                &mut commit_has_changes,
-                &mut commit_mark,
-                &mut first_parent_mark,
-                &mut commit_original_oid,
-                &mut parent_count,
-                &mut commit_pairs,
-                &mut import_broken,
-                &mut parent_lines,
-                &mut alias_map,
-                &emitted_marks,
-                &mut path_events,
-            )? {
-                crate::commit::CommitAction::Consumed => {
-                    for event in path_events {
-                        record_path_compat_event(&mut path_compat_stats, event);
-                    }
+                    process_blob_data_payload(payload, &mut ctx)?;
                     continue;
-                }
-                crate::commit::CommitAction::Ended => {
-                    for event in path_events {
-                        record_path_compat_event(&mut path_compat_stats, event);
-                    }
-                    if let Some(m) = commit_mark {
-                        emitted_marks.insert(m);
-                        if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
-                            short_hash_mapper.as_mut(),
-                            fi_in_opt.as_mut(),
-                            fi_out_opt.as_mut(),
-                        ) {
-                            if let Some((old, Some(mark))) = commit_pairs.last() {
-                                if *mark == m {
-                                    if let Some(new_id) = resolve_mark_oid(fi_in, fi_out, *mark)? {
-                                        mapper.update_mapping(old, &new_id);
-                                    }
-                                }
+                } else {
+                    // Not a blob payload (should be rare here); forward as-is
+                    filt_file.write_all(&line)?;
+                    if let Some(ref mut fi_in) = fi_in_opt {
+                        if let Err(e) = fi_in.write_all(&line) {
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                import_broken = true;
+                                break;
+                            } else {
+                                return Err(e.into());
                             }
                         }
                     }
-                    in_commit = false;
+                    filt_file.write_all(&payload)?;
+                    if let Some(ref mut fi_in) = fi_in_opt {
+                        if let Err(e) = fi_in.write_all(&payload) {
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                import_broken = true;
+                                break;
+                            } else {
+                                return Err(e.into());
+                            }
+                        }
+                    }
+                    continue;
                 }
+                // Do not consume or inject an extra newline; next header line follows in stream.
             }
-        }
 
-        // Generic data blocks (e.g., blob): forward exact payload bytes
-        if line.starts_with(b"data ") {
-            let n = parse_data_size_header(&line)?;
-            let mut payload = vec![0u8; n];
-            fe_out.read_exact(&mut payload)?;
-            // Always mirror to original (when enabled)
-            if let Some(ref mut f) = orig_file_opt {
-                f.write_all(&payload)?;
-            }
-            if in_blob {
-                let mut ctx = BlobPayloadCtx {
-                    opts,
-                    filt_file: &mut filt_file,
-                    fi_in_opt: &mut fi_in_opt,
-                    content_replacer: &content_replacer,
-                    content_regex_replacer: &content_regex_replacer,
-                    in_blob: &mut in_blob,
-                    blob_buf: &mut blob_buf,
-                    last_blob_mark: &mut last_blob_mark,
-                    last_blob_orig_sha: &mut last_blob_orig_sha,
-                    oversize_marks: &mut oversize_marks,
-                    oversize_shas: &mut oversize_shas,
-                    suppressed_marks_by_size: &mut suppressed_marks_by_size,
-                    suppressed_marks_by_sha: &mut suppressed_marks_by_sha,
-                    suppressed_shas_by_size: &mut suppressed_shas_by_size,
-                    suppressed_shas_by_sha: &mut suppressed_shas_by_sha,
-                    modified_marks: &mut modified_marks,
-                    emitted_marks: &mut emitted_marks,
-                    import_broken: &mut import_broken,
-                    strip_sha_lookup: &strip_sha_lookup,
-                };
-                process_blob_data_payload(payload, &mut ctx)?;
-                continue;
-            } else {
-                // Not a blob payload (should be rare here); forward as-is
+            // Handle end-of-stream marker; flush buffered lightweight tag resets before 'done'
+            if line == b"done\n" {
+                crate::finalize::flush_lightweight_tag_resets(
+                    &mut buffered_tag_resets,
+                    &annotated_tag_refs,
+                    &mut filt_file as &mut dyn Write,
+                    fi_in_opt.as_mut().map(|w| w as &mut dyn Write),
+                    &mut import_broken,
+                )?;
+                // Forward 'done' after flushing
                 filt_file.write_all(&line)?;
                 if let Some(ref mut fi_in) = fi_in_opt {
                     if let Err(e) = fi_in.write_all(&line) {
@@ -1751,32 +1800,72 @@ impl<'a> StreamProcessor<'a> {
                         }
                     }
                 }
-                filt_file.write_all(&payload)?;
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    if let Err(e) = fi_in.write_all(&payload) {
-                        if e.kind() == io::ErrorKind::BrokenPipe {
-                            import_broken = true;
-                            break;
-                        } else {
-                            return Err(e.into());
-                        }
-                    }
-                }
                 continue;
             }
-            // Do not consume or inject an extra newline; next header line follows in stream.
-        }
 
-        // Handle end-of-stream marker; flush buffered lightweight tag resets before 'done'
-        if line == b"done\n" {
-            crate::finalize::flush_lightweight_tag_resets(
-                &mut buffered_tag_resets,
-                &annotated_tag_refs,
-                &mut filt_file as &mut dyn Write,
-                fi_in_opt.as_mut().map(|w| w as &mut dyn Write),
-                &mut import_broken,
-            )?;
-            // Forward 'done' after flushing
+            // Lightweight tag renames: reset refs/tags/<name>
+            if crate::tag::process_reset_header(
+                &line,
+                opts,
+                &mut ref_renames,
+                &mut pending_tag_reset,
+            ) {
+                continue;
+            }
+
+            // Branch reset renames: reset refs/heads/<name>
+            if line.starts_with(b"reset ") {
+                let mut name = &line[b"reset ".len()..];
+                if let Some(&last) = name.last() {
+                    if last == b'\n' {
+                        name = &name[..name.len() - 1];
+                    }
+                }
+                if name.starts_with(b"refs/heads/") {
+                    let mut out = line.clone();
+                    let mut final_ref = name.to_vec();
+                    if let Some((ref old, ref new_)) = opts.branch_rename {
+                        let bname = &name[b"refs/heads/".len()..];
+                        if bname.starts_with(&old[..]) {
+                            let mut rebuilt = Vec::with_capacity(
+                                7 + b"refs/heads/".len()
+                                    + new_.len()
+                                    + (bname.len() - old.len())
+                                    + 1,
+                            );
+                            rebuilt.extend_from_slice(b"reset ");
+                            rebuilt.extend_from_slice(b"refs/heads/");
+                            rebuilt.extend_from_slice(new_);
+                            rebuilt.extend_from_slice(&bname[old.len()..]);
+                            rebuilt.push(b'\n');
+                            let new_full =
+                                [b"refs/heads/".as_ref(), new_, &bname[old.len()..]].concat();
+                            ref_renames.insert((name.to_vec(), new_full.clone()));
+                            final_ref = new_full;
+                            out = rebuilt;
+                        }
+                    }
+                    updated_branch_refs.insert(final_ref.clone());
+                    pending_branch_reset = Some(final_ref);
+                    // forward
+                    filt_file.write_all(&out)?;
+                    if let Some(ref mut fi_in) = fi_in_opt {
+                        if let Err(e) = fi_in.write_all(&out) {
+                            if e.kind() == io::ErrorKind::BrokenPipe {
+                                import_broken = true;
+                            } else {
+                                return Err(e.into());
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Forward non-message lines as-is to filtered + import (drop stray blanks)
+            if line == b"\n" {
+                continue;
+            }
             filt_file.write_all(&line)?;
             if let Some(ref mut fi_in) = fi_in_opt {
                 if let Err(e) = fi_in.write_all(&line) {
@@ -1788,112 +1877,43 @@ impl<'a> StreamProcessor<'a> {
                     }
                 }
             }
-            continue;
         }
 
-        // Lightweight tag renames: reset refs/tags/<name>
-        if crate::tag::process_reset_header(&line, opts, &mut ref_renames, &mut pending_tag_reset) {
-            continue;
-        }
+        drop(fi_out_opt);
+        self.finalize_stream(
+            opts,
+            &mut filt_file,
+            &mut orig_file_opt,
+            &mut fi_in_opt,
+            &mut fe,
+            &mut fi,
+            import_broken,
+            ref_renames,
+            commit_pairs,
+            buffered_tag_resets,
+            annotated_tag_refs,
+            updated_branch_refs,
+            branch_reset_targets,
+            suppressed_shas_by_size,
+            suppressed_marks_by_size,
+            suppressed_shas_by_sha,
+            suppressed_marks_by_sha,
+            modified_marks,
+            inline_modified_paths,
+            total_commits,
+            total_blobs,
+            samples_size,
+            samples_sha,
+            samples_modified,
+            path_compat_stats,
+            &blob_size_tracker,
+        )?;
 
-        // Branch reset renames: reset refs/heads/<name>
-        if line.starts_with(b"reset ") {
-            let mut name = &line[b"reset ".len()..];
-            if let Some(&last) = name.last() {
-                if last == b'\n' {
-                    name = &name[..name.len() - 1];
-                }
-            }
-            if name.starts_with(b"refs/heads/") {
-                let mut out = line.clone();
-                let mut final_ref = name.to_vec();
-                if let Some((ref old, ref new_)) = opts.branch_rename {
-                    let bname = &name[b"refs/heads/".len()..];
-                    if bname.starts_with(&old[..]) {
-                        let mut rebuilt = Vec::with_capacity(
-                            7 + b"refs/heads/".len() + new_.len() + (bname.len() - old.len()) + 1,
-                        );
-                        rebuilt.extend_from_slice(b"reset ");
-                        rebuilt.extend_from_slice(b"refs/heads/");
-                        rebuilt.extend_from_slice(new_);
-                        rebuilt.extend_from_slice(&bname[old.len()..]);
-                        rebuilt.push(b'\n');
-                        let new_full =
-                            [b"refs/heads/".as_ref(), new_, &bname[old.len()..]].concat();
-                        ref_renames.insert((name.to_vec(), new_full.clone()));
-                        final_ref = new_full;
-                        out = rebuilt;
-                    }
-                }
-                updated_branch_refs.insert(final_ref.clone());
-                pending_branch_reset = Some(final_ref);
-                // forward
-                filt_file.write_all(&out)?;
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    if let Err(e) = fi_in.write_all(&out) {
-                        if e.kind() == io::ErrorKind::BrokenPipe {
-                            import_broken = true;
-                        } else {
-                            return Err(e.into());
-                        }
-                    }
-                }
-                continue;
-            }
+        // Wait for child processes to finish
+        let _ = fe.wait()?;
+        if let Some(mut child) = fi {
+            let _ = child.wait()?;
         }
-
-        // Forward non-message lines as-is to filtered + import (drop stray blanks)
-        if line == b"\n" {
-            continue;
-        }
-        filt_file.write_all(&line)?;
-        if let Some(ref mut fi_in) = fi_in_opt {
-            if let Err(e) = fi_in.write_all(&line) {
-                if e.kind() == io::ErrorKind::BrokenPipe {
-                    import_broken = true;
-                    break;
-                } else {
-                    return Err(e.into());
-                }
-            }
-        }
-    }
-
-    drop(fi_out_opt);
-    self.finalize_stream(
-        opts,
-        &mut filt_file,
-        &mut orig_file_opt,
-        &mut fi_in_opt,
-        &mut fe,
-        &mut fi,
-        import_broken,
-        ref_renames,
-        commit_pairs,
-        buffered_tag_resets,
-        annotated_tag_refs,
-        updated_branch_refs,
-        branch_reset_targets,
-        suppressed_shas_by_size,
-        suppressed_marks_by_size,
-        suppressed_shas_by_sha,
-        suppressed_marks_by_sha,
-        modified_marks,
-        inline_modified_paths,
-        total_commits,
-        total_blobs,
-        samples_size,
-        samples_sha,
-        samples_modified,
-        path_compat_stats,
-        &blob_size_tracker,
-    )?;
-
-    // Wait for child processes to finish
-    let _ = fe.wait()?;
-    if let Some(mut child) = fi {
-        let _ = child.wait()?;
-    }
 
         Ok(())
     }
