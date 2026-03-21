@@ -390,17 +390,7 @@ fn scan_blob_candidates(
     let detections: Vec<Detection> = blob_payloads
         .into_par_iter()
         .flat_map(|(oid, path, payload)| {
-            let mut local_detections = Vec::new();
-            let mut local_dedup = HashSet::new();
-            scan_single_blob(
-                &payload,
-                &oid,
-                path.as_deref(),
-                patterns,
-                &mut local_dedup,
-                &mut local_detections,
-            );
-            local_detections
+            collect_blob_detections(&payload, &oid, path.as_deref(), patterns)
         })
         .collect();
 
@@ -416,14 +406,13 @@ fn scan_blob_candidates(
     Ok(unique_detections)
 }
 
-fn scan_single_blob(
+fn collect_blob_detections(
     payload: &[u8],
     oid: &str,
     path: Option<&str>,
     patterns: &[SecretPattern],
-    dedup: &mut HashSet<String>,
-    detections: &mut Vec<Detection>,
-) {
+) -> Vec<Detection> {
+    let mut detections = Vec::new();
     for pattern in patterns {
         for captures in pattern.regex.captures_iter(payload) {
             let matched = if let Some(group_idx) = pattern.capture_group {
@@ -438,11 +427,8 @@ fn scan_single_blob(
             let Some(value) = normalize_detected_value(matched.as_bytes()) else {
                 continue;
             };
-            if !dedup.insert(value.clone()) {
-                continue;
-            }
             if detections.len() >= MAX_DETECTED_VALUES {
-                continue;
+                break;
             }
 
             detections.push(Detection {
@@ -453,6 +439,7 @@ fn scan_single_blob(
             });
         }
     }
+    detections
 }
 
 fn normalize_detected_value(bytes: &[u8]) -> Option<String> {
