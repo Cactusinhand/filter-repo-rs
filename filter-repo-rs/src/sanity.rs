@@ -112,11 +112,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::time::Duration;
 use std::time::Instant;
-#[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use colored::*;
 
@@ -127,6 +123,11 @@ mod sensitive;
 
 use already_ran::check_already_ran_detection;
 pub use already_ran::{AlreadyRanChecker, AlreadyRanState};
+pub use debug::{DebugOutputManager, GitCommandError, GitCommandExecutor};
+pub use sensitive::SensitiveModeValidator;
+
+#[cfg(test)]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use checks::{
     build_branch_mappings, check_case_insensitive_conflicts, check_git_dir_structure_with_context,
@@ -134,8 +135,6 @@ use checks::{
     check_replace_refs_in_loose_objects_with_context, check_unicode_normalization_conflicts,
     check_unpushed_changes_with_context,
 };
-pub use debug::{DebugOutputManager, GitCommandError, GitCommandExecutor};
-pub use sensitive::SensitiveModeValidator;
 
 fn highlight_flag(s: &str) -> ColoredString {
     s.yellow().bold()
