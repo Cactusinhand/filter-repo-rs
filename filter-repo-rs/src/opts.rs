@@ -571,9 +571,13 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--path" => {
                 let raw = require_arg_value(&mut it, "--path requires value")?;
-                let mut norm = normalize_cli_path_str(&raw, /*allow_empty=*/ false).map_err(|msg| {
-                    FilterRepoError::invalid_options(format!("invalid --path '{}': {}", raw, msg))
-                })?;
+                let mut norm =
+                    normalize_cli_path_str(&raw, /*allow_empty=*/ false).map_err(|msg| {
+                        FilterRepoError::invalid_options(format!(
+                            "invalid --path '{}': {}",
+                            raw, msg
+                        ))
+                    })?;
                 opts.paths.push(std::mem::take(&mut norm));
             }
             "--invert-paths" => {
@@ -592,7 +596,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             "--path-regex" => {
                 let p = require_arg_value(&mut it, "--path-regex requires value")?;
                 let re = Regex::new(&p).map_err(|err| {
-                    FilterRepoError::invalid_options(format!("invalid --path-regex '{}': {}", p, err))
+                    FilterRepoError::invalid_options(format!(
+                        "invalid --path-regex '{}': {}",
+                        p, err
+                    ))
                 })?;
                 opts.path_regexes.push(re);
             }
@@ -612,7 +619,10 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                             .map(|new_n| (old_n, new_n))
                     })
                     .map_err(|m| {
-                        FilterRepoError::invalid_options(format!("invalid --path-rename '{}': {}", v, m))
+                        FilterRepoError::invalid_options(format!(
+                            "invalid --path-rename '{}': {}",
+                            v, m
+                        ))
                     })?;
                 opts.path_renames.push(rename);
             }
@@ -1085,13 +1095,15 @@ fn parse_max_blob_size(s: &str) -> Result<usize, ()> {
 }
 
 fn parse_u64(s: &str, flag: &str) -> Result<u64, FilterRepoError> {
-    parse_integer_allowing_underscores::<u64>(s)
-        .map_err(|_| FilterRepoError::invalid_options(format!("{} expects an integer number", flag)))
+    parse_integer_allowing_underscores::<u64>(s).map_err(|_| {
+        FilterRepoError::invalid_options(format!("{} expects an integer number", flag))
+    })
 }
 
 fn parse_usize(s: &str, flag: &str) -> Result<usize, FilterRepoError> {
-    parse_integer_allowing_underscores::<usize>(s)
-        .map_err(|_| FilterRepoError::invalid_options(format!("{} expects an integer number", flag)))
+    parse_integer_allowing_underscores::<usize>(s).map_err(|_| {
+        FilterRepoError::invalid_options(format!("{} expects an integer number", flag))
+    })
 }
 
 fn parse_duration(s: &str) -> Result<i64, FilterRepoError> {
@@ -1115,10 +1127,7 @@ fn parse_duration(s: &str) -> Result<i64, FilterRepoError> {
         }
 
         let value = parse_integer_allowing_underscores::<i64>(parts[i]).map_err(|_| {
-            FilterRepoError::invalid_options(format!(
-                "--date-shift: invalid number '{}'",
-                parts[i]
-            ))
+            FilterRepoError::invalid_options(format!("--date-shift: invalid number '{}'", parts[i]))
         })?;
 
         let unit = parts[i + 1].to_lowercase();

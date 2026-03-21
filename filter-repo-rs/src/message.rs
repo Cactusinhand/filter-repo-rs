@@ -459,6 +459,7 @@ pub mod blob_regex {
             }
         }
 
+        #[cfg(test)]
         pub fn apply_regex(&self, data: Vec<u8>) -> Vec<u8> {
             let mut cur = data;
             for (re, rep, has_dollar) in &self.rules {
@@ -573,27 +574,6 @@ pub mod msg_regex {
                 }
             }
             cur
-        }
-
-        pub fn apply_regex_with_change(&self, data: Vec<u8>) -> (Vec<u8>, bool) {
-            let mut cur = data;
-            let mut changed = false;
-            for (re, rep, has_dollar) in &self.rules {
-                if re.is_match(&cur) {
-                    changed = true;
-                }
-                if *has_dollar {
-                    let tpl = rep.clone();
-                    cur = re
-                        .replace_all(&cur, |caps: &Captures| expand_bytes_template(&tpl, caps))
-                        .into_owned();
-                } else {
-                    cur = re
-                        .replace_all(&cur, regex::bytes::NoExpand(rep))
-                        .into_owned();
-                }
-            }
-            (cur, changed)
         }
     }
 }
