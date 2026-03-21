@@ -3,6 +3,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use rayon::prelude::*;
 use regex::bytes::Regex;
 
 use crate::Options;
@@ -345,8 +346,8 @@ fn scan_blob_candidates(
         .take()
         .ok_or_else(|| io::Error::other("failed to read git cat-file stdout"))?;
     let mut reader = BufReader::new(stdout);
-    let mut dedup = HashSet::new();
-    let mut detections = Vec::new();
+
+    let mut blob_payloads: Vec<(String, Option<String>, Vec<u8>)> = Vec::new();
 
     for candidate in candidates {
         let mut header = String::new();
@@ -376,14 +377,7 @@ fn scan_blob_candidates(
             continue;
         }
 
-        collect_blob_detections(
-            &payload,
-            oid,
-            candidate.path.as_deref(),
-            patterns,
-            &mut dedup,
-            &mut detections,
-        );
+        blob_payloads.push((oid.to_string(), candidate.path.clone(), payload));
     }
 
     let status = child.wait()?;
@@ -393,11 +387,36 @@ fn scan_blob_candidates(
         ));
     }
 
-    detections.sort_by(|a, b| a.value.cmp(&b.value));
-    Ok(detections)
+    let detections: Vec<Detection> = blob_payloads
+        .into_par_iter()
+        .flat_map(|(oid, path, payload)| {
+            let mut local_detections = Vec::new();
+            let mut local_dedup = HashSet::new();
+            scan_single_blob(
+                &payload,
+                &oid,
+                path.as_deref(),
+                patterns,
+                &mut local_dedup,
+                &mut local_detections,
+            );
+            local_detections
+        })
+        .collect();
+
+    let mut dedup = HashSet::new();
+    let mut unique_detections = Vec::new();
+    for detection in detections {
+        if dedup.insert(detection.value.clone()) {
+            unique_detections.push(detection);
+        }
+    }
+
+    unique_detections.sort_by(|a, b| a.value.cmp(&b.value));
+    Ok(unique_detections)
 }
 
-fn collect_blob_detections(
+fn scan_single_blob(
     payload: &[u8],
     oid: &str,
     path: Option<&str>,
