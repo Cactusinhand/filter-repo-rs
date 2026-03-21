@@ -1,14 +1,18 @@
 pub mod analysis;
 mod backup;
-mod commit;
-mod detect;
+#[doc(hidden)]
+pub mod commit;
+#[doc(hidden)]
+pub mod detect;
 pub mod error;
-mod filechange;
+#[doc(hidden)]
+pub mod filechange;
 mod finalize;
 pub mod git_config;
 pub mod gitutil;
 mod limits;
-mod message;
+#[doc(hidden)]
+pub mod message;
 mod migrate;
 pub mod opts;
 pub mod pathutil;

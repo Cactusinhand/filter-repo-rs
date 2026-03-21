@@ -35,11 +35,7 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
             None => Utc::now(),
         },
     };
-    let formatted = format!(
-        "{}-{:09}",
-        datetime.format("%Y%m%d-%H%M%S"),
-        nanos
-    );
+    let formatted = format!("{}-{:09}", datetime.format("%Y%m%d-%H%M%S"), nanos);
     let bundle_name = format!("backup-{formatted}.bundle");
 
     let bundle_path = match &opts.backup_path {

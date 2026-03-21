@@ -13,10 +13,11 @@ const REDACTION: &str = "***REMOVED***";
 const MAX_SCAN_BLOB_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DETECTED_VALUES: usize = 500;
 
-struct SecretPattern {
-    name: String,
-    regex: Regex,
-    capture_group: Option<usize>,
+#[doc(hidden)]
+pub struct SecretPattern {
+    pub name: String,
+    pub regex: Regex,
+    pub capture_group: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,7 +27,7 @@ struct BlobCandidate {
 }
 
 #[derive(Debug, Clone)]
-struct Detection {
+pub struct Detection {
     value: String,
     pattern: String,
     oid: String,
@@ -406,7 +407,7 @@ fn scan_blob_candidates(
     Ok(unique_detections)
 }
 
-fn collect_blob_detections(
+pub fn collect_blob_detections(
     payload: &[u8],
     oid: &str,
     path: Option<&str>,

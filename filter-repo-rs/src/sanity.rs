@@ -127,14 +127,14 @@ pub use debug::{DebugOutputManager, GitCommandError, GitCommandExecutor};
 pub use sensitive::SensitiveModeValidator;
 
 #[cfg(test)]
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(test)]
 use checks::{
     build_branch_mappings, check_case_insensitive_conflicts, check_git_dir_structure_with_context,
     check_reference_conflicts_with_context, check_reflog_entries_with_context,
     check_replace_refs_in_loose_objects_with_context, check_unicode_normalization_conflicts,
     check_unpushed_changes_with_context,
 };
+#[cfg(test)]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn highlight_flag(s: &str) -> ColoredString {
     s.yellow().bold()

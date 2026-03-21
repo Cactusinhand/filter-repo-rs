@@ -1213,13 +1213,16 @@ impl<'a> StreamProcessor<'a> {
                 };
                 Some(ReportData {
                     summary: Summary {
-                        blobs_stripped_by_size: tracker.suppressed_shas_by_size
+                        blobs_stripped_by_size: tracker
+                            .suppressed_shas_by_size
                             .len()
                             .max(tracker.suppressed_marks_by_size.len()),
-                        blobs_stripped_by_sha: tracker.suppressed_shas_by_sha
+                        blobs_stripped_by_sha: tracker
+                            .suppressed_shas_by_sha
                             .len()
                             .max(tracker.suppressed_marks_by_sha.len()),
-                        blobs_modified: tracker.modified_marks.len() + samples.inline_modified_paths.len(),
+                        blobs_modified: tracker.modified_marks.len()
+                            + samples.inline_modified_paths.len(),
                     },
                     statistics: Statistics {
                         commits_processed: total_commits,
@@ -1227,15 +1230,18 @@ impl<'a> StreamProcessor<'a> {
                         refs_rewritten: total_refs_rewritten,
                     },
                     samples: Samples {
-                        by_size: samples.size
+                        by_size: samples
+                            .size
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),
-                        by_sha: samples.sha
+                        by_sha: samples
+                            .sha
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),
-                        modified: samples.modified
+                        modified: samples
+                            .modified
                             .into_iter()
                             .map(|p| String::from_utf8_lossy(&p).into_owned())
                             .collect(),

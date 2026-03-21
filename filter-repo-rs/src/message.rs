@@ -169,7 +169,6 @@ impl MessageReplacer {
 
         Ok(changed)
     }
-
 }
 
 const MIN_SHORT_HASH_LEN: usize = 7;
