@@ -113,8 +113,6 @@ impl MessageReplacer {
     }
 
     pub fn apply(&self, data: Vec<u8>) -> Vec<u8> {
-        // Keep replace-text behavior deterministic and git-filter-repo-compatible:
-        // apply rules once, in file order.
         let mut result = data;
         for (from, to) in &self.pairs {
             result = replace_all_bytes(&result, from, to);
@@ -632,6 +630,19 @@ mod tests {
             out, expected,
             "pattern split across read boundary should still be replaced"
         );
+    }
+
+    #[test]
+    fn message_replacer_apply_preserves_rule_order_cascades() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let path = dir.path().join("rules-order.txt");
+        write_file(&path, b"a==>b\nb==>c\nunused==>x\n");
+
+        let replacer = MessageReplacer::from_file(&path).expect("parse rules");
+        assert!(replacer.supports_streaming());
+
+        let out = replacer.apply(b"a".to_vec());
+        assert_eq!(out, b"c".to_vec());
     }
 
     #[test]

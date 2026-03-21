@@ -628,7 +628,7 @@ use regex::Regex as RegexStr;
 
 pub struct MailmapRewriter {
     parser: RegexStr,
-    old_email_patterns: Vec<RegexStr>,
+    old_emails: Vec<String>,
     new_names: Vec<String>,
     new_emails: Vec<String>,
 }
@@ -645,7 +645,7 @@ impl MailmapRewriter {
             RegexStr::new(r"^(?:([^<]*?)\s+)?<([^>]+)>\s+(?:<([^>]+)>|([^<]*?)\s+<([^>]+)>)")
                 .unwrap();
 
-        let mut old_email_patterns = Vec::new();
+        let mut old_emails = Vec::new();
         let mut new_names = Vec::new();
         let mut new_emails = Vec::new();
 
@@ -675,19 +675,16 @@ impl MailmapRewriter {
                 };
 
                 if let Some(old_email_str) = old_email {
-                    let escaped = regex::escape(old_email_str);
-                    if let Ok(re) = RegexStr::new(&format!("^{}$", escaped)) {
-                        old_email_patterns.push(re);
-                        new_names.push(new_name.unwrap_or_default());
-                        new_emails.push(new_email.unwrap_or_default());
-                    }
+                    old_emails.push(old_email_str.to_string());
+                    new_names.push(new_name.unwrap_or_default());
+                    new_emails.push(new_email.unwrap_or_default());
                 }
             }
         }
 
         Ok(Self {
             parser,
-            old_email_patterns,
+            old_emails,
             new_names,
             new_emails,
         })
@@ -716,8 +713,8 @@ impl MailmapRewriter {
                 let old_email = &identity[email_start..close_pos];
                 let suffix = &identity[close_pos + 1..];
 
-                for (i, pattern) in self.old_email_patterns.iter().enumerate() {
-                    if pattern.is_match(old_email) {
+                for (i, old_email_pattern) in self.old_emails.iter().enumerate() {
+                    if old_email == old_email_pattern.as_str() {
                         let mut result = String::new();
                         result.push_str(&line_str[..header_len]);
 
@@ -754,7 +751,7 @@ impl MailmapRewriter {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.old_email_patterns.is_empty()
+        self.old_emails.is_empty()
     }
 }
 
@@ -762,11 +759,7 @@ impl Clone for MailmapRewriter {
     fn clone(&self) -> Self {
         Self {
             parser: RegexStr::new(self.parser.as_str()).unwrap(),
-            old_email_patterns: self
-                .old_email_patterns
-                .iter()
-                .map(|r| RegexStr::new(r.as_str()).unwrap())
-                .collect(),
+            old_emails: self.old_emails.clone(),
             new_names: self.new_names.clone(),
             new_emails: self.new_emails.clone(),
         }
