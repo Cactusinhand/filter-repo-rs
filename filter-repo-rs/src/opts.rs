@@ -403,118 +403,118 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--analyze-top" => {
                 let v = require_arg_value(&mut it, "--analyze-top requires COUNT")?;
-                let n = parse_usize(&v, "--analyze-top");
+                let n = parse_usize(&v, "--analyze-top")?;
                 let top = n.max(1);
                 opts.analyze.top = top;
                 overrides.top = Some(top);
             }
             "--analyze-total-warn" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-total-warn", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-total-warn", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-total-warn",
                     "analyze.thresholds.warn_total_bytes",
                 );
                 let v = require_arg_value(&mut it, "--analyze-total-warn requires BYTES")?;
-                let parsed = parse_u64(&v, "--analyze-total-warn");
+                let parsed = parse_u64(&v, "--analyze-total-warn")?;
                 opts.analyze.thresholds.warn_total_bytes = parsed;
                 overrides.thresholds.warn_total_bytes = Some(parsed);
             }
             "--analyze-total-critical" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-total-critical", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-total-critical", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-total-critical",
                     "analyze.thresholds.crit_total_bytes",
                 );
                 let v = require_arg_value(&mut it, "--analyze-total-critical requires BYTES")?;
-                let parsed = parse_u64(&v, "--analyze-total-critical");
+                let parsed = parse_u64(&v, "--analyze-total-critical")?;
                 opts.analyze.thresholds.crit_total_bytes = parsed;
                 overrides.thresholds.crit_total_bytes = Some(parsed);
             }
             "--analyze-large-blob" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-large-blob", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-large-blob", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-large-blob",
                     "analyze.thresholds.warn_blob_bytes",
                 );
                 let v = require_arg_value(&mut it, "--analyze-large-blob requires BYTES")?;
-                let parsed = parse_u64(&v, "--analyze-large-blob");
+                let parsed = parse_u64(&v, "--analyze-large-blob")?;
                 opts.analyze.thresholds.warn_blob_bytes = parsed;
                 overrides.thresholds.warn_blob_bytes = Some(parsed);
             }
             "--analyze-ref-warn" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-ref-warn", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-ref-warn", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-ref-warn",
                     "analyze.thresholds.warn_ref_count",
                 );
                 let v = require_arg_value(&mut it, "--analyze-ref-warn requires COUNT")?;
-                let parsed = parse_usize(&v, "--analyze-ref-warn");
+                let parsed = parse_usize(&v, "--analyze-ref-warn")?;
                 opts.analyze.thresholds.warn_ref_count = parsed;
                 overrides.thresholds.warn_ref_count = Some(parsed);
             }
             "--analyze-object-warn" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-object-warn", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-object-warn", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-object-warn",
                     "analyze.thresholds.warn_object_count",
                 );
                 let v = require_arg_value(&mut it, "--analyze-object-warn requires COUNT")?;
-                let parsed = parse_usize(&v, "--analyze-object-warn");
+                let parsed = parse_usize(&v, "--analyze-object-warn")?;
                 opts.analyze.thresholds.warn_object_count = parsed;
                 overrides.thresholds.warn_object_count = Some(parsed);
             }
             "--analyze-tree-entries" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-tree-entries", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-tree-entries", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-tree-entries",
                     "analyze.thresholds.warn_tree_entries",
                 );
                 let v = require_arg_value(&mut it, "--analyze-tree-entries requires COUNT")?;
-                let parsed = parse_usize(&v, "--analyze-tree-entries");
+                let parsed = parse_usize(&v, "--analyze-tree-entries")?;
                 opts.analyze.thresholds.warn_tree_entries = parsed;
                 overrides.thresholds.warn_tree_entries = Some(parsed);
             }
             "--analyze-path-length" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-path-length", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-path-length", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-path-length",
                     "analyze.thresholds.warn_path_length",
                 );
                 let v = require_arg_value(&mut it, "--analyze-path-length requires LENGTH")?;
-                let parsed = parse_usize(&v, "--analyze-path-length");
+                let parsed = parse_usize(&v, "--analyze-path-length")?;
                 opts.analyze.thresholds.warn_path_length = parsed;
                 overrides.thresholds.warn_path_length = Some(parsed);
             }
             "--analyze-duplicate-paths" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-duplicate-paths", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-duplicate-paths", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-duplicate-paths",
                     "analyze.thresholds.warn_duplicate_paths",
                 );
                 let v = require_arg_value(&mut it, "--analyze-duplicate-paths requires COUNT")?;
-                let parsed = parse_usize(&v, "--analyze-duplicate-paths");
+                let parsed = parse_usize(&v, "--analyze-duplicate-paths")?;
                 opts.analyze.thresholds.warn_duplicate_paths = parsed;
                 overrides.thresholds.warn_duplicate_paths = Some(parsed);
             }
             "--analyze-commit-msg-warn" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-commit-msg-warn", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-commit-msg-warn", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-commit-msg-warn",
                     "analyze.thresholds.warn_commit_msg_bytes",
                 );
                 let v = require_arg_value(&mut it, "--analyze-commit-msg-warn requires BYTES")?;
-                let parsed = parse_usize(&v, "--analyze-commit-msg-warn");
+                let parsed = parse_usize(&v, "--analyze-commit-msg-warn")?;
                 opts.analyze.thresholds.warn_commit_msg_bytes = parsed;
                 overrides.thresholds.warn_commit_msg_bytes = Some(parsed);
             }
             "--analyze-max-parents-warn" => {
-                enforce_legacy_analyze_flag_allowed("--analyze-max-parents-warn", opts.debug_mode);
+                enforce_legacy_analyze_flag_allowed("--analyze-max-parents-warn", opts.debug_mode)?;
                 warn_legacy_analyze_threshold(
                     "--analyze-max-parents-warn",
                     "analyze.thresholds.warn_max_parents",
                 );
                 let v = require_arg_value(&mut it, "--analyze-max-parents-warn requires COUNT")?;
-                let parsed = parse_usize(&v, "--analyze-max-parents-warn");
+                let parsed = parse_usize(&v, "--analyze-max-parents-warn")?;
                 opts.analyze.thresholds.warn_max_parents = parsed;
                 overrides.thresholds.warn_max_parents = Some(parsed);
             }
@@ -536,13 +536,13 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 opts.partial = true;
             }
             "--date-order" => {
-                guard_debug("--date-order", opts.debug_mode);
+                guard_debug("--date-order", opts.debug_mode)?;
                 opts.date_order = true;
             }
             "--no-data" => opts.no_data = true,
             "--quiet" => opts.quiet = true,
             "--no-reset" => {
-                guard_debug("--no-reset", opts.debug_mode);
+                guard_debug("--no-reset", opts.debug_mode)?;
                 opts.reset = false;
             }
             "--replace-message" => {
@@ -571,46 +571,38 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--path" => {
                 let raw = require_arg_value(&mut it, "--path requires value")?;
-                match normalize_cli_path_str(&raw, /*allow_empty=*/ false) {
-                    Ok(mut norm) => {
-                        // For directory prefixes, users often omit trailing '/'; keep as-is.
-                        opts.paths.push(std::mem::take(&mut norm));
-                    }
-                    Err(msg) => {
-                        eprintln!("invalid --path '{}': {}", raw, msg);
-                        std::process::exit(2);
-                    }
-                }
+                let mut norm = normalize_cli_path_str(&raw, /*allow_empty=*/ false).map_err(|msg| {
+                    FilterRepoError::invalid_options(format!("invalid --path '{}': {}", raw, msg))
+                })?;
+                opts.paths.push(std::mem::take(&mut norm));
             }
             "--invert-paths" => {
                 opts.invert_paths = true;
             }
             "--path-glob" => {
                 let raw = require_arg_value(&mut it, "--path-glob requires value")?;
-                match normalize_cli_glob_str(&raw) {
-                    Ok(mut norm) => opts.path_globs.push(std::mem::take(&mut norm)),
-                    Err(msg) => {
-                        eprintln!("invalid --path-glob '{}': {}", raw, msg);
-                        std::process::exit(2);
-                    }
-                }
+                let mut norm = normalize_cli_glob_str(&raw).map_err(|msg| {
+                    FilterRepoError::invalid_options(format!(
+                        "invalid --path-glob '{}': {}",
+                        raw, msg
+                    ))
+                })?;
+                opts.path_globs.push(std::mem::take(&mut norm));
             }
             "--path-regex" => {
                 let p = require_arg_value(&mut it, "--path-regex requires value")?;
-                match Regex::new(&p) {
-                    Ok(re) => opts.path_regexes.push(re),
-                    Err(err) => {
-                        eprintln!("invalid --path-regex '{}': {}", p, err);
-                        std::process::exit(2);
-                    }
-                }
+                let re = Regex::new(&p).map_err(|err| {
+                    FilterRepoError::invalid_options(format!("invalid --path-regex '{}': {}", p, err))
+                })?;
+                opts.path_regexes.push(re);
             }
             "--path-rename" => {
                 let v = require_arg_value(&mut it, "--path-rename requires OLD:NEW")?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
-                    eprintln!("--path-rename expects OLD:NEW");
-                    std::process::exit(2);
+                    return Err(FilterRepoError::invalid_options(
+                        "--path-rename expects OLD:NEW",
+                    ));
                 }
                 let old = parts[0];
                 let new_ = parts[1];
@@ -619,19 +611,19 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                         normalize_cli_path_str(new_, /*allow_empty=*/ true)
                             .map(|new_n| (old_n, new_n))
                     })
-                    .unwrap_or_else(|m| {
-                        eprintln!("invalid --path-rename '{}': {}", v, m);
-                        std::process::exit(2);
-                    });
+                    .map_err(|m| {
+                        FilterRepoError::invalid_options(format!("invalid --path-rename '{}': {}", v, m))
+                    })?;
                 opts.path_renames.push(rename);
             }
             "--subdirectory-filter" => {
                 let dir = require_arg_value(&mut it, "--subdirectory-filter requires DIRECTORY")?;
-                let mut d =
-                    normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
-                        eprintln!("invalid --subdirectory-filter '{}': {}", dir, m);
-                        std::process::exit(2);
-                    });
+                let mut d = normalize_cli_path_str(&dir, /*allow_empty=*/ false).map_err(|m| {
+                    FilterRepoError::invalid_options(format!(
+                        "invalid --subdirectory-filter '{}': {}",
+                        dir, m
+                    ))
+                })?;
                 if !d.ends_with(b"/") {
                     d.push(b'/');
                 }
@@ -641,11 +633,12 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             "--to-subdirectory-filter" => {
                 let dir =
                     require_arg_value(&mut it, "--to-subdirectory-filter requires DIRECTORY")?;
-                let mut d =
-                    normalize_cli_path_str(&dir, /*allow_empty=*/ false).unwrap_or_else(|m| {
-                        eprintln!("invalid --to-subdirectory-filter '{}': {}", dir, m);
-                        std::process::exit(2);
-                    });
+                let mut d = normalize_cli_path_str(&dir, /*allow_empty=*/ false).map_err(|m| {
+                    FilterRepoError::invalid_options(format!(
+                        "invalid --to-subdirectory-filter '{}': {}",
+                        dir, m
+                    ))
+                })?;
                 if !d.ends_with(b"/") {
                     d.push(b'/');
                 }
@@ -658,8 +651,9 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 )?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
-                    eprintln!("--tag-rename expects OLD:NEW");
-                    std::process::exit(2);
+                    return Err(FilterRepoError::invalid_options(
+                        "--tag-rename expects OLD:NEW",
+                    ));
                 }
                 opts.tag_rename =
                     Some((parts[0].as_bytes().to_vec(), parts[1].as_bytes().to_vec()));
@@ -671,20 +665,20 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 )?;
                 let parts: Vec<&str> = v.splitn(2, ':').collect();
                 if parts.len() != 2 {
-                    eprintln!("--branch-rename expects OLD:NEW");
-                    std::process::exit(2);
+                    return Err(FilterRepoError::invalid_options(
+                        "--branch-rename expects OLD:NEW",
+                    ));
                 }
                 opts.branch_rename =
                     Some((parts[0].as_bytes().to_vec(), parts[1].as_bytes().to_vec()));
             }
             "--max-blob-size" => {
                 let v = require_arg_value(&mut it, "--max-blob-size requires BYTES")?;
-                let n = parse_max_blob_size(&v).unwrap_or_else(|_| {
-                    eprintln!(
-                        "--max-blob-size expects an integer number of bytes (optionally suffixed with K, M, or G)"
-                    );
-                    std::process::exit(2);
-                });
+                let n = parse_max_blob_size(&v).map_err(|_| {
+                    FilterRepoError::invalid_options(
+                        "--max-blob-size expects an integer number of bytes (optionally suffixed with K, M, or G)",
+                    )
+                })?;
                 opts.max_blob_size = Some(n);
             }
             "--strip-blobs-with-ids" => {
@@ -699,16 +693,17 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             }
             "--path-compat-policy" => {
                 let v = require_arg_value(&mut it, "--path-compat-policy requires MODE")?;
-                opts.path_compat_policy = PathCompatPolicy::parse(&v).unwrap_or_else(|| {
-                    eprintln!("--path-compat-policy expects one of sanitize|skip|error");
-                    std::process::exit(2);
-                });
+                opts.path_compat_policy = PathCompatPolicy::parse(&v).ok_or_else(|| {
+                    FilterRepoError::invalid_options(
+                        "--path-compat-policy expects one of sanitize|skip|error",
+                    )
+                })?;
             }
             "--cleanup" => {
                 if let Some(next) = it.clone().next() {
                     if matches!(next.as_str(), "none" | "standard" | "aggressive") {
                         let legacy = require_arg_value(&mut it, "--cleanup legacy value consumed")?;
-                        parse_legacy_cleanup_value(&legacy, &mut opts);
+                        parse_legacy_cleanup_value(&legacy, &mut opts)?;
                         continue;
                     }
                 }
@@ -717,31 +712,32 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
             arg if arg.starts_with("--cleanup=") => {
                 let value = &arg[10..];
                 if value.is_empty() {
-                    eprintln!("--cleanup= requires a value of none|standard|aggressive");
-                    std::process::exit(2);
+                    return Err(FilterRepoError::invalid_options(
+                        "--cleanup= requires a value of none|standard|aggressive",
+                    ));
                 }
-                parse_legacy_cleanup_value(value, &mut opts);
+                parse_legacy_cleanup_value(value, &mut opts)?;
             }
             "--cleanup-aggressive" => {
-                guard_debug("--cleanup-aggressive", opts.debug_mode);
+                guard_debug("--cleanup-aggressive", opts.debug_mode)?;
                 opts.cleanup = CleanupMode::Aggressive;
             }
             "--no-reencode" => {
-                guard_debug("--no-reencode", opts.debug_mode);
+                guard_debug("--no-reencode", opts.debug_mode)?;
                 opts.reencode = false;
                 opts.reencode_requested = Some(false);
             }
             "--no-quotepath" => {
-                guard_debug("--no-quotepath", opts.debug_mode);
+                guard_debug("--no-quotepath", opts.debug_mode)?;
                 opts.quotepath = false;
             }
             "--no-mark-tags" => {
-                guard_debug("--no-mark-tags", opts.debug_mode);
+                guard_debug("--no-mark-tags", opts.debug_mode)?;
                 opts.mark_tags = false;
                 opts.mark_tags_requested = Some(false);
             }
             "--mark-tags" => {
-                guard_debug("--mark-tags", opts.debug_mode);
+                guard_debug("--mark-tags", opts.debug_mode)?;
                 opts.mark_tags = true;
                 opts.mark_tags_requested = Some(true);
             }
@@ -769,8 +765,9 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "auto" => PruneMode::Auto,
                     "never" => PruneMode::Never,
                     _ => {
-                        eprintln!("--prune-empty expects one of always|auto|never");
-                        std::process::exit(2);
+                        return Err(FilterRepoError::invalid_options(
+                            "--prune-empty expects one of always|auto|never",
+                        ));
                     }
                 };
             }
@@ -784,8 +781,9 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                     "auto" => PruneMode::Auto,
                     "never" => PruneMode::Never,
                     _ => {
-                        eprintln!("--prune-degenerate expects one of always|auto|never");
-                        std::process::exit(2);
+                        return Err(FilterRepoError::invalid_options(
+                            "--prune-degenerate expects one of always|auto|never",
+                        ));
                     }
                 };
             }
@@ -808,35 +806,37 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
                 if let Some(p) = it.next() {
                     opts.backup_path = Some(PathBuf::from(p));
                 } else {
-                    eprintln!("error: --backup-path requires a value");
-                    std::process::exit(2);
+                    return Err(FilterRepoError::invalid_options(
+                        "--backup-path requires a value",
+                    ));
                 }
             }
             "--date-shift" => {
                 let v = require_arg_value(&mut it, "--date-shift requires DURATION")?;
-                opts.date_shift = Some(parse_duration(&v));
+                opts.date_shift = Some(parse_duration(&v)?);
             }
             "--date-set" => {
                 let v = require_arg_value(&mut it, "--date-set requires TIMESTAMP")?;
-                opts.date_set = Some(parse_timestamp(&v));
+                opts.date_set = Some(parse_timestamp(&v)?);
             }
             "--fe_stream_override" => {
-                guard_debug("--fe_stream_override", opts.debug_mode);
+                guard_debug("--fe_stream_override", opts.debug_mode)?;
                 let p = require_arg_value(&mut it, "--fe_stream_override requires FILE")?;
                 opts.fe_stream_override = Some(PathBuf::from(p));
             }
             "-h" | "--help" => {
                 print_help(opts.debug_mode);
-                std::process::exit(0);
+                return Err(FilterRepoError::exit(0));
             }
             "-V" | "--version" => {
                 print_version();
-                std::process::exit(0);
+                return Err(FilterRepoError::exit(0));
             }
             other => {
-                eprintln!("Unknown argument: {}", other);
-                print_help(opts.debug_mode);
-                std::process::exit(2);
+                return Err(FilterRepoError::invalid_options(format!(
+                    "Unknown argument: {}",
+                    other
+                )));
             }
         }
     }
@@ -850,43 +850,32 @@ pub fn parse_args() -> Result<Options, FilterRepoError> {
     if let Some((path, explicit)) = config_target {
         match apply_config_from_file(&mut opts, &path) {
             Ok(()) => {}
-            Err(ConfigError::Io(err)) => {
+            Err(FilterRepoError::Io(err)) => {
                 use std::io::ErrorKind;
                 if explicit || err.kind() != ErrorKind::NotFound {
-                    eprintln!(
-                        "error: failed to read config at {}: {}",
+                    return Err(FilterRepoError::invalid_options(format!(
+                        "failed to read config at {}: {}",
                         path.display(),
                         err
-                    );
-                    std::process::exit(2);
+                    )));
                 }
             }
-            Err(ConfigError::Parse(err)) => {
-                eprintln!(
-                    "error: failed to parse config at {}: {}",
+            Err(FilterRepoError::InvalidOptions(msg)) => {
+                return Err(FilterRepoError::invalid_options(format!(
+                    "failed to parse config at {}: {}",
                     path.display(),
-                    err
-                );
-                eprintln!(
-          "note: example key: analyze.thresholds.warn_total_bytes (see docs/cli-convergence.md)"
-        );
-                std::process::exit(2);
+                    msg
+                )));
             }
+            Err(other) => return Err(other),
         }
     }
 
     overrides.apply(&mut opts.analyze);
-    let caps = match gitutil::probe_git_capabilities() {
-        Ok(caps) => caps,
-        Err(err) => {
-            eprintln!("error: failed to probe git capabilities: {err}");
-            std::process::exit(2);
-        }
-    };
-    if let Err(msg) = opts.apply_git_capabilities(caps) {
-        eprintln!("error: {msg}");
-        std::process::exit(2);
-    }
+    let caps = gitutil::probe_git_capabilities().map_err(|err| {
+        FilterRepoError::invalid_options(format!("failed to probe git capabilities: {err}"))
+    })?;
+    opts.apply_git_capabilities(caps)?;
 
     // Default cleanup behavior: align with git-filter-repo semantics
     // Run post-import cleanup (reflog expire + git gc) by default unless
@@ -907,14 +896,14 @@ fn require_arg_value(
         .ok_or_else(|| FilterRepoError::invalid_options(message))
 }
 
-enum ConfigError {
-    Io(std::io::Error),
-    Parse(toml::de::Error),
-}
-
-fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigError> {
-    let raw = fs::read_to_string(path).map_err(ConfigError::Io)?;
-    let config: FileConfig = toml::from_str(&raw).map_err(ConfigError::Parse)?;
+fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), FilterRepoError> {
+    let raw = fs::read_to_string(path)?;
+    let config: FileConfig = toml::from_str(&raw).map_err(|err| {
+        FilterRepoError::invalid_options(format!(
+            "{}\nnote: example key: analyze.thresholds.warn_total_bytes (see docs/cli-convergence.md)",
+            err
+        ))
+    })?;
 
     if let Some(analyze) = config.analyze {
         if let Some(json) = analyze.json {
@@ -924,7 +913,7 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
             opts.analyze.top = top.max(1);
         }
         if let Some(thresholds) = analyze.thresholds {
-            guard_debug("analyze.thresholds.*", opts.debug_mode);
+            guard_debug("analyze.thresholds.*", opts.debug_mode)?;
             thresholds.apply(&mut opts.analyze.thresholds);
         }
     }
@@ -932,21 +921,24 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), ConfigE
     Ok(())
 }
 
-fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) {
-    enforce_legacy_cleanup_allowed();
+fn parse_legacy_cleanup_value(value: &str, opts: &mut Options) -> Result<(), FilterRepoError> {
+    enforce_legacy_cleanup_allowed()?;
     warn_legacy_cleanup_usage(value);
     opts.cleanup = match value {
         "none" => CleanupMode::None,
         "standard" => CleanupMode::Standard,
         "aggressive" => {
-            guard_debug("--cleanup aggressive", opts.debug_mode);
+            guard_debug("--cleanup aggressive", opts.debug_mode)?;
             CleanupMode::Aggressive
         }
         other => {
-            eprintln!("--cleanup: unknown mode '{}'", other);
-            std::process::exit(2);
+            return Err(FilterRepoError::invalid_options(format!(
+                "--cleanup: unknown mode '{}'",
+                other
+            )));
         }
     };
+    Ok(())
 }
 
 fn warn_legacy_cleanup_usage(mode: &str) {
@@ -986,25 +978,28 @@ fn legacy_warning_once(key: &str) -> bool {
     warned.insert(key.to_string())
 }
 
-fn enforce_legacy_cleanup_allowed() {
+fn enforce_legacy_cleanup_allowed() -> Result<(), FilterRepoError> {
     if LEGACY_CLEANUP_SYNTAX_ALLOWED && !stage3_env_toggle_enabled(LEGACY_CLEANUP_STAGE3_ENV) {
-        return;
+        return Ok(());
     }
 
-    eprintln!("error: legacy --cleanup=<mode> syntax has been removed; use --cleanup or --cleanup-aggressive.");
-    std::process::exit(2);
+    Err(FilterRepoError::invalid_options(
+        "legacy --cleanup=<mode> syntax has been removed; use --cleanup or --cleanup-aggressive.",
+    ))
 }
 
-fn enforce_legacy_analyze_flag_allowed(flag: &str, debug_mode: bool) {
+fn enforce_legacy_analyze_flag_allowed(
+    flag: &str,
+    debug_mode: bool,
+) -> Result<(), FilterRepoError> {
     if !LEGACY_ANALYZE_THRESHOLD_FLAGS_ALLOWED
         || stage3_env_toggle_enabled(LEGACY_ANALYZE_STAGE3_ENV)
     {
-        eprintln!(
-      "error: {flag} is no longer accepted; configure analyze.thresholds.* in your filter-repo-rs config file instead."
-    );
-        std::process::exit(2);
+        return Err(FilterRepoError::invalid_options(format!(
+            "{flag} is no longer accepted; configure analyze.thresholds.* in your filter-repo-rs config file instead."
+        )));
     }
-    guard_debug(flag, debug_mode);
+    guard_debug(flag, debug_mode)
 }
 
 fn warn_legacy_analyze_threshold(flag: &str, config_key: &str) {
@@ -1040,14 +1035,13 @@ fn stage3_env_toggle_enabled(var: &str) -> bool {
     matches!(std::env::var(var), Ok(val) if debug_env_flag_enabled(&val))
 }
 
-fn guard_debug(flag: &str, debug_mode: bool) {
+fn guard_debug(flag: &str, debug_mode: bool) -> Result<(), FilterRepoError> {
     if !debug_mode {
-        eprintln!(
-      "error: {flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags."
-    );
-        eprintln!("See docs/cli-convergence.md for the configuration migration plan.");
-        std::process::exit(2);
+        return Err(FilterRepoError::invalid_options(format!(
+            "{flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags. See docs/cli-convergence.md for the configuration migration plan."
+        )));
     }
+    Ok(())
 }
 
 fn parse_integer_allowing_underscores<T>(s: &str) -> Result<T, T::Err>
@@ -1090,21 +1084,17 @@ fn parse_max_blob_size(s: &str) -> Result<usize, ()> {
     usize::try_from(scaled).map_err(|_| ())
 }
 
-fn parse_u64(s: &str, flag: &str) -> u64 {
-    parse_integer_allowing_underscores::<u64>(s).unwrap_or_else(|_| {
-        eprintln!("{} expects an integer number", flag);
-        std::process::exit(2);
-    })
+fn parse_u64(s: &str, flag: &str) -> Result<u64, FilterRepoError> {
+    parse_integer_allowing_underscores::<u64>(s)
+        .map_err(|_| FilterRepoError::invalid_options(format!("{} expects an integer number", flag)))
 }
 
-fn parse_usize(s: &str, flag: &str) -> usize {
-    parse_integer_allowing_underscores::<usize>(s).unwrap_or_else(|_| {
-        eprintln!("{} expects an integer number", flag);
-        std::process::exit(2);
-    })
+fn parse_usize(s: &str, flag: &str) -> Result<usize, FilterRepoError> {
+    parse_integer_allowing_underscores::<usize>(s)
+        .map_err(|_| FilterRepoError::invalid_options(format!("{} expects an integer number", flag)))
 }
 
-fn parse_duration(s: &str) -> i64 {
+fn parse_duration(s: &str) -> Result<i64, FilterRepoError> {
     let s = s.trim();
     let (sign, rest) = if let Some(stripped) = s.strip_prefix('+') {
         (1, stripped)
@@ -1119,14 +1109,17 @@ fn parse_duration(s: &str) -> i64 {
 
     for i in (0..parts.len()).step_by(2) {
         if i + 1 >= parts.len() {
-            eprintln!("--date-shift expects format like '+2 hours' or '-1 day 3 hours'");
-            std::process::exit(2);
+            return Err(FilterRepoError::invalid_options(
+                "--date-shift expects format like '+2 hours' or '-1 day 3 hours'",
+            ));
         }
 
-        let value = parse_integer_allowing_underscores::<i64>(parts[i]).unwrap_or_else(|_| {
-            eprintln!("--date-shift: invalid number '{}'", parts[i]);
-            std::process::exit(2);
-        });
+        let value = parse_integer_allowing_underscores::<i64>(parts[i]).map_err(|_| {
+            FilterRepoError::invalid_options(format!(
+                "--date-shift: invalid number '{}'",
+                parts[i]
+            ))
+        })?;
 
         let unit = parts[i + 1].to_lowercase();
         let multiplier = match unit.as_str() {
@@ -1138,30 +1131,32 @@ fn parse_duration(s: &str) -> i64 {
             "month" | "months" | "mo" => 2592000,
             "year" | "years" | "y" => 31536000,
             _ => {
-                eprintln!("--date-shift: unknown unit '{}'", parts[i + 1]);
-                std::process::exit(2);
+                return Err(FilterRepoError::invalid_options(format!(
+                    "--date-shift: unknown unit '{}'",
+                    parts[i + 1]
+                )));
             }
         };
 
         total_seconds = total_seconds.saturating_add(value.saturating_mul(multiplier));
     }
 
-    total_seconds.saturating_mul(sign)
+    Ok(total_seconds.saturating_mul(sign))
 }
 
-fn parse_timestamp(s: &str) -> i64 {
+fn parse_timestamp(s: &str) -> Result<i64, FilterRepoError> {
     let s = s.trim();
 
     if let Ok(ts) = s.parse::<i64>() {
-        return ts;
+        return Ok(ts);
     }
 
     if let Ok(ts) = parse_integer_allowing_underscores::<i64>(s) {
-        return ts;
+        return Ok(ts);
     }
 
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return dt.timestamp();
+        return Ok(dt.timestamp());
     }
 
     for fmt in [
@@ -1173,23 +1168,21 @@ fn parse_timestamp(s: &str) -> i64 {
         "%Y/%m/%d",
     ] {
         if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
-            return naive.and_utc().timestamp();
+            return Ok(naive.and_utc().timestamp());
         }
     }
 
     if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return naive_date
             .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc()
-            .timestamp();
+            .map(|v| v.and_utc().timestamp())
+            .ok_or_else(|| FilterRepoError::invalid_options("--date-set: invalid timestamp"));
     }
 
-    eprintln!("--date-set: invalid timestamp '{}'", s);
-    eprintln!(
-        "Expected: Unix timestamp (e.g., '1700000000') or ISO 8601 (e.g., '2024-01-01T00:00:00Z')"
-    );
-    std::process::exit(2);
+    Err(FilterRepoError::invalid_options(format!(
+        "--date-set: invalid timestamp '{}'. Expected: Unix timestamp (e.g., '1700000000') or ISO 8601 (e.g., '2024-01-01T00:00:00Z')",
+        s
+    )))
 }
 
 #[derive(Debug, Clone)]
