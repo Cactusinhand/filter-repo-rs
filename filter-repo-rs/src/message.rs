@@ -120,6 +120,20 @@ impl MessageReplacer {
         result
     }
 
+    pub fn would_change(&self, data: &[u8]) -> bool {
+        if let Some(ref ac) = self.ac {
+            return ac.find(data).is_some();
+        }
+        self.pairs
+            .iter()
+            .any(|(from, _)| !from.is_empty() && find_subslice(data, from).is_some())
+    }
+
+    pub fn apply_with_change(&self, data: Vec<u8>) -> (Vec<u8>, bool) {
+        let changed = self.would_change(&data);
+        (self.apply(data), changed)
+    }
+
     #[allow(dead_code)]
     pub fn supports_streaming(&self) -> bool {
         self.ac.is_some()
@@ -461,6 +475,27 @@ pub mod blob_regex {
             }
             cur
         }
+
+        pub fn apply_regex_with_change(&self, data: Vec<u8>) -> (Vec<u8>, bool) {
+            let mut cur = data;
+            let mut changed = false;
+            for (re, rep, has_dollar) in &self.rules {
+                if re.is_match(&cur) {
+                    changed = true;
+                }
+                if *has_dollar {
+                    let tpl = rep.clone();
+                    cur = re
+                        .replace_all(&cur, |caps: &Captures| expand_bytes_template(&tpl, caps))
+                        .into_owned();
+                } else {
+                    cur = re
+                        .replace_all(&cur, regex::bytes::NoExpand(rep))
+                        .into_owned();
+                }
+            }
+            (cur, changed)
+        }
     }
 }
 
@@ -538,6 +573,27 @@ pub mod msg_regex {
                 }
             }
             cur
+        }
+
+        pub fn apply_regex_with_change(&self, data: Vec<u8>) -> (Vec<u8>, bool) {
+            let mut cur = data;
+            let mut changed = false;
+            for (re, rep, has_dollar) in &self.rules {
+                if re.is_match(&cur) {
+                    changed = true;
+                }
+                if *has_dollar {
+                    let tpl = rep.clone();
+                    cur = re
+                        .replace_all(&cur, |caps: &Captures| expand_bytes_template(&tpl, caps))
+                        .into_owned();
+                } else {
+                    cur = re
+                        .replace_all(&cur, regex::bytes::NoExpand(rep))
+                        .into_owned();
+                }
+            }
+            (cur, changed)
         }
     }
 }
