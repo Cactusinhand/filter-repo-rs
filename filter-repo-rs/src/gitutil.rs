@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -17,32 +17,57 @@ pub fn run_git_with_timeout(
     args: &[&str],
     timeout_secs: u64,
 ) -> io::Result<std::process::Output> {
+    use std::time::{Duration, Instant};
+
     let mut cmd = Command::new("git");
     if let Some(r) = repo {
         cmd.arg("-C").arg(r);
     }
     cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = std::process::Command::new("timeout")
-        .arg(format!("{}", timeout_secs))
-        .arg(cmd.get_program())
-        .args(cmd.get_args())
-        .output()
-        .map_err(|e| io::Error::other(format!("failed to run timeout command: {e}")))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| io::Error::other(format!("failed to spawn git command: {e}")))?;
 
-    // Check if timeout killed the process (exit code 124)
-    if output.status.code() == Some(124) {
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!(
-                "git {} timed out after {} seconds",
-                args.join(" "),
-                timeout_secs
-            ),
-        ));
+    let start_time = Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    loop {
+        match child.try_wait()? {
+            Some(status) => {
+                let stdout = child.stdout.take().map_or_else(Vec::new, |mut s| {
+                    let mut buf = Vec::new();
+                    let _ = s.read_to_end(&mut buf);
+                    buf
+                });
+                let stderr = child.stderr.take().map_or_else(Vec::new, |mut s| {
+                    let mut buf = Vec::new();
+                    let _ = s.read_to_end(&mut buf);
+                    buf
+                });
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None => {
+                if start_time.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!(
+                            "git {} timed out after {} seconds",
+                            args.join(" "),
+                            timeout_secs
+                        ),
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
     }
-
-    Ok(output)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
