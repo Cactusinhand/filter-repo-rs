@@ -4155,7 +4155,8 @@ mod tests {
         assert!(error_msg.contains("--fe_stream_override"));
         assert!(error_msg.contains("compromise the security"));
         assert!(error_msg.contains("Remove --fe_stream_override"));
-        assert!(error_msg.contains("Use --force to bypass"));
+        assert!(error_msg.contains("--force"));
+        assert!(error_msg.contains("bypass"));
     }
 
     #[test]

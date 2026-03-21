@@ -3,9 +3,8 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use time::format_description::FormatItem;
-use time::macros::format_description;
-use time::OffsetDateTime;
+
+use chrono::{TimeZone, Utc};
 
 use crate::gitutil::git_dir;
 use crate::opts::Options;
@@ -25,15 +24,27 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0));
-    let nanos_since_epoch = (timestamp.as_secs() as i128).saturating_mul(1_000_000_000)
-        + timestamp.subsec_nanos() as i128;
-    let datetime = OffsetDateTime::from_unix_timestamp_nanos(nanos_since_epoch)
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
-    const FORMAT: &[FormatItem<'_>] =
-        format_description!("[year][month][day]-[hour][minute][second]-[subsecond digits:9]");
-    let formatted = datetime
-        .format(FORMAT)
-        .map_err(|e| io::Error::other(format!("failed to format backup timestamp: {e}")))?;
+    let nanos = timestamp.subsec_nanos();
+    let datetime = match i64::try_from(timestamp.as_secs())
+        .ok()
+        .and_then(|secs| Utc.timestamp_opt(secs, nanos).single())
+    {
+        Some(dt) => dt,
+        None => match Utc.timestamp_opt(0, 0).single() {
+            Some(epoch) => epoch,
+            None => Utc::now(),
+        },
+    };
+    let formatted = format!(
+        "{}{:02}{:02}-{:02}{:02}{:02}-{:09}",
+        datetime.format("%Y"),
+        datetime.format("%m"),
+        datetime.format("%d"),
+        datetime.format("%H"),
+        datetime.format("%M"),
+        datetime.format("%S"),
+        nanos
+    );
     let bundle_name = format!("backup-{formatted}.bundle");
 
     let bundle_path = match &opts.backup_path {

@@ -294,14 +294,10 @@ pub fn process_commit_line(
     Ok(CommitAction::Consumed)
 }
 
-// Parse a 'mark :<num>' line and return the numeric mark
-pub fn parse_mark_number(line: &[u8]) -> Option<u32> {
-    if !line.starts_with(b"mark :") {
-        return None;
-    }
+fn parse_mark_value(line: &[u8], prefix_len: usize) -> Option<u32> {
     let mut num: u32 = 0;
     let mut seen = false;
-    for &b in line[b"mark :".len()..].iter() {
+    for &b in line[prefix_len..].iter() {
         if b.is_ascii_digit() {
             seen = true;
             num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
@@ -316,7 +312,13 @@ pub fn parse_mark_number(line: &[u8]) -> Option<u32> {
     }
 }
 
-// Parse a 'from :<num>' line and return the numeric mark
+pub fn parse_mark_number(line: &[u8]) -> Option<u32> {
+    if !line.starts_with(b"mark :") {
+        return None;
+    }
+    parse_mark_value(line, b"mark :".len())
+}
+
 pub fn parse_from_mark(line: &[u8]) -> Option<u32> {
     if !line.starts_with(b"from ") {
         return None;
@@ -324,21 +326,7 @@ pub fn parse_from_mark(line: &[u8]) -> Option<u32> {
     if line.get(b"from ".len()).copied() != Some(b':') {
         return None;
     }
-    let mut num: u32 = 0;
-    let mut seen = false;
-    for &b in line[b"from :".len()..].iter() {
-        if b.is_ascii_digit() {
-            seen = true;
-            num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
-        } else {
-            break;
-        }
-    }
-    if seen {
-        Some(num)
-    } else {
-        None
-    }
+    parse_mark_value(line, b"from :".len())
 }
 
 fn parse_merge_mark(line: &[u8]) -> Option<u32> {
@@ -348,21 +336,7 @@ fn parse_merge_mark(line: &[u8]) -> Option<u32> {
     if line.get(b"merge ".len()).copied() != Some(b':') {
         return None;
     }
-    let mut num: u32 = 0;
-    let mut seen = false;
-    for &b in line[b"merge :".len()..].iter() {
-        if b.is_ascii_digit() {
-            seen = true;
-            num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
-        } else {
-            break;
-        }
-    }
-    if seen {
-        Some(num)
-    } else {
-        None
-    }
+    parse_mark_value(line, b"merge :".len())
 }
 
 // Handle a commit message 'data <n>' header line: read payload from fe_out,

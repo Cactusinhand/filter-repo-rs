@@ -270,32 +270,37 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn apply_git_capabilities(&mut self, caps: GitCapabilities) -> Result<(), String> {
+    pub fn apply_git_capabilities(&mut self, caps: GitCapabilities) -> Result<(), FilterRepoError> {
         self.git_caps = caps;
 
         if !self.git_caps.diff_tree_combined_all_paths {
-            return Err("need git >= 2.22.0: git diff-tree lacks --combined-all-paths".to_string());
+            return Err(FilterRepoError::invalid_options(
+                "need git >= 2.22.0: git diff-tree lacks --combined-all-paths",
+            ));
         }
 
         if !self.git_caps.fast_export_reencode {
             if matches!(self.reencode_requested, Some(true)) {
-                return Err("need git >= 2.23.0: git fast-export lacks --reencode".to_string());
+                return Err(FilterRepoError::invalid_options(
+                    "need git >= 2.23.0: git fast-export lacks --reencode",
+                ));
             }
             self.reencode = false;
         }
 
         if !self.git_caps.fast_export_mark_tags {
             if matches!(self.mark_tags_requested, Some(true)) {
-                return Err("need git >= 2.24.0: git fast-export lacks --mark-tags".to_string());
+                return Err(FilterRepoError::invalid_options(
+                    "need git >= 2.24.0: git fast-export lacks --mark-tags",
+                ));
             }
             self.mark_tags = false;
         }
 
         if self.sensitive && !self.git_caps.cat_file_batch_command {
-            return Err(
-                "need git >= 2.36.0: --sensitive requires 'git cat-file --batch-command'"
-                    .to_string(),
-            );
+            return Err(FilterRepoError::invalid_options(
+                "need git >= 2.36.0: --sensitive requires 'git cat-file --batch-command'",
+            ));
         }
 
         Ok(())
@@ -329,7 +334,11 @@ mod tests {
         let err = opts
             .apply_git_capabilities(caps)
             .expect_err("mark-tags request should fail");
-        assert!(err.contains("git >= 2.24.0"), "unexpected error: {err}");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("git >= 2.24.0"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]
@@ -342,7 +351,11 @@ mod tests {
         let err = opts
             .apply_git_capabilities(caps)
             .expect_err("sensitive should require batch-command");
-        assert!(err.contains("git >= 2.36.0"), "unexpected error: {err}");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("git >= 2.36.0"),
+            "unexpected error: {err_msg}"
+        );
     }
 }
 
