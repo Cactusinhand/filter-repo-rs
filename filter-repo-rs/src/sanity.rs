@@ -110,15 +110,32 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use colored::*;
-use unicode_normalization::UnicodeNormalization;
+
+mod already_ran;
+mod checks;
+mod debug;
+mod sensitive;
+
+use already_ran::check_already_ran_detection;
+pub use already_ran::{AlreadyRanChecker, AlreadyRanState};
+#[cfg(test)]
+use checks::{
+    build_branch_mappings, check_case_insensitive_conflicts, check_git_dir_structure_with_context,
+    check_reference_conflicts_with_context, check_reflog_entries_with_context,
+    check_replace_refs_in_loose_objects_with_context, check_unicode_normalization_conflicts,
+    check_unpushed_changes_with_context,
+};
+pub use debug::{DebugOutputManager, GitCommandError, GitCommandExecutor};
+pub use sensitive::SensitiveModeValidator;
 
 fn highlight_flag(s: &str) -> ColoredString {
     s.yellow().bold()
@@ -543,945 +560,6 @@ impl From<io::Error> for SanityCheckError {
     }
 }
 
-/// Git command execution error types
-///
-/// This enum provides detailed error information for Git command execution failures,
-/// including timeout, retry exhaustion, and detailed error reporting.
-#[derive(Debug)]
-pub enum GitCommandError {
-    /// Git executable not found on PATH
-    NotFound,
-    /// Git command execution failed
-    ExecutionFailed {
-        command: String,
-        stderr: String,
-        exit_code: i32,
-    },
-    /// Git command timed out
-    Timeout { command: String, timeout: Duration },
-    /// IO error during command execution
-    IoError(String), // Store error message instead of io::Error for Clone compatibility
-    /// Retry limit exceeded
-    RetryExhausted {
-        command: String,
-        attempts: u32,
-        last_error: Box<GitCommandError>,
-    },
-}
-
-impl Clone for GitCommandError {
-    fn clone(&self) -> Self {
-        match self {
-            GitCommandError::NotFound => GitCommandError::NotFound,
-            GitCommandError::ExecutionFailed {
-                command,
-                stderr,
-                exit_code,
-            } => GitCommandError::ExecutionFailed {
-                command: command.clone(),
-                stderr: stderr.clone(),
-                exit_code: *exit_code,
-            },
-            GitCommandError::Timeout { command, timeout } => GitCommandError::Timeout {
-                command: command.clone(),
-                timeout: *timeout,
-            },
-            GitCommandError::IoError(msg) => GitCommandError::IoError(msg.clone()),
-            GitCommandError::RetryExhausted {
-                command,
-                attempts,
-                last_error,
-            } => GitCommandError::RetryExhausted {
-                command: command.clone(),
-                attempts: *attempts,
-                last_error: last_error.clone(),
-            },
-        }
-    }
-}
-
-impl fmt::Display for GitCommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GitCommandError::NotFound => {
-                writeln!(f, "Git executable not found on PATH.")?;
-                writeln!(
-                    f,
-                    "Please install Git and ensure it's available in your PATH."
-                )?;
-                write!(
-                    f,
-                    "Visit https://git-scm.com/downloads for installation instructions."
-                )
-            }
-            GitCommandError::ExecutionFailed {
-                command,
-                stderr,
-                exit_code,
-            } => {
-                writeln!(f, "Git command failed: {}", command)?;
-                writeln!(f, "Exit code: {}", exit_code)?;
-                if !stderr.is_empty() {
-                    write!(f, "Error output: {}", stderr)
-                } else {
-                    write!(f, "No error output available.")
-                }
-            }
-            GitCommandError::Timeout { command, timeout } => {
-                writeln!(f, "Git command timed out after {:?}: {}", timeout, command)?;
-                writeln!(f, "The operation may be taking longer than expected.")?;
-                write!(
-                    f,
-                    "Consider checking your repository size or network connectivity."
-                )
-            }
-            GitCommandError::IoError(msg) => {
-                write!(f, "IO error during Git command execution: {}", msg)
-            }
-            GitCommandError::RetryExhausted {
-                command,
-                attempts,
-                last_error,
-            } => {
-                writeln!(
-                    f,
-                    "Git command failed after {} attempts: {}",
-                    attempts, command
-                )?;
-                write!(f, "Last error: {}", last_error)
-            }
-        }
-    }
-}
-
-impl std::error::Error for GitCommandError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            GitCommandError::RetryExhausted { last_error, .. } => Some(last_error.as_ref()),
-            _ => None,
-        }
-    }
-}
-
-impl From<io::Error> for GitCommandError {
-    fn from(err: io::Error) -> Self {
-        GitCommandError::IoError(err.to_string())
-    }
-}
-
-/// Enhanced debug output system for sanity checks
-///
-/// This struct provides structured debug logging for sanity check operations,
-/// including execution timing, context details, and check reasoning explanations.
-/// It integrates with the existing `debug_mode` flag from Options to provide
-/// comprehensive troubleshooting information when enabled.
-///
-/// # Features
-///
-/// * **Execution Timing**: Shows duration of each sanity check and Git command
-/// * **Context Details**: Logs repository information and configuration
-/// * **Check Reasoning**: Explains why checks pass or fail
-/// * **Consistent Formatting**: Structured debug output for easy parsing
-/// * **Performance Metrics**: Helps identify slow operations
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use filter_repo_rs::sanity::{DebugOutputManager, SanityCheckContext};
-/// use std::path::Path;
-/// use std::time::Instant;
-///
-/// let debug_manager = DebugOutputManager::new(true);
-/// let ctx = SanityCheckContext::new(Path::new(".")).unwrap();
-///
-/// debug_manager.log_context_creation(&ctx);
-/// debug_manager.log_sanity_check("git_dir_structure", &Ok(()));
-/// debug_manager.log_preflight_summary(std::time::Duration::from_millis(50), 8);
-/// ```
-pub struct DebugOutputManager {
-    enabled: bool,
-    start_time: Instant,
-}
-
-impl DebugOutputManager {
-    /// Create a new DebugOutputManager
-    ///
-    /// # Arguments
-    ///
-    /// * `debug_enabled` - Whether debug output is enabled
-    ///
-    /// # Returns
-    ///
-    /// Returns a new `DebugOutputManager` with the current time as start time.
-    pub fn new(debug_enabled: bool) -> Self {
-        DebugOutputManager {
-            enabled: debug_enabled,
-            start_time: Instant::now(),
-        }
-    }
-
-    /// Log context creation details
-    ///
-    /// Logs repository information and configuration when debug mode is enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `context` - The sanity check context containing repository information
-    pub fn log_context_creation(&self, context: &SanityCheckContext) {
-        if !self.enabled {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-        println!(
-            "[DEBUG] [{:>8.2}ms] Context created for repository: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            context.repo_path.display()
-        );
-
-        println!(
-            "[DEBUG] [{:>8.2}ms]   Repository type: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            if context.is_bare { "bare" } else { "non-bare" }
-        );
-
-        println!(
-            "[DEBUG] [{:>8.2}ms]   References found: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            context.refs.len()
-        );
-
-        if !context.replace_refs.is_empty() {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Replace references: {}",
-                elapsed.as_secs_f64() * 1000.0,
-                context.replace_refs.len()
-            );
-        }
-
-        println!(
-            "[DEBUG] [{:>8.2}ms]   Case-insensitive filesystem: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            context.config.ignore_case
-        );
-
-        if context.config.precompose_unicode {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Unicode precomposition enabled",
-                elapsed.as_secs_f64() * 1000.0
-            );
-        }
-
-        if let Some(ref remote_url) = context.config.origin_url {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Remote origin URL: {}",
-                elapsed.as_secs_f64() * 1000.0,
-                remote_url
-            );
-        }
-    }
-
-    /// Log Git command execution details
-    ///
-    /// Logs Git command details, timing, and results when debug mode is enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `args` - Git command arguments that were executed
-    /// * `duration` - Time taken to execute the command
-    /// * `result` - Result of the command execution
-    pub fn log_git_command(
-        &self,
-        args: &[&str],
-        duration: Duration,
-        result: &Result<String, GitCommandError>,
-    ) {
-        if !self.enabled {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-        let command_str = format!("git {}", args.join(" "));
-
-        match result {
-            Ok(output) => {
-                let output_preview = if output.len() > 100 {
-                    format!("{}... ({} chars)", &output[..97], output.len())
-                } else {
-                    output.clone()
-                };
-
-                println!(
-                    "[DEBUG] [{:>8.2}ms] Git command succeeded in {:>6.2}ms: {}",
-                    elapsed.as_secs_f64() * 1000.0,
-                    duration.as_secs_f64() * 1000.0,
-                    command_str
-                );
-
-                if !output.trim().is_empty() {
-                    println!(
-                        "[DEBUG] [{:>8.2}ms]   Output: {}",
-                        elapsed.as_secs_f64() * 1000.0,
-                        output_preview
-                    );
-                }
-            }
-            Err(e) => {
-                println!(
-                    "[DEBUG] [{:>8.2}ms] Git command failed in {:>6.2}ms: {}",
-                    elapsed.as_secs_f64() * 1000.0,
-                    duration.as_secs_f64() * 1000.0,
-                    command_str
-                );
-
-                println!(
-                    "[DEBUG] [{:>8.2}ms]   Error: {}",
-                    elapsed.as_secs_f64() * 1000.0,
-                    e
-                );
-            }
-        }
-    }
-
-    /// Log sanity check execution and results
-    ///
-    /// Logs sanity check execution details and reasoning when debug mode is enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `check_name` - Name of the sanity check being performed
-    /// * `result` - Result of the sanity check
-    pub fn log_sanity_check(&self, check_name: &str, result: &Result<(), SanityCheckError>) {
-        if !self.enabled {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-
-        match result {
-            Ok(()) => {
-                println!(
-                    "[DEBUG] [{:>8.2}ms] Sanity check PASSED: {}",
-                    elapsed.as_secs_f64() * 1000.0,
-                    check_name
-                );
-
-                // Add reasoning for why the check passed
-                match check_name {
-                    "git_dir_structure" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Git directory structure is valid",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "reference_conflicts" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: No reference name conflicts detected",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "reflog_entries" => {
-                        println!("[DEBUG] [{:>8.2}ms]   Reason: Repository appears fresh (acceptable reflog entries)", 
-                                 elapsed.as_secs_f64() * 1000.0);
-                    }
-                    "unpushed_changes" => {
-                        println!("[DEBUG] [{:>8.2}ms]   Reason: All local branches match their remote counterparts", 
-                                 elapsed.as_secs_f64() * 1000.0);
-                    }
-                    "freshly_packed" => {
-                        println!("[DEBUG] [{:>8.2}ms]   Reason: Repository is freshly packed with acceptable object count", 
-                                 elapsed.as_secs_f64() * 1000.0);
-                    }
-                    "remote_configuration" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Remote configuration is valid",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "stash_presence" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: No stashed changes found",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "working_tree_cleanliness" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Working tree is clean",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "untracked_files" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: No untracked files found",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "worktree_count" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Single worktree detected",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    "already_ran_detection" => {
-                        println!("[DEBUG] [{:>8.2}ms]   Reason: Already ran detection completed successfully", 
-                                 elapsed.as_secs_f64() * 1000.0);
-                    }
-                    "sensitive_mode_validation" => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Sensitive mode options are compatible",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Check completed successfully",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                println!(
-                    "[DEBUG] [{:>8.2}ms] Sanity check FAILED: {}",
-                    elapsed.as_secs_f64() * 1000.0,
-                    check_name
-                );
-
-                // Add reasoning for why the check failed
-                match e {
-                    SanityCheckError::GitDirStructure {
-                        expected,
-                        actual,
-                        is_bare,
-                    } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Git directory structure mismatch",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Expected: {}, Found: {}, Bare: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            expected,
-                            actual,
-                            is_bare
-                        );
-                    }
-                    SanityCheckError::ReferenceConflict {
-                        conflict_type,
-                        conflicts,
-                    } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Reference name conflicts detected",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Conflict type: {:?}, Count: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            conflict_type,
-                            conflicts.len()
-                        );
-                    }
-                    SanityCheckError::ReflogTooManyEntries {
-                        problematic_reflogs,
-                    } => {
-                        println!("[DEBUG] [{:>8.2}ms]   Reason: Repository not fresh (too many reflog entries)", 
-                                 elapsed.as_secs_f64() * 1000.0);
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Problematic reflogs: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            problematic_reflogs.len()
-                        );
-                    }
-                    SanityCheckError::UnpushedChanges { unpushed_branches } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Unpushed changes detected",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Unpushed branches: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            unpushed_branches.len()
-                        );
-                    }
-                    SanityCheckError::NotFreshlyPacked {
-                        packs,
-                        loose_count,
-                        replace_refs_count,
-                    } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Repository not freshly packed",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Packs: {}, Loose objects: {}, Replace refs: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            packs,
-                            loose_count,
-                            replace_refs_count
-                        );
-                    }
-                    SanityCheckError::WorkingTreeNotClean {
-                        staged_dirty,
-                        unstaged_dirty,
-                    } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Working tree not clean",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Staged dirty: {}, Unstaged dirty: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            staged_dirty,
-                            unstaged_dirty
-                        );
-                    }
-                    SanityCheckError::UntrackedFiles { files } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Untracked files present",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Untracked file count: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            files.len()
-                        );
-                    }
-                    SanityCheckError::AlreadyRan { age_hours, .. } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Already ran detection triggered",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Age: {} hours",
-                            elapsed.as_secs_f64() * 1000.0,
-                            age_hours
-                        );
-                    }
-                    SanityCheckError::SensitiveDataIncompatible { option, .. } => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: Sensitive mode incompatibility",
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Incompatible option: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            option
-                        );
-                    }
-                    _ => {
-                        println!(
-                            "[DEBUG] [{:>8.2}ms]   Reason: {}",
-                            elapsed.as_secs_f64() * 1000.0,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    /// Log preflight summary with performance metrics
-    ///
-    /// Logs overall preflight execution summary when debug mode is enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `total_duration` - Total time taken for all preflight checks
-    /// * `checks_performed` - Number of sanity checks performed
-    pub fn log_preflight_summary(&self, total_duration: Duration, checks_performed: usize) {
-        if !self.enabled {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-        println!(
-            "[DEBUG] [{:>8.2}ms] ========================================",
-            elapsed.as_secs_f64() * 1000.0
-        );
-        println!(
-            "[DEBUG] [{:>8.2}ms] Preflight checks completed",
-            elapsed.as_secs_f64() * 1000.0
-        );
-        println!(
-            "[DEBUG] [{:>8.2}ms]   Total duration: {:>6.2}ms",
-            elapsed.as_secs_f64() * 1000.0,
-            total_duration.as_secs_f64() * 1000.0
-        );
-        println!(
-            "[DEBUG] [{:>8.2}ms]   Checks performed: {}",
-            elapsed.as_secs_f64() * 1000.0,
-            checks_performed
-        );
-
-        if checks_performed > 0 {
-            let avg_duration = total_duration.as_secs_f64() * 1000.0 / checks_performed as f64;
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Average check duration: {:>6.2}ms",
-                elapsed.as_secs_f64() * 1000.0,
-                avg_duration
-            );
-        }
-
-        // Performance assessment
-        let total_ms = total_duration.as_secs_f64() * 1000.0;
-        if total_ms > 100.0 {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Performance: SLOW (>{:.0}ms threshold)",
-                elapsed.as_secs_f64() * 1000.0,
-                100.0
-            );
-        } else if total_ms > 50.0 {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Performance: MODERATE (>{:.0}ms threshold)",
-                elapsed.as_secs_f64() * 1000.0,
-                50.0
-            );
-        } else {
-            println!(
-                "[DEBUG] [{:>8.2}ms]   Performance: FAST (<{:.0}ms threshold)",
-                elapsed.as_secs_f64() * 1000.0,
-                50.0
-            );
-        }
-
-        println!(
-            "[DEBUG] [{:>8.2}ms] ========================================",
-            elapsed.as_secs_f64() * 1000.0
-        );
-    }
-
-    /// Log a general debug message with timing
-    ///
-    /// Logs a general debug message with elapsed time when debug mode is enabled.
-    ///
-    /// # Arguments
-    ///
-    /// * `message` - The debug message to log
-    pub fn log_message(&self, message: &str) {
-        if !self.enabled {
-            return;
-        }
-
-        let elapsed = self.start_time.elapsed();
-        println!(
-            "[DEBUG] [{:>8.2}ms] {}",
-            elapsed.as_secs_f64() * 1000.0,
-            message
-        );
-    }
-
-    /// Check if debug output is enabled
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if debug output is enabled, `false` otherwise.
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-}
-
-/// Robust Git command execution system
-///
-/// This struct provides comprehensive Git command execution with timeout protection,
-/// retry logic, detailed error reporting, and Git availability checking.
-///
-/// # Features
-///
-/// * **Timeout Protection**: Configurable timeouts prevent hanging operations
-/// * **Retry Logic**: Exponential backoff for transient failures
-/// * **Error Capture**: Captures both stdout and stderr for detailed reporting
-/// * **Git Availability**: Checks Git installation and provides guidance
-/// * **Cross-Platform**: Works consistently across Windows, Linux, and macOS
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use filter_repo_rs::sanity::GitCommandExecutor;
-/// use std::path::Path;
-/// use std::time::Duration;
-///
-/// let executor = GitCommandExecutor::new(Path::new("."));
-///
-/// // Simple command execution
-/// match executor.run_command(&["status", "--porcelain"]) {
-///     Ok(output) => println!("Git status: {}", output),
-///     Err(e) => eprintln!("Git command failed: {}", e),
-/// }
-///
-/// // Command with custom timeout
-/// match executor.run_command_with_timeout(&["fetch", "origin"], Duration::from_secs(30)) {
-///     Ok(output) => println!("Fetch completed: {}", output),
-///     Err(e) => eprintln!("Fetch failed: {}", e),
-/// }
-///
-/// // Command with retry logic
-/// match executor.run_command_with_retry(&["push", "origin", "main"], 3) {
-///     Ok(output) => println!("Push succeeded: {}", output),
-///     Err(e) => eprintln!("Push failed after retries: {}", e),
-/// }
-/// ```
-pub struct GitCommandExecutor {
-    repo_path: PathBuf,
-    default_timeout: Duration,
-    default_retry_count: u32,
-}
-
-impl GitCommandExecutor {
-    /// Create a new GitCommandExecutor for the given repository
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_path` - Path to the Git repository
-    ///
-    /// # Returns
-    ///
-    /// Returns a new `GitCommandExecutor` with default timeout (30 seconds)
-    /// and retry count (3 attempts).
-    pub fn new(repo_path: &Path) -> Self {
-        GitCommandExecutor {
-            repo_path: repo_path.to_path_buf(),
-            default_timeout: Duration::from_secs(30),
-            default_retry_count: 3,
-        }
-    }
-
-    /// Create a new GitCommandExecutor with custom settings
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_path` - Path to the Git repository
-    /// * `timeout` - Default timeout for Git commands
-    /// * `retry_count` - Default number of retry attempts
-    pub fn with_settings(repo_path: &Path, timeout: Duration, retry_count: u32) -> Self {
-        GitCommandExecutor {
-            repo_path: repo_path.to_path_buf(),
-            default_timeout: timeout,
-            default_retry_count: retry_count,
-        }
-    }
-
-    /// Run a Git command with default settings
-    ///
-    /// # Arguments
-    ///
-    /// * `args` - Git command arguments (e.g., &["status", "--porcelain"])
-    ///
-    /// # Returns
-    ///
-    /// Returns the command output on success or a detailed error on failure.
-    pub fn run_command(&self, args: &[&str]) -> Result<String, GitCommandError> {
-        self.run_command_with_timeout(args, self.default_timeout)
-    }
-
-    /// Run a Git command with custom timeout
-    ///
-    /// # Arguments
-    ///
-    /// * `args` - Git command arguments
-    /// * `timeout` - Maximum time to wait for command completion
-    ///
-    /// # Returns
-    ///
-    /// Returns the command output on success or a detailed error on failure.
-    pub fn run_command_with_timeout(
-        &self,
-        args: &[&str],
-        timeout: Duration,
-    ) -> Result<String, GitCommandError> {
-        // Check Git availability first
-        self.check_git_availability()?;
-
-        let command_str = format!("git -C {} {}", self.repo_path.display(), args.join(" "));
-
-        // Build the command
-        let mut cmd = Command::new("git");
-        cmd.arg("-C").arg(&self.repo_path);
-        for arg in args {
-            cmd.arg(arg);
-        }
-
-        // Execute with timeout
-        let start_time = Instant::now();
-        let result = self.execute_with_timeout(cmd, timeout);
-
-        match result {
-            Ok(output) => {
-                if output.status.success() {
-                    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                    let exit_code = output.status.code().unwrap_or(-1);
-                    Err(GitCommandError::ExecutionFailed {
-                        command: command_str,
-                        stderr,
-                        exit_code,
-                    })
-                }
-            }
-            Err(e) => {
-                if start_time.elapsed() >= timeout {
-                    Err(GitCommandError::Timeout {
-                        command: command_str,
-                        timeout,
-                    })
-                } else {
-                    Err(GitCommandError::IoError(e.to_string()))
-                }
-            }
-        }
-    }
-
-    /// Run a Git command with retry logic
-    ///
-    /// # Arguments
-    ///
-    /// * `args` - Git command arguments
-    /// * `max_retries` - Maximum number of retry attempts
-    ///
-    /// # Returns
-    ///
-    /// Returns the command output on success or a detailed error after all retries fail.
-    pub fn run_command_with_retry(
-        &self,
-        args: &[&str],
-        max_retries: u32,
-    ) -> Result<String, GitCommandError> {
-        let mut last_error = None;
-        let mut backoff_ms = 100; // Start with 100ms backoff
-
-        for attempt in 1..=max_retries {
-            match self.run_command_with_timeout(args, self.default_timeout) {
-                Ok(output) => return Ok(output),
-                Err(e) => {
-                    last_error = Some(e);
-
-                    // Don't retry on certain error types
-                    if let Some(ref err) = last_error {
-                        match err {
-                            GitCommandError::NotFound => break,
-                            GitCommandError::ExecutionFailed { exit_code, .. } => {
-                                // Don't retry on certain exit codes (e.g., syntax errors)
-                                if *exit_code == 128 || *exit_code == 129 {
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // Wait before retry (exponential backoff)
-                    if attempt < max_retries {
-                        thread::sleep(Duration::from_millis(backoff_ms));
-                        backoff_ms = (backoff_ms * 2).min(5000); // Cap at 5 seconds
-                    }
-                }
-            }
-        }
-
-        let command_str = format!("git -C {} {}", self.repo_path.display(), args.join(" "));
-        Err(GitCommandError::RetryExhausted {
-            command: command_str,
-            attempts: max_retries,
-            last_error: Box::new(last_error.unwrap()),
-        })
-    }
-
-    /// Run a Git command with default retry logic
-    ///
-    /// This is a convenience method that uses the default retry count configured
-    /// for this GitCommandExecutor instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `args` - Git command arguments
-    ///
-    /// # Returns
-    ///
-    /// Returns the command output on success or a detailed error after all retries fail.
-    pub fn run_command_with_default_retry(&self, args: &[&str]) -> Result<String, GitCommandError> {
-        self.run_command_with_retry(args, self.default_retry_count)
-    }
-
-    /// Check if Git is available on the system
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if Git is available, or `GitCommandError::NotFound` if not.
-    pub fn check_git_availability(&self) -> Result<(), GitCommandError> {
-        match Command::new("git").arg("--version").output() {
-            Ok(output) => {
-                if output.status.success() {
-                    Ok(())
-                } else {
-                    Err(GitCommandError::NotFound)
-                }
-            }
-            Err(_) => Err(GitCommandError::NotFound),
-        }
-    }
-
-    /// Execute a command with timeout protection
-    ///
-    /// This is a cross-platform timeout implementation that works on Windows, Linux, and macOS.
-    fn execute_with_timeout(
-        &self,
-        mut cmd: Command,
-        timeout: Duration,
-    ) -> Result<std::process::Output, io::Error> {
-        use std::process::Stdio;
-
-        // Configure command to capture output
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        // Spawn the process
-        let mut child = cmd.spawn()?;
-
-        // Wait for completion with timeout
-        let start_time = Instant::now();
-        loop {
-            match child.try_wait()? {
-                Some(status) => {
-                    // Process completed
-                    let stdout = {
-                        let mut buf = Vec::new();
-                        if let Some(mut stdout) = child.stdout.take() {
-                            use std::io::Read;
-                            stdout.read_to_end(&mut buf)?;
-                        }
-                        buf
-                    };
-
-                    let stderr = {
-                        let mut buf = Vec::new();
-                        if let Some(mut stderr) = child.stderr.take() {
-                            use std::io::Read;
-                            stderr.read_to_end(&mut buf)?;
-                        }
-                        buf
-                    };
-
-                    return Ok(std::process::Output {
-                        status,
-                        stdout,
-                        stderr,
-                    });
-                }
-                None => {
-                    // Process still running, check timeout
-                    if start_time.elapsed() >= timeout {
-                        // Kill the process
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(io::Error::new(io::ErrorKind::TimedOut, "Command timed out"));
-                    }
-                    // Sleep briefly before checking again
-                    thread::sleep(Duration::from_millis(50));
-                }
-            }
-        }
-    }
-}
-
 impl SanityCheckError {
     /// Detect if the remote configuration indicates a local clone
     ///
@@ -1549,607 +627,6 @@ impl SanityCheckError {
 
         false
     }
-}
-
-/// State of already ran detection
-#[derive(Debug, PartialEq)]
-pub enum AlreadyRanState {
-    /// Filter-repo-rs has not been run before
-    NotRan,
-    /// Filter-repo-rs was run recently (within 24 hours)
-    RecentRan,
-    /// Filter-repo-rs was run more than 24 hours ago
-    OldRan { age_hours: u64 },
-}
-
-/// Already ran detection system
-///
-/// This struct manages the detection and handling of previous filter-repo-rs runs
-/// by maintaining a marker file in the `.git/filter-repo/` directory.
-pub struct AlreadyRanChecker {
-    ran_file: PathBuf,
-}
-
-impl AlreadyRanChecker {
-    /// Create a new AlreadyRanChecker for the given repository
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_path` - Path to the Git repository
-    ///
-    /// # Returns
-    ///
-    /// Returns a new `AlreadyRanChecker` instance or an IO error if the
-    /// `.git/filter-repo` directory cannot be created.
-    pub fn new(repo_path: &Path) -> io::Result<Self> {
-        let git_dir = gitutil::git_dir(repo_path)?;
-        let tmp_dir = git_dir.join("filter-repo");
-        let ran_file = tmp_dir.join("already_ran");
-
-        // Ensure the filter-repo directory exists
-        if !tmp_dir.exists() {
-            fs::create_dir_all(&tmp_dir)?;
-        }
-
-        Ok(AlreadyRanChecker { ran_file })
-    }
-
-    /// Check the already ran state
-    ///
-    /// # Returns
-    ///
-    /// Returns the current state of already ran detection or an IO error.
-    pub fn check_already_ran(&self) -> io::Result<AlreadyRanState> {
-        if !self.ran_file.exists() {
-            return Ok(AlreadyRanState::NotRan);
-        }
-
-        // Read the timestamp from the file
-        let timestamp_str = fs::read_to_string(&self.ran_file)?;
-        let timestamp: u64 = timestamp_str.trim().parse().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid timestamp in already_ran file",
-            )
-        })?;
-
-        // Calculate age in hours
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| io::Error::other("System time before Unix epoch"))?
-            .as_secs();
-
-        let age_seconds = current_time.saturating_sub(timestamp);
-        let age_hours = age_seconds / 3600;
-
-        if age_hours < 24 {
-            Ok(AlreadyRanState::RecentRan)
-        } else {
-            Ok(AlreadyRanState::OldRan { age_hours })
-        }
-    }
-
-    /// Mark the repository as having been run
-    ///
-    /// Creates or updates the already_ran marker file with the current timestamp.
-    pub fn mark_as_ran(&self) -> io::Result<()> {
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| io::Error::other("System time before Unix epoch"))?
-            .as_secs();
-
-        fs::write(&self.ran_file, current_time.to_string())
-    }
-
-    /// Clear the already ran marker
-    ///
-    /// Removes the already_ran file if it exists.
-    pub fn clear_ran_marker(&self) -> io::Result<()> {
-        if self.ran_file.exists() {
-            fs::remove_file(&self.ran_file)?;
-        }
-        Ok(())
-    }
-
-    /// Prompt user for confirmation when old run is detected
-    ///
-    /// # Arguments
-    ///
-    /// * `age_hours` - Age of the previous run in hours
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if user confirms continuation, `false` if they decline.
-    pub fn prompt_user_for_old_run(&self, age_hours: u64) -> io::Result<bool> {
-        println!(
-            "Filter-repo-rs was previously run on this repository {} hours ago.",
-            age_hours
-        );
-        println!("The repository may be in an intermediate state.");
-        print!("Do you want to continue with the existing state? [y/N]: ");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        let response = input.trim().to_lowercase();
-        Ok(matches!(response.as_str(), "y" | "yes"))
-    }
-
-    /// Check if the already ran marker file exists
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the marker file exists, `false` otherwise.
-    pub fn marker_file_exists(&self) -> bool {
-        self.ran_file.exists()
-    }
-}
-
-/// Sensitive mode validation system
-///
-/// This struct provides validation for option compatibility when using sensitive data removal mode.
-/// It ensures that options that could compromise the security of sensitive data removal are not used
-/// in combination with the `--sensitive` flag.
-pub struct SensitiveModeValidator;
-
-impl SensitiveModeValidator {
-    /// Validate options for sensitive mode compatibility
-    ///
-    /// # Arguments
-    ///
-    /// * `opts` - The options to validate
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if options are compatible, or a `SanityCheckError` if incompatible
-    /// options are detected.
-    ///
-    /// # Validation Rules
-    ///
-    /// 1. `--sensitive` + `--fe_stream_override` → Error (stream override could leak sensitive data)
-    /// 2. `--sensitive` + non-default `--source` → Error (non-default source could be unsafe)
-    /// 3. `--sensitive` + non-default `--target` → Error (non-default target could be unsafe)
-    pub fn validate_options(opts: &Options) -> Result<(), SanityCheckError> {
-        // Skip validation if not in sensitive mode
-        if !opts.sensitive {
-            return Ok(());
-        }
-
-        // Skip validation if force flag is used
-        if opts.force {
-            return Ok(());
-        }
-
-        // Check for stream override incompatibility
-        Self::check_stream_override_compatibility(opts)?;
-
-        // Check for source/target incompatibility
-        Self::check_source_target_compatibility(opts)?;
-
-        Ok(())
-    }
-
-    /// Check for stream override incompatibility
-    ///
-    /// The `--fe_stream_override` option allows bypassing the normal fast-export stream,
-    /// which could potentially leak sensitive data that should be removed.
-    fn check_stream_override_compatibility(opts: &Options) -> Result<(), SanityCheckError> {
-        if opts.fe_stream_override.is_some() {
-            return Err(SanityCheckError::SensitiveDataIncompatible {
-                option: "--fe_stream_override".to_string(),
-                suggestion: "Remove --fe_stream_override when using --sensitive mode, or use separate operations".to_string(),
-            });
-        }
-        Ok(())
-    }
-
-    /// Check for source/target path incompatibility
-    ///
-    /// Non-default source and target paths could potentially bypass sensitive data removal
-    /// protections or create unsafe conditions.
-    fn check_source_target_compatibility(opts: &Options) -> Result<(), SanityCheckError> {
-        let default_opts = Options::default();
-
-        // Check if source path is non-default
-        if opts.source != default_opts.source {
-            return Err(SanityCheckError::SensitiveDataIncompatible {
-                option: format!("--source {}", opts.source.display()),
-                suggestion: "Use default source path (current directory) when in --sensitive mode"
-                    .to_string(),
-            });
-        }
-
-        // Check if target path is non-default
-        if opts.target != default_opts.target {
-            return Err(SanityCheckError::SensitiveDataIncompatible {
-                option: format!("--target {}", opts.target.display()),
-                suggestion: "Use default target path (current directory) when in --sensitive mode"
-                    .to_string(),
-            });
-        }
-
-        Ok(())
-    }
-}
-
-/// Check Git directory structure validation using context
-fn check_git_dir_structure_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    // Validate the Git directory structure using cached context data
-    if gitutil::validate_git_dir_structure(&ctx.repo_path, ctx.is_bare).is_err() {
-        let git_dir = gitutil::git_dir(&ctx.repo_path).map_err(SanityCheckError::from)?;
-        let actual = if ctx.is_bare {
-            git_dir.display().to_string()
-        } else {
-            git_dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown")
-                .to_string()
-        };
-
-        let expected = if ctx.is_bare { "." } else { ".git" }.to_string();
-
-        return Err(SanityCheckError::GitDirStructure {
-            expected,
-            actual,
-            is_bare: ctx.is_bare,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check for reference name conflicts using context
-fn check_reference_conflicts_with_context(
-    ctx: &SanityCheckContext,
-) -> Result<(), SanityCheckError> {
-    // Check for case-insensitive conflicts if needed
-    if ctx.config.ignore_case {
-        check_case_insensitive_conflicts(&ctx.refs)?;
-    }
-
-    // Check for Unicode normalization conflicts if needed
-    if ctx.config.precompose_unicode {
-        check_unicode_normalization_conflicts(&ctx.refs)?;
-    }
-
-    Ok(())
-}
-
-/// Check for case-insensitive reference name conflicts
-fn check_case_insensitive_conflicts(
-    refs: &HashMap<String, String>,
-) -> Result<(), SanityCheckError> {
-    let mut case_groups: HashMap<String, Vec<String>> = HashMap::new();
-
-    // Group references by their lowercase versions
-    for refname in refs.keys() {
-        let lowercase = refname.to_lowercase();
-        case_groups
-            .entry(lowercase)
-            .or_default()
-            .push(refname.clone());
-    }
-
-    // Find conflicts (groups with more than one reference)
-    let mut conflicts = Vec::new();
-    for (normalized, group) in case_groups {
-        if group.len() > 1 {
-            conflicts.push((normalized, group));
-        }
-    }
-
-    if !conflicts.is_empty() {
-        return Err(SanityCheckError::ReferenceConflict {
-            conflict_type: ConflictType::CaseInsensitive,
-            conflicts,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check for Unicode normalization conflicts
-fn check_unicode_normalization_conflicts(
-    refs: &HashMap<String, String>,
-) -> Result<(), SanityCheckError> {
-    let mut normalization_groups: HashMap<String, Vec<String>> = HashMap::new();
-
-    // Group references by their NFC normalized versions
-    for refname in refs.keys() {
-        let normalized: String = refname.nfc().collect();
-        normalization_groups
-            .entry(normalized)
-            .or_default()
-            .push(refname.clone());
-    }
-
-    // Find conflicts (groups with more than one reference)
-    let mut conflicts = Vec::new();
-    for (normalized, group) in normalization_groups {
-        if group.len() > 1 {
-            conflicts.push((normalized, group));
-        }
-    }
-
-    if !conflicts.is_empty() {
-        return Err(SanityCheckError::ReferenceConflict {
-            conflict_type: ConflictType::UnicodeNormalization,
-            conflicts,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check reflog entries using context (optimized version that could cache reflog data)
-fn check_reflog_entries_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    // Get all reflogs in the repository
-    let reflogs = gitutil::list_all_reflogs(&ctx.repo_path).map_err(SanityCheckError::from)?;
-
-    // If no reflogs exist, that's acceptable (fresh clone or bare repo)
-    if reflogs.is_empty() {
-        return Ok(());
-    }
-
-    // Check each reflog for entry count
-    let mut problematic_reflogs = Vec::new();
-
-    for reflog_name in &reflogs {
-        let entries = gitutil::get_reflog_entries(&ctx.repo_path, reflog_name)
-            .map_err(SanityCheckError::from)?;
-
-        // If reflog has more than one entry, it's not fresh
-        if entries.len() > 1 {
-            problematic_reflogs.push((reflog_name.clone(), entries.len()));
-        }
-    }
-
-    if !problematic_reflogs.is_empty() {
-        return Err(SanityCheckError::ReflogTooManyEntries {
-            problematic_reflogs,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check for unpushed changes using context
-fn check_unpushed_changes_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    // Skip check for bare repositories
-    if ctx.is_bare {
-        return Ok(());
-    }
-
-    // Build mapping of local branches to their remote counterparts using cached refs
-    let branch_mappings = build_branch_mappings(&ctx.refs)?;
-
-    // If there are no remote tracking branches, skip the unpushed check.
-    if branch_mappings.remote_branches.is_empty() {
-        return Ok(());
-    }
-
-    // Check each local branch against its remote
-    let mut unpushed_branches = Vec::new();
-
-    for (local_branch, local_hash) in &branch_mappings.local_branches {
-        // Check if there's a corresponding origin branch
-        let remote_branch = format!(
-            "refs/remotes/origin/{}",
-            local_branch
-                .strip_prefix("refs/heads/")
-                .unwrap_or(local_branch)
-        );
-
-        if let Some(remote_hash) = branch_mappings.remote_branches.get(&remote_branch) {
-            // Compare hashes
-            if local_hash != remote_hash {
-                unpushed_branches.push(UnpushedBranch {
-                    branch_name: local_branch.clone(),
-                    local_hash: local_hash.clone(),
-                    remote_hash: Some(remote_hash.clone()),
-                });
-            }
-        } else {
-            // Local branch exists but no corresponding remote branch
-            unpushed_branches.push(UnpushedBranch {
-                branch_name: local_branch.clone(),
-                local_hash: local_hash.clone(),
-                remote_hash: None,
-            });
-        }
-    }
-
-    if !unpushed_branches.is_empty() {
-        return Err(SanityCheckError::UnpushedChanges { unpushed_branches });
-    }
-
-    Ok(())
-}
-
-/// Check replace references in loose objects using context
-fn check_replace_refs_in_loose_objects_with_context(
-    ctx: &SanityCheckContext,
-    packs: usize,
-    loose_count: usize,
-) -> bool {
-    // Use cached replace refs from context
-    let replace_refs = &ctx.replace_refs;
-
-    // Original logic: (packs <= 1) && (packs == 0 || count == 0) || (packs == 0 && count < 100)
-    // This means: (<=1 pack AND (no packs OR no loose objects)) OR (no packs AND <100 loose objects)
-
-    // If there are no replace refs, use normal freshness logic
-    if replace_refs.is_empty() {
-        return (packs == 1 && loose_count == 0) || (packs == 0 && loose_count < 100);
-    }
-
-    // If all loose objects are replace refs, consider the repo freshly packed
-    if loose_count <= replace_refs.len() {
-        // Apply the same logic but treat effective loose count as 0
-        return (packs <= 1) || (packs == 0 && 0 < 100);
-    }
-
-    // If there are more loose objects than replace refs, apply normal rules
-    // but account for replace refs in the count
-    let non_replace_loose_count = loose_count.saturating_sub(replace_refs.len());
-    (packs == 1 && non_replace_loose_count == 0) || (packs == 0 && non_replace_loose_count < 100)
-}
-
-/// Check remote configuration using context
-fn check_remote_configuration_with_context(
-    ctx: &SanityCheckContext,
-) -> Result<(), SanityCheckError> {
-    let executor = GitCommandExecutor::new(&ctx.repo_path);
-    let remotes = match executor.run_command(&["remote"]) {
-        Ok(output) => output,
-        Err(GitCommandError::ExecutionFailed { stderr, .. }) if stderr.is_empty() => {
-            // Empty output is acceptable (no remotes)
-            String::new()
-        }
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to get remote configuration: {e}"
-            ))));
-        }
-    };
-    let remote_trim = remotes.trim();
-
-    if remote_trim != "origin" && !remote_trim.is_empty() {
-        let remote_list: Vec<String> = remotes.lines().map(|s| s.trim().to_string()).collect();
-        return Err(SanityCheckError::InvalidRemotes {
-            remotes: remote_list,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check for stash presence using context
-fn check_stash_presence_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    let executor = GitCommandExecutor::new(&ctx.repo_path);
-
-    match executor.run_command(&["rev-parse", "--verify", "--quiet", "refs/stash"]) {
-        Ok(_) => {
-            // If the command succeeds, stash exists
-            Err(SanityCheckError::StashedChanges)
-        }
-        Err(GitCommandError::ExecutionFailed { exit_code, .. }) if exit_code != 0 => {
-            // If command fails with non-zero exit, no stash exists
-            Ok(())
-        }
-        Err(e) => Err(SanityCheckError::IoError(io::Error::other(format!(
-            "Failed to check stash status: {e}"
-        )))),
-    }
-}
-
-/// Check working tree cleanliness using context
-fn check_working_tree_cleanliness_with_context(
-    ctx: &SanityCheckContext,
-) -> Result<(), SanityCheckError> {
-    let executor = GitCommandExecutor::new(&ctx.repo_path);
-
-    // Check for staged changes
-    let staged_dirty = match executor.run_command(&["diff", "--staged", "--quiet"]) {
-        Ok(_) => false, // Command succeeded, no staged changes
-        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check staged changes: {e}"
-            ))));
-        }
-    };
-
-    // Check for unstaged changes
-    let unstaged_dirty = match executor.run_command(&["diff", "--quiet"]) {
-        Ok(_) => false, // Command succeeded, no unstaged changes
-        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true, // Exit code 1 means differences found
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check unstaged changes: {e}"
-            ))));
-        }
-    };
-
-    if staged_dirty || unstaged_dirty {
-        return Err(SanityCheckError::WorkingTreeNotClean {
-            staged_dirty,
-            unstaged_dirty,
-        });
-    }
-
-    Ok(())
-}
-
-/// Check for untracked files using context
-fn check_untracked_files_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    if ctx.is_bare {
-        return Ok(());
-    }
-
-    let executor = GitCommandExecutor::new(&ctx.repo_path);
-
-    // Honor ignore rules and avoid enumerating every file under large untracked directories
-    // by showing directory entries instead of all children.
-    match executor.run_command(&["ls-files", "-o", "--exclude-standard", "--directory"]) {
-        Ok(output) => {
-            let untracked_files: Vec<String> = output
-                .lines()
-                .map(|line| line.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-
-            if !untracked_files.is_empty() {
-                return Err(SanityCheckError::UntrackedFiles {
-                    files: untracked_files,
-                });
-            }
-        }
-        Err(GitCommandError::ExecutionFailed { .. }) => {
-            // If ls-files fails, assume no untracked files
-        }
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check untracked files: {e}"
-            ))));
-        }
-    }
-
-    Ok(())
-}
-
-/// Check worktree count using context
-fn check_worktree_count_with_context(ctx: &SanityCheckContext) -> Result<(), SanityCheckError> {
-    let executor = GitCommandExecutor::new(&ctx.repo_path);
-
-    match executor.run_command(&["worktree", "list"]) {
-        Ok(output) => {
-            let worktree_count = output.lines().count();
-            if worktree_count > 1 {
-                return Err(SanityCheckError::MultipleWorktrees {
-                    count: worktree_count,
-                });
-            }
-        }
-        Err(GitCommandError::ExecutionFailed { .. }) => {
-            // If worktree command fails, assume single worktree
-        }
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check worktree count: {e}"
-            ))));
-        }
-    }
-
-    Ok(())
-}
-
-/// Branch mapping structure to organize local and remote branches
-struct BranchMappings {
-    local_branches: HashMap<String, String>,
-    remote_branches: HashMap<String, String>,
 }
 
 /// Context structure to hold repository state and configuration for sanity checks
@@ -2243,27 +720,6 @@ impl SanityCheckContext {
     }
 }
 
-/// Build mapping between local and remote branches
-fn build_branch_mappings(refs: &HashMap<String, String>) -> io::Result<BranchMappings> {
-    let mut local_branches = HashMap::new();
-    let mut remote_branches = HashMap::new();
-
-    for (refname, hash) in refs {
-        if refname.starts_with("refs/heads/") {
-            // Local branch
-            local_branches.insert(refname.clone(), hash.clone());
-        } else if refname.starts_with("refs/remotes/origin/") {
-            // Remote tracking branch
-            remote_branches.insert(refname.clone(), hash.clone());
-        }
-    }
-
-    Ok(BranchMappings {
-        local_branches,
-        remote_branches,
-    })
-}
-
 /// Perform comprehensive sanity checks on a Git repository before filtering
 ///
 /// This function validates that a Git repository is in a safe state for
@@ -2328,122 +784,114 @@ pub fn preflight(opts: &Options) -> FilterRepoResult<()> {
     Ok(())
 }
 
-/// Check for already ran detection
-///
-/// This function implements the already ran detection logic according to requirements:
-/// - Check for existence of `.git/filter-repo/already_ran` file
-/// - Handle age-based logic with 24-hour threshold
-/// - Prompt user for confirmation on old runs
-/// - Bypass check when force flag is used
-fn check_already_ran_detection(repo_path: &Path, force: bool) -> Result<(), SanityCheckError> {
-    // Skip check if force flag is used
-    if force {
-        return Ok(());
-    }
-
-    let checker = AlreadyRanChecker::new(repo_path)?;
-    let state = checker.check_already_ran()?;
-
-    match state {
-        AlreadyRanState::NotRan => {
-            // First run, mark as ran and continue
-            checker.mark_as_ran()?;
-            Ok(())
-        }
-        AlreadyRanState::RecentRan => {
-            // Recent run (< 24 hours), continue without prompting
-            Ok(())
-        }
-        AlreadyRanState::OldRan { age_hours } => {
-            // Old run (>= 24 hours), prompt user for confirmation
-            let user_confirmed = checker.prompt_user_for_old_run(age_hours)?;
-
-            if user_confirmed {
-                // User wants to continue, update timestamp and proceed
-                checker.mark_as_ran()?;
-                Ok(())
-            } else {
-                // User declined, return error
-                Err(SanityCheckError::AlreadyRan {
-                    ran_file: checker.ran_file.clone(),
-                    age_hours,
-                    user_confirmed: false,
-                })
-            }
-        }
-    }
-}
-
 fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
     let dir = &opts.target;
     let preflight_start = Instant::now();
-    let mut checks_performed = 0;
 
     // Initialize debug output manager
     let debug_manager = DebugOutputManager::new(opts.debug_mode);
     debug_manager.log_message("Starting preflight checks");
 
-    // Check for already ran detection first (before other checks)
+    let mut checks_performed = 0;
+    checks_performed += run_pre_context_stages(opts, dir, &debug_manager)?;
+    checks_performed += run_context_stages(dir, &debug_manager)?;
+
+    // Log preflight summary
+    let total_duration = preflight_start.elapsed();
+    debug_manager.log_preflight_summary(total_duration, checks_performed);
+
+    Ok(())
+}
+
+fn run_pre_context_stages(
+    opts: &Options,
+    dir: &Path,
+    debug_manager: &DebugOutputManager,
+) -> Result<usize, SanityCheckError> {
+    let mut checks_performed = 0;
     debug_manager.log_message("Checking already ran detection");
     let result = check_already_ran_detection(dir, opts.force);
     debug_manager.log_sanity_check("already_ran_detection", &result);
     result?;
     checks_performed += 1;
 
-    // Validate sensitive mode option compatibility
     debug_manager.log_message("Validating sensitive mode options");
     let result = SensitiveModeValidator::validate_options(opts);
     debug_manager.log_sanity_check("sensitive_mode_validation", &result);
     result?;
     checks_performed += 1;
 
-    // Quick repo checks: ensure source/target are git repositories
     debug_manager.log_message("Validating target git repository");
-    let result = quick_repo_checks(&opts.target);
+    let result = checks::quick_repo_checks(dir);
     debug_manager.log_sanity_check("quick_repo_checks", &result);
     result?;
     checks_performed += 1;
 
-    // Before constructing heavy context, run quick worktree checks to fail fast (target and, if different, source)
     debug_manager.log_message("Running quick worktree checks on target (cleanliness/untracked)");
-    let result = early_worktree_checks(dir);
+    let result = checks::early_worktree_checks(dir);
     debug_manager.log_sanity_check("early_worktree_checks", &result);
     result?;
     checks_performed += 1;
+    Ok(checks_performed)
+}
 
-    // Note: preflight focuses on target. Source validity is verified later in pipeline setup.
-
-    // Create context once to avoid repeated Git command executions (potentially expensive)
+fn run_context_stages(
+    dir: &Path,
+    debug_manager: &DebugOutputManager,
+) -> Result<usize, SanityCheckError> {
+    let mut checks_performed = 0;
     debug_manager.log_message("Creating sanity check context");
     let ctx = SanityCheckContext::new(dir)?;
     debug_manager.log_context_creation(&ctx);
 
-    // Run all context-based checks with enhanced error handling
+    checks_performed += run_core_context_checks(&ctx, debug_manager)?;
+
+    check_freshly_packed_with_context(dir, &ctx, debug_manager)?;
+    checks_performed += 1;
+
+    checks_performed += run_trailing_context_checks(&ctx, debug_manager)?;
+
+    Ok(checks_performed)
+}
+
+fn run_core_context_checks(
+    ctx: &SanityCheckContext,
+    debug_manager: &DebugOutputManager,
+) -> Result<usize, SanityCheckError> {
+    let mut checks_performed = 0;
+
     debug_manager.log_message("Checking Git directory structure");
-    let result = check_git_dir_structure_with_context(&ctx);
+    let result = checks::check_git_dir_structure_with_context(ctx);
     debug_manager.log_sanity_check("git_dir_structure", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking reference conflicts");
-    let result = check_reference_conflicts_with_context(&ctx);
+    let result = checks::check_reference_conflicts_with_context(ctx);
     debug_manager.log_sanity_check("reference_conflicts", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking reflog entries");
-    let result = check_reflog_entries_with_context(&ctx);
+    let result = checks::check_reflog_entries_with_context(ctx);
     debug_manager.log_sanity_check("reflog_entries", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking unpushed changes");
-    let result = check_unpushed_changes_with_context(&ctx);
+    let result = checks::check_unpushed_changes_with_context(ctx);
     debug_manager.log_sanity_check("unpushed_changes", &result);
     result?;
     checks_performed += 1;
 
-    // Continue with existing loose object counting logic using context
+    Ok(checks_performed)
+}
+
+fn check_freshly_packed_with_context(
+    dir: &Path,
+    ctx: &SanityCheckContext,
+    debug_manager: &DebugOutputManager,
+) -> Result<(), SanityCheckError> {
     debug_manager.log_message("Checking repository freshness (object packing)");
     let executor = GitCommandExecutor::new(dir);
     let git_start = Instant::now();
@@ -2454,7 +902,6 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                 git_start.elapsed(),
                 &Ok(output.clone()),
             );
-
             let mut packs = 0usize;
             let mut count = 0usize;
             for line in output.lines() {
@@ -2465,10 +912,8 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                     count = v.trim().parse().unwrap_or(0);
                 }
             }
-
-            // Use context-based replace references validation for freshness check
             let freshly_packed =
-                check_replace_refs_in_loose_objects_with_context(&ctx, packs, count);
+                checks::check_replace_refs_in_loose_objects_with_context(ctx, packs, count);
             let result = if freshly_packed {
                 Ok(())
             } else {
@@ -2479,8 +924,7 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                 })
             };
             debug_manager.log_sanity_check("freshly_packed", &result);
-            result?;
-            checks_performed += 1;
+            result
         }
         Err(e) => {
             debug_manager.log_git_command(
@@ -2488,121 +932,52 @@ fn do_preflight_checks(opts: &Options) -> Result<(), SanityCheckError> {
                 git_start.elapsed(),
                 &Err(e.clone()),
             );
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
+            Err(SanityCheckError::IoError(io::Error::other(format!(
                 "Failed to count objects: {e}"
-            ))));
+            ))))
         }
     }
+}
 
-    // Continue with remaining existing checks...
+fn run_trailing_context_checks(
+    ctx: &SanityCheckContext,
+    debug_manager: &DebugOutputManager,
+) -> Result<usize, SanityCheckError> {
+    let mut checks_performed = 0;
+
     debug_manager.log_message("Checking remote configuration");
-    let result = check_remote_configuration_with_context(&ctx);
+    let result = checks::check_remote_configuration_with_context(ctx);
     debug_manager.log_sanity_check("remote_configuration", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking stash presence");
-    let result = check_stash_presence_with_context(&ctx);
+    let result = checks::check_stash_presence_with_context(ctx);
     debug_manager.log_sanity_check("stash_presence", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking working tree cleanliness");
-    let result = check_working_tree_cleanliness_with_context(&ctx);
+    let result = checks::check_working_tree_cleanliness_with_context(ctx);
     debug_manager.log_sanity_check("working_tree_cleanliness", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking untracked files");
-    let result = check_untracked_files_with_context(&ctx);
+    let result = checks::check_untracked_files_with_context(ctx);
     debug_manager.log_sanity_check("untracked_files", &result);
     result?;
     checks_performed += 1;
 
     debug_manager.log_message("Checking worktree count");
-    let result = check_worktree_count_with_context(&ctx);
+    let result = checks::check_worktree_count_with_context(ctx);
     debug_manager.log_sanity_check("worktree_count", &result);
     result?;
     checks_performed += 1;
 
-    // Log preflight summary
-    let total_duration = preflight_start.elapsed();
-    debug_manager.log_preflight_summary(total_duration, checks_performed);
-
-    Ok(())
+    Ok(checks_performed)
 }
 
-/// Fast-path checks that do not require constructing the full context.
-///
-/// Runs cleanliness and untracked checks early to avoid users waiting on
-/// heavy ref/reflog scans when the working tree is obviously not ready.
-fn early_worktree_checks(dir: &Path) -> Result<(), SanityCheckError> {
-    // Skip for bare repositories
-    let is_bare = gitutil::is_bare_repository(dir).unwrap_or(false);
-    if is_bare {
-        return Ok(());
-    }
-
-    let executor = GitCommandExecutor::new(dir);
-
-    // Staged changes
-    let staged_dirty = match executor.run_command(&["diff", "--staged", "--quiet"]) {
-        Ok(_) => false,
-        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check staged changes: {e}"
-            ))));
-        }
-    };
-
-    // Unstaged changes
-    let unstaged_dirty = match executor.run_command(&["diff", "--quiet"]) {
-        Ok(_) => false,
-        Err(GitCommandError::ExecutionFailed { exit_code: 1, .. }) => true,
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check unstaged changes: {e}"
-            ))));
-        }
-    };
-    if staged_dirty || unstaged_dirty {
-        return Err(SanityCheckError::WorkingTreeNotClean {
-            staged_dirty,
-            unstaged_dirty,
-        });
-    }
-
-    // Untracked files (honor ignore rules; summarize directories)
-    match executor.run_command(&["ls-files", "-o", "--exclude-standard", "--directory"]) {
-        Ok(output) => {
-            let files: Vec<String> = output
-                .lines()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
-            if !files.is_empty() {
-                return Err(SanityCheckError::UntrackedFiles { files });
-            }
-        }
-        Err(GitCommandError::ExecutionFailed { .. }) => {
-            // Treat as no untracked on benign failures
-        }
-        Err(e) => {
-            return Err(SanityCheckError::IoError(io::Error::other(format!(
-                "Failed to check untracked files: {e}"
-            ))));
-        }
-    }
-
-    Ok(())
-}
-
-/// Ensure both source and target are git repositories before any heavy checks.
-fn quick_repo_checks(target: &Path) -> Result<(), SanityCheckError> {
-    let _ = gitutil::git_dir(target).map_err(SanityCheckError::from)?;
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use super::*;
