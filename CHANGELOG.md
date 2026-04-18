@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-04-18
+
+### 🚀 Features
+
+- Parallelize blob scanning in detect.rs
+- Add FilterRepoError::Exit variant for explicit process termination
+- Add would_change() and apply_with_change() methods to avoid clone-before-compare
+- Add benchmark infrastructure with criterion
+- *(error)* Add Detect variant with cause chain
+
+### 🐛 Bug Fixes
+
+- Replace timeout command with pure-Rust implementation
+- *(backup)* Simplify redundant chrono format nesting
+- *(backup)* Use numeric timestamp in bundle filename
+
+### 🚜 Refactor
+
+- Remove redundant code in analysis.rs
+- Deduplicate expand_bytes_template and remove dead code
+- Replace time crate with chrono, deduplicate mark parsing, use FilterRepoError
+- Simplify MailmapRewriter to use String instead of Regex, add test for cascading rules
+- Use apply_with_change() to eliminate unnecessary clones
+- *(opts)* Replace process::exit() with proper error returns using FilterRepoError
+- *(stream)* Extract StreamProcessor and context structs to reduce coupling
+- *(stream)* Split main loop into focused helpers
+- *(sanity)* Modularize checks and preflight stages
+- *(detect)* Remove wasteful per-blob dedup in parallel scan
+- *(stream)* Extract FilterTracker and ReportSamples sub-structs
+- *(analysis)* Modularize color output and add NO_COLOR support
+- *(stream,finalize)* Introduce ParseState/ResetDispatch and FinalizeContext
+
+### 📚 Documentation
+
+- Remove prototype docs and inline CLI guidance
+
+### ⚡ Performance
+
+- *(message)* Eliminate double-scan in apply_with_change
+- *(gitutil)* Use adaptive polling interval for process timeout
+
+### 🧪 Testing
+
+- *(identity_rewrite)* Group commit_with_identity arguments into structs
+- *(secrets)* Centralize fake secret fixtures
+
+### ⚙️ Miscellaneous Tasks
+
+- Remove unused crossbeam dependency
+- Update Cargo.lock after removing crossbeam
+- Clean unused regex helpers and format opts parsing
+- *(message)* Clean dead code and gate test-only items with cfg(test)
+- *(stream)* Remove incorrect #[allow(dead_code)] on process_blob_content
+- *(sanity)* Consolidate #[cfg(test)] imports into a single block
+- Modernize io::Error and panic-message hygiene
+- Satisfy clippy::field_reassign_with_default and friends
+- *(release)* Bump version to 1.0.3
+
 ## [1.0.2] - 2026-03-14
 
 ### 🐛 Bug Fixes

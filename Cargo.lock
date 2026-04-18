@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "filter-repo-rs"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aho-corasick",
  "colored",
