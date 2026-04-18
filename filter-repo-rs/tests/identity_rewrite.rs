@@ -3,32 +3,39 @@ use common::*;
 
 use std::process::Command;
 
+struct Identity<'a> {
+    name: &'a str,
+    email: &'a str,
+}
+
+struct FileCommit<'a> {
+    rel_path: &'a str,
+    contents: &'a str,
+    message: &'a str,
+}
+
 fn commit_with_identity(
     repo: &std::path::Path,
-    rel_path: &str,
-    contents: &str,
-    message: &str,
-    author_name: &str,
-    author_email: &str,
-    committer_name: &str,
-    committer_email: &str,
+    file: FileCommit<'_>,
+    author: Identity<'_>,
+    committer: Identity<'_>,
 ) {
-    write_file(repo, rel_path, contents);
+    write_file(repo, file.rel_path, file.contents);
     assert_eq!(
-        run_git(repo, &["add", rel_path]).0,
+        run_git(repo, &["add", file.rel_path]).0,
         0,
         "git add should succeed"
     );
 
     let output = Command::new("git")
         .current_dir(repo)
-        .env("GIT_AUTHOR_NAME", author_name)
-        .env("GIT_AUTHOR_EMAIL", author_email)
-        .env("GIT_COMMITTER_NAME", committer_name)
-        .env("GIT_COMMITTER_EMAIL", committer_email)
+        .env("GIT_AUTHOR_NAME", author.name)
+        .env("GIT_AUTHOR_EMAIL", author.email)
+        .env("GIT_COMMITTER_NAME", committer.name)
+        .env("GIT_COMMITTER_EMAIL", committer.email)
         .arg("commit")
         .arg("-m")
-        .arg(message)
+        .arg(file.message)
         .output()
         .expect("run git commit with custom identity");
 
@@ -45,13 +52,19 @@ fn mailmap_rewrites_author_and_committer_identities() {
     let repo = init_repo();
     commit_with_identity(
         &repo,
-        "mailmap-target.txt",
-        "payload",
-        "commit with legacy identity",
-        "Old Author",
-        "old@example.com",
-        "Old Committer",
-        "old@example.com",
+        FileCommit {
+            rel_path: "mailmap-target.txt",
+            contents: "payload",
+            message: "commit with legacy identity",
+        },
+        Identity {
+            name: "Old Author",
+            email: "old@example.com",
+        },
+        Identity {
+            name: "Old Committer",
+            email: "old@example.com",
+        },
     );
 
     let mailmap = repo.join("rewrite.mailmap");
@@ -78,13 +91,19 @@ fn mailmap_takes_precedence_over_other_identity_rewriters() {
     let repo = init_repo();
     commit_with_identity(
         &repo,
-        "precedence-target.txt",
-        "payload",
-        "commit for precedence check",
-        "Old Author",
-        "old@example.com",
-        "Old Committer",
-        "old@example.com",
+        FileCommit {
+            rel_path: "precedence-target.txt",
+            contents: "payload",
+            message: "commit for precedence check",
+        },
+        Identity {
+            name: "Old Author",
+            email: "old@example.com",
+        },
+        Identity {
+            name: "Old Committer",
+            email: "old@example.com",
+        },
     );
 
     let mailmap = repo.join("rewrite.mailmap");
