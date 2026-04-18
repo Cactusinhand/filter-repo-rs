@@ -242,7 +242,7 @@ filter-repo-rs --path-rename old/:new/
 
 ```sh
 # Single file
-filter-repo-rs --path docs/STATUS.md --invert-paths
+filter-repo-rs --path secrets/production.env --invert-paths
 
 # By glob pattern
 filter-repo-rs --path-glob "*.log" --invert-paths

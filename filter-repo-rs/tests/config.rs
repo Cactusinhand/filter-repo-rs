@@ -25,11 +25,6 @@ fn docs_example_config_requires_debug_mode() {
         "expected gating message in stderr: {}",
         stderr
     );
-    assert!(
-        stderr.contains("cli-convergence"),
-        "expected docs pointer in gating message: {}",
-        stderr
-    );
 }
 
 #[test]
@@ -164,11 +159,6 @@ fn invalid_repo_config_emits_friendly_error() {
     assert!(
         stderr.contains("failed to parse config"),
         "parse failure should mention config error: {}",
-        stderr
-    );
-    assert!(
-        stderr.contains("cli-convergence"),
-        "parse failure should point to CLI convergence docs: {}",
         stderr
     );
 }

@@ -242,7 +242,7 @@ filter-repo-rs --path-rename old/:new/
 
 ```sh
 # 单个文件
-filter-repo-rs --path docs/STATUS.md --invert-paths
+filter-repo-rs --path secrets/production.env --invert-paths
 
 # 按 glob 模式
 filter-repo-rs --path-glob "*.log" --invert-paths

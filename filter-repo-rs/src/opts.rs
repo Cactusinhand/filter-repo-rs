@@ -955,8 +955,9 @@ fn apply_config_from_file(opts: &mut Options, path: &Path) -> Result<(), FilterR
     let raw = fs::read_to_string(path)?;
     let config: FileConfig = toml::from_str(&raw).map_err(|err| {
         FilterRepoError::invalid_options(format!(
-            "{}\nnote: example key: analyze.thresholds.warn_total_bytes (see docs/cli-convergence.md)",
-            err
+            "{}\n{}",
+            err,
+            config_assignment_note("analyze.thresholds.warn_total_bytes")
         ))
     })?;
 
@@ -1023,7 +1024,7 @@ fn warn_legacy_cleanup_usage(mode: &str) {
       );
         }
     }
-    eprintln!("note: see docs/CLI-CONVERGENCE.zh-CN.md for the cleanup migration guide.");
+    eprintln!("note: use --cleanup for standard cleanup; --cleanup-aggressive remains debug-only.");
 }
 
 fn legacy_warning_once(key: &str) -> bool {
@@ -1051,7 +1052,7 @@ fn enforce_legacy_analyze_flag_allowed(
         || stage3_env_toggle_enabled(LEGACY_ANALYZE_STAGE3_ENV)
     {
         return Err(FilterRepoError::invalid_options(format!(
-            "{flag} is no longer accepted; configure analyze.thresholds.* in your filter-repo-rs config file instead."
+            "{flag} is no longer accepted; configure analyze.thresholds.* in .filter-repo-rs.toml at the repo root, or in the file passed via --config, instead."
         )));
     }
     guard_debug(flag, debug_mode)
@@ -1065,9 +1066,23 @@ fn warn_legacy_analyze_threshold(flag: &str, config_key: &str) {
     eprintln!(
     "warning: {flag} is deprecated; set {config_key} in your .filter-repo-rs.toml (or --config) file instead."
   );
-    eprintln!(
-        "note: see docs/CLI-CONVERGENCE.zh-CN.md for the analysis threshold migration table."
-    );
+    eprintln!("{}", config_assignment_note(config_key));
+}
+
+fn config_assignment_note(config_key: &str) -> String {
+    format!(
+        "note: put `{}` in `.filter-repo-rs.toml` at the repo root, or in the file passed via `--config`.",
+        config_assignment_example(config_key)
+    )
+}
+
+fn config_assignment_example(config_key: &str) -> String {
+    let example_value = if config_key.ends_with("_bytes") {
+        "1048576"
+    } else {
+        "1"
+    };
+    format!("{config_key} = {example_value}")
 }
 
 fn debug_mode_enabled(args: &[String]) -> bool {
@@ -1093,7 +1108,7 @@ fn stage3_env_toggle_enabled(var: &str) -> bool {
 fn guard_debug(flag: &str, debug_mode: bool) -> Result<(), FilterRepoError> {
     if !debug_mode {
         return Err(FilterRepoError::invalid_options(format!(
-            "{flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags. See docs/cli-convergence.md for the configuration migration plan."
+            "{flag} is gated behind debug mode. Set FRRS_DEBUG=1 or pass --debug-mode to access debug-only flags."
         )));
     }
     Ok(())

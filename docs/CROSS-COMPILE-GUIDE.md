@@ -1,12 +1,38 @@
 # filter-repo-rs 多平台交叉编译指南
 
-本文档介绍如何为 filter-repo-rs 构建适用于不同操作系统与架构的二进制文件。
+本文档介绍如何为 `filter-repo-rs` 构建适用于不同操作系统与架构的二进制文件，并给出最常用的快速构建入口。
+
+## 一键构建
+
+优先使用仓库内置脚本：
+
+```sh
+# Linux/macOS：构建全部目标
+./scripts/build-cross.sh
+
+# Linux/macOS：仅构建部分目标
+./scripts/build-cross.sh x86_64-unknown-linux-gnu x86_64-apple-darwin
+```
+
+```cmd
+REM Windows：构建全部目标
+scripts\build-cross.bat
+
+REM Windows：仅构建部分目标
+scripts\build-cross.bat x86_64-pc-windows-msvc
+```
 
 ## 支持范围
 
 - Linux: x86_64, ARM64（glibc 与 musl 变体）
 - macOS: x86_64（Intel）、aarch64（Apple Silicon）
 - Windows: x86_64、ARM64（MSVC）
+
+常用 target 三元组：
+
+- Linux: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`
+- macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
+- Windows: `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`
 
 ## 环境准备
 
@@ -56,6 +82,7 @@ cross build --target aarch64-pc-windows-msvc --release -p filter-repo-rs
 ## 产物与验证
 
 - 产物重命名复制到 `target/releases/`
+- CI 产物通常为 Linux/macOS 的 `.tar.gz` 与 Windows 的 `.zip`
 - 使用脚本验证：
 
 ```sh
@@ -66,6 +93,16 @@ cross build --target aarch64-pc-windows-msvc --release -p filter-repo-rs
 - 文件存在与大小
 - 非 Windows 目标的执行权限
 - 当前平台可运行目标的 `--help` 冒烟测试
+
+## CI 构建
+
+GitHub Actions 会在 push / PR / tag 场景下执行多平台构建，并上传对应产物。
+如需发布前自检，建议在本地先跑：
+
+```sh
+./scripts/build-cross.sh
+./scripts/verify-build.sh
+```
 
 ## Cargo 配置（摘录）
 
@@ -103,4 +140,9 @@ newgrp docker
 ```sh
 xcode-select --install
 ```
+
+## 相关文档
+
+- `README.md`
+- `docs/examples/filter-repo-rs.toml`
 
