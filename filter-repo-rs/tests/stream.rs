@@ -1,6 +1,7 @@
 use std::io::Read;
 
 mod common;
+use common::fake_secrets;
 use common::*;
 
 #[test]
@@ -374,7 +375,8 @@ done
 fn inline_replace_text_and_report_modified() {
     let repo = init_repo();
     let stream_path = repo.join("fe-inline.stream");
-    let payload = "token=SECRET-INLINE-123\n";
+    let inline_secret = fake_secrets::secret_inline_123();
+    let payload = format!("token={inline_secret}\n");
     let payload_len = payload.len();
     let msg = "inline commit\n";
     let msg_len = msg.len();
@@ -392,7 +394,11 @@ fn inline_replace_text_and_report_modified() {
     std::fs::write(&stream_path, s).unwrap();
 
     let repl = repo.join("repl-inline.txt");
-    std::fs::write(&repl, "SECRET-INLINE-123==>REDACTED\n").unwrap();
+    std::fs::write(
+        &repl,
+        fake_secrets::replace_rule_line(&inline_secret, "REDACTED"),
+    )
+    .unwrap();
 
     run_tool_expect_success(&repo, |o| {
         o.debug_mode = true;
@@ -407,7 +413,7 @@ fn inline_replace_text_and_report_modified() {
 
     let (_cc, content, _ee) = run_git(&repo, &["show", "HEAD:secret.txt"]);
     assert!(content.contains("REDACTED"));
-    assert!(!content.contains("SECRET-INLINE-123"));
+    assert!(!content.contains(&inline_secret));
 
     let report = repo.join(".git").join("filter-repo").join("report.txt");
     let mut s = String::new();
@@ -443,11 +449,11 @@ fn streaming_replace_text_without_match_reports_zero_modified_blobs() {
     std::fs::write(&stream_path, stream).expect("write large blob stream");
 
     let repl = repo.join("repl-no-match.txt");
-    std::fs::write(
-        &repl,
-        "SECRET-1==>REDACTED\nSECRET-2==>REDACTED\nSECRET-3==>REDACTED\n",
-    )
-    .expect("write replacement rules");
+    let rules = [1usize, 2, 3]
+        .into_iter()
+        .map(|n| fake_secrets::replace_rule_line(&fake_secrets::secret_numbered(n), "REDACTED"))
+        .collect::<String>();
+    std::fs::write(&repl, rules).expect("write replacement rules");
 
     run_tool_expect_success(&repo, |o| {
         o.debug_mode = true;

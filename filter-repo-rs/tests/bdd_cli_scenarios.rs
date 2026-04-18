@@ -3,6 +3,7 @@ use std::fs;
 use filter_repo_rs as fr;
 
 mod common;
+use common::fake_secrets;
 use common::*;
 
 fn stage_and_commit(repo: &std::path::Path, message: &str) {
@@ -32,11 +33,13 @@ fn list_tree(repo: &std::path::Path) -> String {
 #[test]
 fn given_secret_blob_when_replace_text_then_redacted_value_is_persisted() {
     let repo = init_repo();
-    write_file(&repo, "secrets.env", "API_KEY=SECRET-ABC-123\n");
+    let secret = fake_secrets::secret_abc_123();
+    write_file(&repo, "secrets.env", &format!("API_KEY={secret}\n"));
     stage_and_commit(&repo, "add secrets file");
 
     let rules = repo.join("replace-text-rules.txt");
-    fs::write(&rules, "SECRET-ABC-123==>REDACTED\n").expect("write replace-text rules");
+    fs::write(&rules, fake_secrets::replace_rule_line(&secret, "REDACTED"))
+        .expect("write replace-text rules");
 
     run_tool_expect_success(&repo, |o| {
         o.replace_text_file = Some(rules.clone());
@@ -45,7 +48,7 @@ fn given_secret_blob_when_replace_text_then_redacted_value_is_persisted() {
 
     let (_code, content, _err) = run_git(&repo, &["show", "HEAD:secrets.env"]);
     assert!(content.contains("REDACTED"));
-    assert!(!content.contains("SECRET-ABC-123"));
+    assert!(!content.contains(&secret));
 }
 
 #[test]

@@ -2,6 +2,9 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use std::io::Write;
 use tempfile::NamedTempFile;
 
+#[path = "../tests/common/fake_secrets.rs"]
+mod fake_secrets;
+
 use filter_repo_rs::message::blob_regex::RegexReplacer as BlobRegexReplacer;
 use filter_repo_rs::message::MessageReplacer;
 
@@ -17,13 +20,13 @@ fn make_payload(size: usize, hit: bool) -> Vec<u8> {
     // When `hit` is true, scatter replaceable tokens throughout;
     // when false, use content that won't match any rule.
     if hit {
-        let token = b"SECRET_TOKEN_VALUE";
+        let token = fake_secrets::secret_token_value().into_bytes();
         let filler = b"the quick brown fox jumps over the lazy dog ";
         let mut buf = Vec::with_capacity(size);
         let mut i = 0;
         while buf.len() < size {
             if i % 5 == 0 && buf.len() + token.len() <= size {
-                buf.extend_from_slice(token);
+                buf.extend_from_slice(&token);
             } else if buf.len() + filler.len() <= size {
                 buf.extend_from_slice(filler);
             } else {
@@ -39,8 +42,13 @@ fn make_payload(size: usize, hit: bool) -> Vec<u8> {
 }
 
 fn bench_message_replacer(c: &mut Criterion) {
-    let rules = b"SECRET_TOKEN_VALUE==>REDACTED\npassword123==>***\napi_key_abc==>***\n";
-    let rules_file = make_rules_file(rules);
+    let rules = format!(
+        "{}\n{}\n{}\n",
+        fake_secrets::replace_rule(&fake_secrets::secret_token_value(), "REDACTED"),
+        fake_secrets::replace_rule(&fake_secrets::password123(), "***"),
+        fake_secrets::replace_rule(&fake_secrets::api_key_abc(), "***"),
+    );
+    let rules_file = make_rules_file(rules.as_bytes());
     let replacer = MessageReplacer::from_file(rules_file.path()).unwrap();
 
     let sizes: &[usize] = &[1_024, 64 * 1_024, 1_024 * 1_024];

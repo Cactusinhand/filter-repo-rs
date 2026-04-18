@@ -1,5 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
+#[path = "../tests/common/fake_secrets.rs"]
+mod fake_secrets;
+
 use filter_repo_rs::detect::{collect_blob_detections, SecretPattern};
 use regex::bytes::Regex;
 
@@ -59,21 +62,13 @@ fn build_default_patterns() -> Vec<SecretPattern> {
 fn make_blob(size: usize, inject_secrets: usize) -> Vec<u8> {
     let filler =
         b"const foo = 42;\nlet bar = \"hello world\";\nfunction process(data) { return data; }\n";
-    // Construct fake secrets at runtime via concat so the full literal patterns
-    // don't appear in this source file — mirrors the approach in tests/detect_secrets.rs.
+    // Shared helper keeps fake-provider patterns out of source literals while
+    // still exercising the real detection regexes.
     let secrets: Vec<Vec<u8>> = vec![
-        [b"AKIA" as &[u8], b"IOSFODNN7EXAMPLE1"].concat(),
-        [b"ghp_" as &[u8], b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh"].concat(),
-        [
-            b"xoxb" as &[u8],
-            b"-123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx",
-        ]
-        .concat(),
-        [
-            b"sk-proj-" as &[u8],
-            b"abcdefghijklmnopqrstuvwxyz1234567890ab",
-        ]
-        .concat(),
+        fake_secrets::aws_access_key_id().into_bytes(),
+        fake_secrets::github_pat().into_bytes(),
+        fake_secrets::slack_token().into_bytes(),
+        fake_secrets::openai_project_key().into_bytes(),
     ];
 
     let mut buf = Vec::with_capacity(size);

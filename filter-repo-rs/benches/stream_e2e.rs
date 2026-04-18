@@ -12,6 +12,9 @@ use std::sync::OnceLock;
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 
+#[path = "../tests/common/fake_secrets.rs"]
+mod fake_secrets;
+
 use filter_repo_rs::opts::{Mode, Options};
 
 // ---------------------------------------------------------------------------
@@ -50,11 +53,32 @@ fn build_fixture(n_commits: usize, files_per: usize) -> Fixture {
     // Create replace-text rules file (for content-replacement benchmarks)
     let rules_file = work_path.join("bench_rules.txt");
     {
+        let secret_value_alpha = fake_secrets::secret_value_alpha();
+        let private_token_beta = fake_secrets::private_token_beta();
+        let internal_key_gamma = fake_secrets::internal_key_gamma();
         let mut f = fs::File::create(&rules_file).unwrap();
-        writeln!(f, "SECRET_VALUE_ALPHA==>***REMOVED***").unwrap();
-        writeln!(f, "PRIVATE_TOKEN_BETA==>***REMOVED***").unwrap();
-        writeln!(f, "INTERNAL_KEY_GAMMA==>***REMOVED***").unwrap();
+        writeln!(
+            f,
+            "{}",
+            fake_secrets::replace_rule(&secret_value_alpha, "***REMOVED***")
+        )
+        .unwrap();
+        writeln!(
+            f,
+            "{}",
+            fake_secrets::replace_rule(&private_token_beta, "***REMOVED***")
+        )
+        .unwrap();
+        writeln!(
+            f,
+            "{}",
+            fake_secrets::replace_rule(&internal_key_gamma, "***REMOVED***")
+        )
+        .unwrap();
     }
+
+    let secret_value_alpha = fake_secrets::secret_value_alpha();
+    let private_token_beta = fake_secrets::private_token_beta();
 
     for commit_idx in 0..n_commits {
         for file_idx in 0..files_per {
@@ -66,9 +90,9 @@ fn build_fixture(n_commits: usize, files_per: usize) -> Fixture {
             let mut content = String::with_capacity(2048);
             for line in 0..40 {
                 if line == 10 && commit_idx % 3 == 0 {
-                    content.push_str("  api_key = SECRET_VALUE_ALPHA\n");
+                    content.push_str(&format!("  api_key = {secret_value_alpha}\n"));
                 } else if line == 20 && commit_idx % 5 == 0 {
-                    content.push_str("  token = PRIVATE_TOKEN_BETA\n");
+                    content.push_str(&format!("  token = {private_token_beta}\n"));
                 } else {
                     content.push_str(&format!(
                         "line {} of commit {} in {}/{}\n",

@@ -11,6 +11,8 @@ use std::time::Duration;
 use filter_repo_rs as fr;
 use filter_repo_rs::FilterRepoError;
 
+pub mod fake_secrets;
+
 pub fn mktemp(prefix: &str) -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.push("target");

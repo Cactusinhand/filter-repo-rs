@@ -1,14 +1,17 @@
 mod common;
+use common::fake_secrets;
 use common::*;
 
 #[test]
 fn detect_secrets_dry_run_writes_draft_file() {
     let repo = init_repo();
+    let aws_access_key_id = fake_secrets::aws_access_key_id();
+    let super_secret = fake_secrets::super_secret_123();
 
     write_file(
         &repo,
         "app.env",
-        "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF\npassword=superSecret123\n",
+        &format!("AWS_ACCESS_KEY_ID={aws_access_key_id}\npassword={super_secret}\n"),
     );
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "add secret-like values"]);
@@ -36,7 +39,7 @@ fn detect_secrets_dry_run_writes_draft_file() {
     assert!(rules.exists(), "detected-secrets.txt should be generated");
     let content = std::fs::read_to_string(&rules).expect("read detected-secrets.txt");
     assert!(
-        content.contains("AKIA1234567890ABCDEF==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&aws_access_key_id)),
         "draft should include aws access key rule: {}",
         content
     );
@@ -69,8 +72,9 @@ fn detect_secrets_reports_zero_when_no_matches() {
 #[test]
 fn detect_secrets_supports_custom_detect_pattern() {
     let repo = init_repo();
+    let custom_secret = fake_secrets::custom_secret_2026();
 
-    write_file(&repo, "custom.txt", "internal=ZZZ-CUSTOM-SECRET-2026\n");
+    write_file(&repo, "custom.txt", &format!("internal={custom_secret}\n"));
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "add custom secret token"]);
 
@@ -95,7 +99,7 @@ fn detect_secrets_supports_custom_detect_pattern() {
     );
     let content = std::fs::read_to_string(&rules).expect("read detected-secrets.txt");
     assert!(
-        content.contains("ZZZ-CUSTOM-SECRET-2026==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&custom_secret)),
         "draft should include custom-pattern match: {}",
         content
     );
@@ -104,11 +108,12 @@ fn detect_secrets_supports_custom_detect_pattern() {
 #[test]
 fn detect_secrets_detects_openai_api_key() {
     let repo = init_repo();
+    let openai_api_key = fake_secrets::openai_api_key();
 
     write_file(
         &repo,
         "config.py",
-        "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz1234567890ABC\n",
+        &format!("OPENAI_API_KEY={openai_api_key}\n"),
     );
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "add openai key"]);
@@ -132,7 +137,7 @@ fn detect_secrets_detects_openai_api_key() {
     let rules = repo.join("detected-secrets.txt");
     let content = std::fs::read_to_string(&rules).expect("read detected-secrets.txt");
     assert!(
-        content.contains("sk-abcdefghijklmnopqrstuvwxyz1234567890ABC==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&openai_api_key)),
         "draft should include openai api key rule: {}",
         content
     );
@@ -141,17 +146,17 @@ fn detect_secrets_detects_openai_api_key() {
 #[test]
 fn detect_secrets_detects_additional_common_patterns() {
     let repo = init_repo();
-    let slack_domain = ["hooks", "slack", "com"].join(".");
-    let slack_webhook = format!(
-        "https://{}/services/T12345678/B12345678/abcdefghijklmnopqrstuvwx",
-        slack_domain
-    );
-    let stripe_secret = ["sk", "live", "abcdefghijklmnopqrstuvwxyz123456"].join("_");
+    let aws_secret_access_key = fake_secrets::aws_secret_access_key();
+    let google_api_key = fake_secrets::google_api_key();
+    let gitlab_token = fake_secrets::gitlab_token();
+    let npm_token = fake_secrets::npm_token();
+    let slack_webhook = fake_secrets::slack_webhook_url();
+    let stripe_secret = fake_secrets::stripe_live_secret();
     let tokens_env = format!(
-        "AWS_SECRET_ACCESS_KEY=abcdEFGHijklMNOPqrstUVWXyz0123456789+/AB\n\
-GOOGLE_API_KEY=AIza12345678901234567890123456789012345\n\
-GITLAB_TOKEN=glpat-abcDEF0123456789uvwxyzABCD\n\
-NPM_TOKEN=npm_1234567890abcdefghijklmnopqrstuvwxyz\n\
+        "AWS_SECRET_ACCESS_KEY={aws_secret_access_key}\n\
+GOOGLE_API_KEY={google_api_key}\n\
+GITLAB_TOKEN={gitlab_token}\n\
+NPM_TOKEN={npm_token}\n\
 SLACK_WEBHOOK={}\n\
 STRIPE_SECRET={}\n",
         slack_webhook, stripe_secret
@@ -173,32 +178,32 @@ STRIPE_SECRET={}\n",
     let rules = repo.join("detected-secrets.txt");
     let content = std::fs::read_to_string(&rules).expect("read detected-secrets.txt");
     assert!(
-        content.contains("abcdEFGHijklMNOPqrstUVWXyz0123456789+/AB==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&aws_secret_access_key)),
         "draft should include aws secret access key: {}",
         content
     );
     assert!(
-        content.contains("AIza12345678901234567890123456789012345==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&google_api_key)),
         "draft should include google api key: {}",
         content
     );
     assert!(
-        content.contains("glpat-abcDEF0123456789uvwxyzABCD==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&gitlab_token)),
         "draft should include gitlab pat: {}",
         content
     );
     assert!(
-        content.contains("npm_1234567890abcdefghijklmnopqrstuvwxyz==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&npm_token)),
         "draft should include npm token: {}",
         content
     );
     assert!(
-        content.contains(&format!("{}==>***REMOVED***", slack_webhook)),
+        content.contains(&fake_secrets::removed_rule(&slack_webhook)),
         "draft should include slack webhook url: {}",
         content
     );
     assert!(
-        content.contains(&format!("{}==>***REMOVED***", stripe_secret)),
+        content.contains(&fake_secrets::removed_rule(&stripe_secret)),
         "draft should include stripe secret key: {}",
         content
     );
@@ -207,18 +212,28 @@ STRIPE_SECRET={}\n",
 #[test]
 fn detect_secrets_detects_llm_vendor_keys() {
     let repo = init_repo();
+    let google_api_key = fake_secrets::google_api_key();
+    let anthropic_api_key = fake_secrets::anthropic_api_key();
+    let xai_api_key = fake_secrets::xai_api_key();
+    let deepseek_api_key = fake_secrets::deepseek_api_key();
+    let zai_api_key = fake_secrets::zai_api_key();
+    let minimax_api_key = fake_secrets::minimax_api_key();
+    let moonshot_api_key = fake_secrets::moonshot_api_key();
+    let qwen_api_key = fake_secrets::qwen_api_key();
 
     write_file(
         &repo,
         "llm.env",
-        "GEMINI_API_KEY=AIza12345678901234567890123456789012345\n\
-ANTHROPIC_API_KEY=sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab\n\
-XAI_API_KEY=xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab\n\
-DEEPSEEK_API_KEY=deepseek_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n\
-GLM_API_KEY=zai-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab\n\
-MINIMAX_API_KEY=minimax_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n\
-KIMI_API_KEY=moonshot_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n\
-QWEN_API_KEY=qwen_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n",
+        &format!(
+            "GEMINI_API_KEY={google_api_key}\n\
+ANTHROPIC_API_KEY={anthropic_api_key}\n\
+XAI_API_KEY={xai_api_key}\n\
+DEEPSEEK_API_KEY={deepseek_api_key}\n\
+GLM_API_KEY={zai_api_key}\n\
+MINIMAX_API_KEY={minimax_api_key}\n\
+KIMI_API_KEY={moonshot_api_key}\n\
+QWEN_API_KEY={qwen_api_key}\n"
+        ),
     );
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-q", "-m", "add llm keys"]);
@@ -235,42 +250,42 @@ QWEN_API_KEY=qwen_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n",
     let rules = repo.join("detected-secrets.txt");
     let content = std::fs::read_to_string(&rules).expect("read detected-secrets.txt");
     assert!(
-        content.contains("AIza12345678901234567890123456789012345==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&google_api_key)),
         "draft should include gemini/google api key: {}",
         content
     );
     assert!(
-        content.contains("sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&anthropic_api_key)),
         "draft should include anthropic key: {}",
         content
     );
     assert!(
-        content.contains("xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&xai_api_key)),
         "draft should include xai key: {}",
         content
     );
     assert!(
-        content.contains("deepseek_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&deepseek_api_key)),
         "draft should include deepseek key: {}",
         content
     );
     assert!(
-        content.contains("zai-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&zai_api_key)),
         "draft should include glm(z.ai) key: {}",
         content
     );
     assert!(
-        content.contains("minimax_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&minimax_api_key)),
         "draft should include minimax key: {}",
         content
     );
     assert!(
-        content.contains("moonshot_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&moonshot_api_key)),
         "draft should include kimi key: {}",
         content
     );
     assert!(
-        content.contains("qwen_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789==>***REMOVED***"),
+        content.contains(&fake_secrets::removed_rule(&qwen_api_key)),
         "draft should include qwen key: {}",
         content
     );

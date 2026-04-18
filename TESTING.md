@@ -77,3 +77,69 @@ Flaky tests are treated as defects:
 3. Do not merge by silently skipping unstable coverage.
 
 Test helper code may include bounded retries for transient system-level process spawn errors, but must never hide assertion failures or application errors.
+
+## Fake Secret Fixtures
+
+GitHub push protection scans all blob objects in a packfile, not just files that
+look production-facing. That means test and benchmark fixtures can block a push
+if they contain a complete provider-style secret pattern as a single string
+literal, even when the value is obviously fake.
+
+### Rule
+
+Never write a complete fake secret as one contiguous literal in:
+
+- `filter-repo-rs/tests/**`
+- `filter-repo-rs/benches/**`
+- `#[cfg(test)]` code under `filter-repo-rs/src/**`
+
+Instead, construct the value at runtime by splitting at the fixed prefix and
+joining the parts back together in code.
+
+### Preferred Pattern
+
+Use the shared helpers in `filter-repo-rs/tests/common/fake_secrets.rs` whenever
+possible. If a new fixture is needed, add it there instead of hand-rolling the
+same pattern in multiple test files.
+
+### Examples
+
+```rust
+// BAD: full secret-like literal appears in the source blob
+let slack = b"xoxb-123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx";
+
+// GOOD: split at the fixed prefix, then reassemble at runtime
+let slack: Vec<u8> =
+    [b"xoxb" as &[u8], b"-123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx"].concat();
+```
+
+```rust
+// BAD
+let url = "https://hooks.slack.com/services/T12345678/B12345678/abcdefghij";
+
+// GOOD
+let domain = ["hooks", "slack", "com"].join(".");
+let url = format!("https://{}/services/T12345678/B12345678/abcdefghij", domain);
+```
+
+### Where To Split
+
+Split immediately after the fixed prefix that a detector keys on, for example:
+
+- `AKIA`
+- `ghp_`
+- `xoxb`
+- `sk-`
+- `sk-proj-`
+- `glpat-`
+- `AIza`
+
+The goal is simple: the full pattern must not appear contiguously in the source
+file, but the runtime value must still exercise the real detection logic.
+
+### If Push Protection Blocks A Commit
+
+1. Find the file and literal reported by GitHub.
+2. Replace the full literal with helper-based or split-part construction.
+3. Re-run the affected tests.
+4. Amend or recreate the commit, depending on the branch state and workflow.

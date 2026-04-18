@@ -1,21 +1,23 @@
 mod common;
+use common::fake_secrets;
 use common::*;
 
 #[test]
 fn replace_text_redacts_blob_contents() {
     let repo = init_repo();
-    write_file(&repo, "secret.txt", "token=SECRET-ABC-123\n");
+    let secret = fake_secrets::secret_abc_123();
+    write_file(&repo, "secret.txt", &format!("token={secret}\n"));
     run_git(&repo, &["add", "."]);
     assert_eq!(run_git(&repo, &["commit", "-q", "-m", "add secret"]).0, 0);
     let repl = repo.join("repl-blobs.txt");
-    std::fs::write(&repl, "SECRET-ABC-123==>REDACTED\n").unwrap();
+    std::fs::write(&repl, fake_secrets::replace_rule_line(&secret, "REDACTED")).unwrap();
     run_tool_expect_success(&repo, |o| {
         o.replace_text_file = Some(repl.clone());
         o.no_data = false;
     });
     let (_c2, content, _e2) = run_git(&repo, &["show", "HEAD:secret.txt"]);
     assert!(content.contains("REDACTED"));
-    assert!(!content.contains("SECRET-ABC-123"));
+    assert!(!content.contains(&secret));
 }
 
 #[test]

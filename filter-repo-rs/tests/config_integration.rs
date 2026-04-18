@@ -2,6 +2,7 @@ use filter_repo_rs as fr;
 use std::fs;
 
 mod common;
+use common::fake_secrets;
 use common::*;
 
 /// Test basic CLI options interaction and analysis configuration
@@ -128,11 +129,12 @@ fn cli_options_priority_testing() {
 #[test]
 fn multiple_cli_options_interaction() {
     let repo = init_repo();
+    let password = fake_secrets::secret_123();
 
     // Create a complex scenario
     write_file(&repo, "keep_this.txt", "Important content");
     write_file(&repo, "filter_this.txt", &"x".repeat(3000)); // 3KB
-    write_file(&repo, "secret.txt", "password: secret123");
+    write_file(&repo, "secret.txt", &format!("password: {password}"));
 
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "Test multiple options"]);
