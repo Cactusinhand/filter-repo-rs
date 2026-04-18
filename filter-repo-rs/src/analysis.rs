@@ -1,3 +1,4 @@
+use colored::{Color, Colorize};
 use comfy_table::{
     modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment,
     ContentArrangement, Table,
@@ -15,25 +16,51 @@ use crate::gitutil;
 use crate::opts::{AnalyzeConfig, AnalyzeThresholds, Mode, Options};
 use std::fs::{create_dir_all, File};
 
-mod term_colors {
+fn color_output_enabled(is_terminal: bool, no_color: bool, force_color: bool) -> bool {
+    if no_color {
+        return false;
+    }
+    is_terminal || force_color
+}
+
+fn stdout_supports_color() -> bool {
     use std::io::IsTerminal;
 
-    pub const RESET: &str = "\x1b[0m";
-    pub const BOLD: &str = "\x1b[1m";
-    pub const CYAN: &str = "\x1b[36m";
-    pub const GREEN: &str = "\x1b[32m";
+    color_output_enabled(
+        std::io::stdout().is_terminal(),
+        std::env::var_os("NO_COLOR").is_some(),
+        std::env::var_os("FORCE_COLOR").is_some(),
+    )
+}
 
-    pub fn supports_color() -> bool {
-        std::io::stdout().is_terminal() || std::env::var("FORCE_COLOR").is_ok()
+fn stderr_supports_color() -> bool {
+    use std::io::IsTerminal;
+
+    color_output_enabled(
+        std::io::stderr().is_terminal(),
+        std::env::var_os("NO_COLOR").is_some(),
+        std::env::var_os("FORCE_COLOR").is_some(),
+    )
+}
+
+fn styled_text(text: &str, color: Color, bold: bool, enabled: bool) -> String {
+    if !enabled {
+        return text.to_string();
     }
 
-    pub fn eprintln_color(color: &str, msg: &str) {
-        if supports_color() {
-            eprintln!("{}{}{}", color, msg, RESET);
-        } else {
-            eprintln!("{}", msg);
-        }
+    let styled = text.color(color);
+    if bold {
+        styled.bold().to_string()
+    } else {
+        styled.to_string()
     }
+}
+
+fn eprintln_color(color: Color, msg: &str) {
+    eprintln!(
+        "{}",
+        styled_text(msg, color, false, stderr_supports_color())
+    );
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -116,6 +143,14 @@ pub struct RepositoryMetrics {
 pub struct AnalysisReport {
     pub metrics: RepositoryMetrics,
     pub warnings: Vec<Warning>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct BlobSizeStats {
+    unpacked_size: HashMap<String, u64>,
+    packed_size: HashMap<String, u64>,
+    processed_objects: usize,
 }
 
 pub fn run(opts: &Options) -> io::Result<()> {
@@ -345,10 +380,10 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         ..Default::default()
     };
 
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Starting repository analysis...");
+    eprintln_color(Color::Cyan, "[*] Starting repository analysis...");
 
     // First, get all blob sizes in one pass
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Gathering blob sizes...");
+    eprintln_color(Color::Cyan, "[*] Gathering blob sizes...");
     let (unpacked_size, packed_size) = gather_all_blob_sizes(repo)?;
 
     // Initialize metrics with blob sizes - pre-allocate reasonable capacities
@@ -362,7 +397,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     };
 
     // Then process commit history
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Processing commit history...");
+    eprintln_color(Color::Cyan, "[*] Processing commit history...");
     gather_commit_history(repo, &mut stats)?;
 
     // Determine maximum number of parents across all commits
@@ -371,7 +406,7 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
     }
 
     // Now map blob OIDs to paths efficiently using the collected blob sizes
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Mapping blob paths (streaming)...");
+    eprintln_color(Color::Cyan, "[*] Mapping blob paths (streaming)...");
     let blob_oids: HashSet<String> = unpacked_size.keys().cloned().collect();
 
     // Use streaming approach to avoid loading all objects into memory
@@ -403,8 +438,8 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         )));
     }
 
-    term_colors::eprintln_color(
-        term_colors::GREEN,
+    eprintln_color(
+        Color::Green,
         &format!("[*] Found {} blob-to-path mappings", blob_path_map.len()),
     );
 
@@ -456,16 +491,16 @@ fn collect_metrics(repo: &Path, cfg: &AnalyzeConfig) -> io::Result<RepositoryMet
         compute_largest_files(&stats.blob_paths, &unpacked_size, &packed_size, cfg.top);
 
     // Tree inventory via cat-file for counts and top sizes (lightweight)
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Gathering tree inventory...");
+    eprintln_color(Color::Cyan, "[*] Gathering tree inventory...");
 
     // Keep a quick HEAD snapshot for context (simplified)
-    term_colors::eprintln_color(term_colors::CYAN, "[*] Analyzing working directory...");
+    eprintln_color(Color::Cyan, "[*] Analyzing working directory...");
 
     // Gather oversized commit messages based on configured threshold
     metrics.oversized_commit_messages =
         gather_oversized_commit_messages(repo, cfg.thresholds.warn_commit_msg_bytes)?;
 
-    term_colors::eprintln_color(term_colors::GREEN, "[*] Analysis complete!");
+    eprintln_color(Color::Green, "[*] Analysis complete!");
     Ok(metrics)
 }
 
@@ -496,9 +531,7 @@ fn gather_footprint(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<
 }
 
 #[cfg(test)]
-fn collect_blob_sizes_from_reader<R: BufRead>(
-    reader: &mut R,
-) -> io::Result<(HashMap<String, u64>, HashMap<String, u64>, usize)> {
+fn collect_blob_sizes_from_reader<R: BufRead>(reader: &mut R) -> io::Result<BlobSizeStats> {
     let mut unpacked_size = HashMap::new();
     let mut packed_size = HashMap::new();
     let mut processed_objects = 0usize;
@@ -528,7 +561,11 @@ fn collect_blob_sizes_from_reader<R: BufRead>(
         line_buf.clear();
     }
 
-    Ok((unpacked_size, packed_size, processed_objects))
+    Ok(BlobSizeStats {
+        unpacked_size,
+        packed_size,
+        processed_objects,
+    })
 }
 
 fn gather_refs(repo: &Path, metrics: &mut RepositoryMetrics) -> io::Result<()> {
@@ -643,10 +680,7 @@ fn gather_all_blob_sizes(repo: &Path) -> io::Result<(HashMap<String, u64>, HashM
 fn gather_commit_history(repo: &Path, stats: &mut StatsCollection) -> io::Result<()> {
     // Use streaming approach: process all commits in a single git log command
     // This is more efficient than batched --skip approach which is O(n²)
-    term_colors::eprintln_color(
-        term_colors::CYAN,
-        "[*] Gathering commit history (streaming)...",
-    );
+    eprintln_color(Color::Cyan, "[*] Gathering commit history (streaming)...");
 
     // Get total commit count first
     let rev_list_output = run_git_capture(repo, &["rev-list", "--all", "--count"])?;
@@ -1313,32 +1347,17 @@ fn push_top(heap: &mut BinaryHeap<Reverse<(u64, String)>>, limit: usize, size: u
 }
 
 fn banner(title: &str) -> String {
-    if term_colors::supports_color() {
-        format!(
-            "{}{}{:=^64}{}",
-            term_colors::BOLD,
-            term_colors::CYAN,
-            format!(" {} ", title),
-            term_colors::RESET
-        )
-    } else {
-        format!("{:=^64}", format!(" {} ", title))
-    }
+    let banner = format!("{:=^64}", format!(" {} ", title));
+    styled_text(&banner, Color::Cyan, true, stdout_supports_color())
 }
 
 fn print_section(title: &str) {
     println!();
-    if term_colors::supports_color() {
-        println!(
-            "{}{}{:-^64}{}",
-            term_colors::BOLD,
-            term_colors::CYAN,
-            format!(" {} ", title),
-            term_colors::RESET
-        )
-    } else {
-        println!("{:-^64}", format!(" {} ", title));
-    }
+    let section = format!("{:-^64}", format!(" {} ", title));
+    println!(
+        "{}",
+        styled_text(&section, Color::Cyan, true, stdout_supports_color())
+    );
 }
 
 fn print_table(headers: &[(&str, CellAlignment)], rows: Vec<Vec<Cow<'_, str>>>) {
@@ -1503,7 +1522,7 @@ fn build_summary_rows(metrics: &RepositoryMetrics) -> Vec<Vec<Cow<'_, str>>> {
 mod tests {
     use super::{
         collect_blob_sizes_from_reader, collect_oversized_commit_messages_from_reader,
-        flush_progress_writer,
+        color_output_enabled, flush_progress_writer,
     };
     use std::io::{Cursor, ErrorKind, Write};
 
@@ -1530,18 +1549,24 @@ cccccccccccccccccccccccccccccccccccccccc blob 42 21
 ";
         let mut reader = Cursor::new(input.as_bytes());
 
-        let (unpacked, packed, processed) =
-            collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
+        let stats = collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
 
-        assert_eq!(processed, 3, "expected all non-empty lines to be processed");
-        assert_eq!(unpacked.len(), 2, "expected only blob entries");
-        assert_eq!(packed.len(), 2, "expected only blob entries");
         assert_eq!(
-            unpacked.get("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            stats.processed_objects, 3,
+            "expected all non-empty lines to be processed"
+        );
+        assert_eq!(stats.unpacked_size.len(), 2, "expected only blob entries");
+        assert_eq!(stats.packed_size.len(), 2, "expected only blob entries");
+        assert_eq!(
+            stats
+                .unpacked_size
+                .get("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             Some(&10)
         );
         assert_eq!(
-            packed.get("cccccccccccccccccccccccccccccccccccccccc"),
+            stats
+                .packed_size
+                .get("cccccccccccccccccccccccccccccccccccccccc"),
             Some(&21)
         );
     }
@@ -1556,18 +1581,21 @@ ffffffffffffffffffffffffffffffffffffffff blob 12 6
 ";
         let mut reader = Cursor::new(input.as_bytes());
 
-        let (unpacked, packed, processed) =
-            collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
+        let stats = collect_blob_sizes_from_reader(&mut reader).expect("parse batch output");
 
-        assert_eq!(processed, 4);
-        assert_eq!(unpacked.len(), 1);
-        assert_eq!(packed.len(), 1);
+        assert_eq!(stats.processed_objects, 4);
+        assert_eq!(stats.unpacked_size.len(), 1);
+        assert_eq!(stats.packed_size.len(), 1);
         assert_eq!(
-            unpacked.get("ffffffffffffffffffffffffffffffffffffffff"),
+            stats
+                .unpacked_size
+                .get("ffffffffffffffffffffffffffffffffffffffff"),
             Some(&12)
         );
         assert_eq!(
-            packed.get("ffffffffffffffffffffffffffffffffffffffff"),
+            stats
+                .packed_size
+                .get("ffffffffffffffffffffffffffffffffffffffff"),
             Some(&6)
         );
     }
@@ -1595,6 +1623,15 @@ ffffffffffffffffffffffffffffffffffffffff blob 12 6
             result.is_err(),
             "non-BrokenPipe flush errors should propagate"
         );
+    }
+
+    #[test]
+    fn color_output_enabled_respects_no_color_and_force_color() {
+        assert!(color_output_enabled(true, false, false));
+        assert!(!color_output_enabled(false, false, false));
+        assert!(color_output_enabled(false, false, true));
+        assert!(!color_output_enabled(true, true, false));
+        assert!(!color_output_enabled(false, true, true));
     }
 
     #[test]
