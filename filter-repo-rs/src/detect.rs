@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use rayon::prelude::*;
 use regex::bytes::Regex;
 
+use crate::error::{FilterRepoError, Result as FilterRepoResult};
 use crate::Options;
 
 const OUTPUT_FILE_NAME: &str = "detected-secrets.txt";
@@ -34,11 +35,24 @@ pub struct Detection {
     path: Option<String>,
 }
 
-pub fn run(opts: &Options) -> io::Result<()> {
-    let patterns = build_patterns(opts)?;
-    let candidates = collect_blob_candidates(&opts.source)?;
-    let detections = scan_blob_candidates(&opts.source, &candidates, &patterns)?;
-    let output_path = write_detection_draft(&opts.source, &detections)?;
+fn map_detect_err<T>(stage: &str, result: io::Result<T>) -> FilterRepoResult<T> {
+    result.map_err(|err| FilterRepoError::detect(stage, err))
+}
+
+pub fn run(opts: &Options) -> FilterRepoResult<()> {
+    let patterns = map_detect_err("failed to build detect patterns", build_patterns(opts))?;
+    let candidates = map_detect_err(
+        "failed to collect blob candidates for secret detection",
+        collect_blob_candidates(&opts.source),
+    )?;
+    let detections = map_detect_err(
+        "failed to scan blob candidates for secrets",
+        scan_blob_candidates(&opts.source, &candidates, &patterns),
+    )?;
+    let output_path = map_detect_err(
+        "failed to write detection draft",
+        write_detection_draft(&opts.source, &detections),
+    )?;
 
     println!(
         "Detected {} potential secrets, wrote {}",

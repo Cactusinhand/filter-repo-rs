@@ -735,3 +735,38 @@ fn detect_pattern_requires_detect_secrets() {
         stderr
     );
 }
+
+#[test]
+fn detect_pattern_runtime_failure_keeps_cause_chain() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let output = cli_command()
+        .arg("--detect-secrets")
+        .arg("--detect-pattern")
+        .arg("[")
+        .arg("--dry-run")
+        .current_dir(temp.path())
+        .output()
+        .expect("run detect-secrets with invalid detect pattern");
+
+    assert_eq!(
+        Some(1),
+        output.status.code(),
+        "invalid detect pattern should exit with runtime failure"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to build detect patterns"),
+        "runtime error should include detect stage context: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Caused by:"),
+        "runtime detect error should keep cause chain: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("invalid --detect-pattern"),
+        "runtime detect error should expose regex failure detail: {}",
+        stderr
+    );
+}

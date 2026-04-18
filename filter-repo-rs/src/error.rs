@@ -17,6 +17,8 @@ pub enum FilterRepoError {
     Sanity(SanityCheckError),
     /// Invalid option or configuration supplied by the caller.
     InvalidOptions(String),
+    /// Failures that occur while running secret detection mode.
+    Detect { message: String, source: io::Error },
     /// Early, explicit process exit request (e.g. --help/--version).
     Exit(i32),
 }
@@ -27,6 +29,7 @@ impl fmt::Display for FilterRepoError {
             FilterRepoError::Io(err) => write!(f, "{err}"),
             FilterRepoError::Sanity(err) => write!(f, "{err}"),
             FilterRepoError::InvalidOptions(msg) => f.write_str(msg),
+            FilterRepoError::Detect { message, .. } => f.write_str(message),
             FilterRepoError::Exit(_) => Ok(()),
         }
     }
@@ -38,6 +41,7 @@ impl StdError for FilterRepoError {
             FilterRepoError::Io(err) => Some(err),
             FilterRepoError::Sanity(err) => err.source(),
             FilterRepoError::InvalidOptions(_) => None,
+            FilterRepoError::Detect { source, .. } => Some(source),
             FilterRepoError::Exit(_) => None,
         }
     }
@@ -68,6 +72,13 @@ impl FilterRepoError {
     /// Convenience constructor for invalid option failures.
     pub fn invalid_options(msg: impl Into<String>) -> Self {
         FilterRepoError::InvalidOptions(msg.into())
+    }
+
+    pub fn detect(msg: impl Into<String>, source: io::Error) -> Self {
+        FilterRepoError::Detect {
+            message: msg.into(),
+            source,
+        }
     }
 
     pub fn exit(code: i32) -> Self {

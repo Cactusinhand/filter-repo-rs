@@ -67,7 +67,7 @@ fn validate_options(opts: &Options) -> FilterRepoResult<()> {
 
 pub fn run(opts: &Options) -> FilterRepoResult<()> {
     if opts.detect_secrets {
-        return Ok(detect::run(opts)?);
+        return detect::run(opts);
     }
 
     match opts.mode {

@@ -217,6 +217,30 @@ fn error_handling_invalid_regex_pattern() {
 }
 
 #[test]
+fn detect_secrets_invalid_custom_pattern_is_reported_as_detect_error() {
+    let opts = fr::Options {
+        detect_secrets: true,
+        detect_patterns: vec!["[".to_string()],
+        ..Default::default()
+    };
+
+    let err = fr::run(&opts).expect_err("invalid detect regex should fail");
+    match err {
+        fr::FilterRepoError::Detect { message, source } => {
+            assert!(
+                message.contains("failed to build detect patterns"),
+                "unexpected detect error message: {message}"
+            );
+            assert!(
+                source.to_string().contains("invalid --detect-pattern"),
+                "unexpected detect source error: {source}"
+            );
+        }
+        other => panic!("expected detect error, got {other:?}"),
+    }
+}
+
+#[test]
 fn error_handling_permission_denied_simulation() {
     let repo = init_repo();
     std::fs::write(repo.join("test.txt"), "test content").unwrap();
