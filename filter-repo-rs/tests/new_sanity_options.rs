@@ -104,8 +104,7 @@ fn create_test_repo() -> Result<TempDir, FilterRepoError> {
         .output()?;
 
     if !output.status.success() {
-        return Err(FilterRepoError::from(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(FilterRepoError::from(std::io::Error::other(
             "Failed to initialize test git repository",
         )));
     }

@@ -994,10 +994,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to initialize test git repository",
-            ));
+            return Err(io::Error::other("Failed to initialize test git repository"));
         }
 
         // Configure git user for commits
@@ -1029,8 +1026,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "Failed to initialize bare test git repository",
             ));
         }
@@ -1069,10 +1065,10 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to set git config {}={}", key, value),
-            ));
+            return Err(io::Error::other(format!(
+                "Failed to set git config {}={}",
+                key, value
+            )));
         }
 
         Ok(())
@@ -1979,10 +1975,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to get current commit hash",
-            ));
+            return Err(io::Error::other("Failed to get current commit hash"));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -1998,10 +1991,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to get current branch name",
-            ));
+            return Err(io::Error::other("Failed to get current branch name"));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -2275,10 +2265,10 @@ mod tests {
         // Run multiple checks using the same context
         // This should be more efficient than individual function calls
         if let Err(err) = check_git_dir_structure_with_context(&ctx) {
-            return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
+            return Err(io::Error::other(err.to_string()));
         }
         if let Err(err) = check_reference_conflicts_with_context(&ctx) {
-            return Err(io::Error::new(io::ErrorKind::Other, err.to_string()));
+            return Err(io::Error::other(err.to_string()));
         }
         check_unpushed_changes_with_context(&ctx).ok(); // May fail, that's fine
 

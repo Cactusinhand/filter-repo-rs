@@ -583,7 +583,7 @@ impl AuthorRewriter {
             return Ok(Self {
                 patterns: vec![String::new()],
                 replacements: vec![String::new()],
-                ac: AhoCorasick::new([""]).unwrap(),
+                ac: AhoCorasick::new([""]).expect("empty pattern is always valid"),
             });
         }
 
@@ -619,7 +619,8 @@ impl Clone for AuthorRewriter {
         Self {
             patterns: self.patterns.clone(),
             replacements: self.replacements.clone(),
-            ac: AhoCorasick::new(&self.patterns).unwrap(),
+            ac: AhoCorasick::new(&self.patterns)
+                .expect("AuthorRewriter patterns already validated during construction"),
         }
     }
 }
@@ -643,7 +644,7 @@ impl MailmapRewriter {
     pub fn from_reader<R: BufRead>(reader: R) -> io::Result<Self> {
         let parser =
             RegexStr::new(r"^(?:([^<]*?)\s+)?<([^>]+)>\s+(?:<([^>]+)>|([^<]*?)\s+<([^>]+)>)")
-                .unwrap();
+                .expect("mailmap regex pattern is valid");
 
         let mut old_emails = Vec::new();
         let mut new_names = Vec::new();
@@ -758,7 +759,8 @@ impl MailmapRewriter {
 impl Clone for MailmapRewriter {
     fn clone(&self) -> Self {
         Self {
-            parser: RegexStr::new(self.parser.as_str()).unwrap(),
+            parser: RegexStr::new(self.parser.as_str())
+                .expect("MailmapRewriter regex already validated during construction"),
             old_emails: self.old_emails.clone(),
             new_names: self.new_names.clone(),
             new_emails: self.new_emails.clone(),

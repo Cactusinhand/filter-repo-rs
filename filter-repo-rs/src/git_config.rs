@@ -200,10 +200,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to initialize test git repository",
-            ));
+            return Err(io::Error::other("Failed to initialize test git repository"));
         }
 
         Ok(temp_dir)
@@ -219,10 +216,10 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to set git config {}={}", key, value),
-            ));
+            return Err(io::Error::other(format!(
+                "Failed to set git config {}={}",
+                key, value
+            )));
         }
 
         Ok(())

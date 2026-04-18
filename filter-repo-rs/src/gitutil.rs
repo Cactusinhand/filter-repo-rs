@@ -536,10 +536,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to initialize test git repository",
-            ));
+            return Err(io::Error::other("Failed to initialize test git repository"));
         }
 
         // Configure git user for commits
@@ -571,8 +568,7 @@ mod tests {
             .output()?;
 
         if !output.status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(io::Error::other(
                 "Failed to initialize bare test git repository",
             ));
         }
