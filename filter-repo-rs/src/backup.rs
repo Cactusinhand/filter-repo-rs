@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{TimeZone, Utc};
+use time::macros::format_description;
 
 use crate::gitutil::git_dir;
 use crate::opts::Options;
@@ -25,17 +25,14 @@ pub fn create_backup(opts: &Options) -> io::Result<Option<PathBuf>> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0));
     let nanos = timestamp.subsec_nanos();
-    let datetime = match i64::try_from(timestamp.as_secs())
-        .ok()
-        .and_then(|secs| Utc.timestamp_opt(secs, nanos).single())
-    {
-        Some(dt) => dt,
-        None => match Utc.timestamp_opt(0, 0).single() {
-            Some(epoch) => epoch,
-            None => Utc::now(),
-        },
-    };
-    let formatted = format!("{}-{:09}", datetime.format("%Y%m%d-%H%M%S"), nanos);
+    let datetime = time::OffsetDateTime::from_unix_timestamp(timestamp.as_secs() as i64)
+        .unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let date_str = datetime
+        .format(format_description!(
+            "[year][month][day]-[hour][minute][second]"
+        ))
+        .expect("date format is valid");
+    let formatted = format!("{}-{:09}", date_str, nanos);
     let bundle_name = format!("backup-{formatted}.bundle");
 
     let bundle_path = match &opts.backup_path {
@@ -171,6 +168,62 @@ mod tests {
         assert!(
             err.to_string().contains("git bundle create failed"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn create_backup_bundle_name_uses_numeric_timestamp() {
+        let repo = init_repo_with_commit();
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            refs: vec!["--all".to_string()],
+            ..Options::default()
+        };
+
+        let bundle = create_backup(&opts)
+            .expect("backup should succeed")
+            .expect("bundle path should be returned");
+        let name = bundle
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("bundle name should be utf-8");
+
+        assert!(
+            name.starts_with("backup-"),
+            "bundle name should start with backup-: {name}"
+        );
+        assert!(
+            name.ends_with(".bundle"),
+            "bundle name should end with .bundle: {name}"
+        );
+        let stem = name
+            .strip_prefix("backup-")
+            .and_then(|s| s.strip_suffix(".bundle"))
+            .expect("strip prefix/suffix");
+        assert!(
+            !stem.contains('%'),
+            "bundle stem must not contain unexpanded format specifiers: {stem}"
+        );
+
+        let mut chunks = stem.split('-');
+        let date_part = chunks.next().expect("date chunk");
+        let time_part = chunks.next().expect("time chunk");
+        let nanos_part = chunks.next().expect("nanos chunk");
+        assert_eq!(chunks.next(), None, "no extra chunks: {stem}");
+        assert_eq!(date_part.len(), 8, "yyyymmdd: {date_part}");
+        assert_eq!(time_part.len(), 6, "HHMMSS: {time_part}");
+        assert_eq!(nanos_part.len(), 9, "nanos: {nanos_part}");
+        assert!(
+            date_part.chars().all(|c| c.is_ascii_digit()),
+            "date should be digits: {date_part}"
+        );
+        assert!(
+            time_part.chars().all(|c| c.is_ascii_digit()),
+            "time should be digits: {time_part}"
+        );
+        assert!(
+            nanos_part.chars().all(|c| c.is_ascii_digit()),
+            "nanos should be digits: {nanos_part}"
         );
     }
 

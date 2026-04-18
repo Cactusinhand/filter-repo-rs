@@ -312,6 +312,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_timestamp_accepts_unix_seconds_and_iso_8601_variants() {
+        // Unix integer seconds.
+        assert_eq!(parse_timestamp("1704067200").unwrap(), 1704067200);
+        // RFC3339 with explicit zone.
+        assert_eq!(parse_timestamp("2024-01-01T00:00:00Z").unwrap(), 1704067200);
+        assert_eq!(
+            parse_timestamp("2024-01-01T00:00:00+08:00").unwrap(),
+            1704038400
+        );
+        // Naive datetime forms (assumed UTC).
+        assert_eq!(parse_timestamp("2024-01-01 00:00:00").unwrap(), 1704067200);
+        assert_eq!(parse_timestamp("2024-01-01T00:00:00").unwrap(), 1704067200);
+        assert_eq!(parse_timestamp("2024-01-01 00:00").unwrap(), 1704067200);
+        assert_eq!(parse_timestamp("2024/01/01 00:00:00").unwrap(), 1704067200);
+        // Date-only forms (midnight UTC).
+        assert_eq!(parse_timestamp("2024-01-01").unwrap(), 1704067200);
+        assert_eq!(parse_timestamp("2024/01/01").unwrap(), 1704067200);
+    }
+
+    #[test]
+    fn parse_timestamp_requires_zero_padded_components() {
+        // After the chrono -> time migration single-digit month/day/hour are no
+        // longer accepted. Documented format requires `YYYY-MM-DD ...`. This test
+        // pins the contract so any future relaxation is intentional.
+        assert!(parse_timestamp("2024-1-1").is_err());
+        assert!(parse_timestamp("2024-1-1 0:0:0").is_err());
+    }
+
+    #[test]
+    fn parse_timestamp_rejects_garbage() {
+        assert!(parse_timestamp("not-a-date").is_err());
+        assert!(parse_timestamp("").is_err());
+    }
+
+    #[test]
     fn apply_git_capabilities_disables_defaults() {
         let mut opts = Options::default();
         let mut caps = GitCapabilities::default();
@@ -1164,28 +1199,27 @@ fn parse_timestamp(s: &str) -> Result<i64, FilterRepoError> {
         return Ok(ts);
     }
 
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Ok(dt.timestamp());
+    if let Ok(dt) = time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339) {
+        return Ok(dt.unix_timestamp());
     }
 
     for fmt in [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d",
-        "%Y/%m/%d %H:%M:%S",
-        "%Y/%m/%d",
+        "[year]-[month]-[day] [hour]:[minute]:[second]",
+        "[year]-[month]-[day]T[hour]:[minute]:[second]",
+        "[year]-[month]-[day] [hour]:[minute]",
+        "[year]-[month]-[day]",
+        "[year]/[month]/[day] [hour]:[minute]:[second]",
+        "[year]/[month]/[day]",
     ] {
-        if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
-            return Ok(naive.and_utc().timestamp());
+        if let Ok(desc) = time::format_description::parse(fmt) {
+            if let Ok(pdt) = time::PrimitiveDateTime::parse(s, &desc) {
+                return Ok(pdt.assume_utc().unix_timestamp());
+            }
+            // Also try as date-only (for formats like "[year]-[month]-[day]")
+            if let Ok(date) = time::Date::parse(s, &desc) {
+                return Ok(date.midnight().assume_utc().unix_timestamp());
+            }
         }
-    }
-
-    if let Ok(naive_date) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return naive_date
-            .and_hms_opt(0, 0, 0)
-            .map(|v| v.and_utc().timestamp())
-            .ok_or_else(|| FilterRepoError::invalid_options("--date-set: invalid timestamp"));
     }
 
     Err(FilterRepoError::invalid_options(format!(
