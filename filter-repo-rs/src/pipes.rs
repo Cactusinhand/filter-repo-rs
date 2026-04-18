@@ -142,11 +142,16 @@ mod tests {
 
     #[test]
     fn fast_export_skips_flags_without_capability() {
-        let mut opts = Options::default();
-        opts.reencode = false;
-        opts.mark_tags = true;
-        opts.git_caps.fast_export_reencode = false;
-        opts.git_caps.fast_export_mark_tags = false;
+        let opts = Options {
+            reencode: false,
+            mark_tags: true,
+            git_caps: crate::gitutil::GitCapabilities {
+                fast_export_reencode: false,
+                fast_export_mark_tags: false,
+                ..Default::default()
+            },
+            ..Options::default()
+        };
 
         let cmd = build_fast_export_cmd(&opts).expect("command");
         let args = args_as_strings(&cmd);
@@ -192,9 +197,14 @@ mod tests {
             .status()
             .expect("git init");
 
-        let mut opts = Options::default();
-        opts.target = temp.path().to_path_buf();
-        opts.git_caps.fast_export_anonymize_map = true;
+        let opts = Options {
+            target: temp.path().to_path_buf(),
+            git_caps: crate::gitutil::GitCapabilities {
+                fast_export_anonymize_map: true,
+                ..Default::default()
+            },
+            ..Options::default()
+        };
         let with_cap = build_fast_import_cmd(&opts);
         let args_with = args_as_strings(&with_cap);
         assert!(

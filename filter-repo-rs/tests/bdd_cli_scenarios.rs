@@ -302,11 +302,13 @@ fn given_nonsensitive_full_rewrite_when_run_then_origin_remote_is_removed() {
 #[test]
 fn given_analyze_mode_when_run_then_metrics_and_warnings_are_reported() {
     let repo = init_repo();
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true;
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true,
+        ..Default::default()
+    };
 
     let report = fr::analysis::generate_report(&opts).expect("generate analyze report");
     assert!(report.metrics.refs_total >= 1, "expected refs_total >= 1");

@@ -94,11 +94,13 @@ fn cli_options_priority_testing() {
     run_git(&repo, &["commit", "-m", "Test CLI options"]);
 
     // Test that larger max_blob_size allows more files through
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.max_blob_size = Some(5000); // 5KB limit
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        max_blob_size: Some(5000), // 5KB limit
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -141,13 +143,15 @@ fn multiple_cli_options_interaction() {
     fs::write(&rules_file, rules_content).unwrap();
 
     // Test multiple options working together
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.max_blob_size = Some(2000); // Filter out larger files
-    opts.replace_text_file = Some(rules_file);
-    opts.paths = vec![b"keep_this".to_vec()]; // Only keep specific files
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        max_blob_size: Some(2000), // Filter out larger files
+        replace_text_file: Some(rules_file),
+        paths: vec![b"keep_this".to_vec()], // Only keep specific files
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -195,15 +199,17 @@ fn path_filtering_with_various_patterns() {
     run_git(&repo, &["commit", "-m", "Test path filtering patterns"]);
 
     // Test multiple path filters (OR logic)
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.paths = vec![
-        b"important".to_vec(),
-        b"config".to_vec(),
-        b"README".to_vec(),
-    ]; // Keep files matching any of these patterns
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        paths: vec![
+            b"important".to_vec(),
+            b"config".to_vec(),
+            b"README".to_vec(),
+        ], // Keep files matching any of these patterns
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -247,11 +253,13 @@ fn path_rename_functionality() {
     run_git(&repo, &["commit", "-m", "Test path rename"]);
 
     // Test path renaming
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.path_renames = vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())];
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        path_renames: vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())],
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -295,12 +303,14 @@ fn branch_and_tag_rename_functionality() {
     run_git(&repo, &["checkout", "main"]);
 
     // Test tag and branch renaming
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.tag_rename = Some((b"v".to_vec(), b"release-".to_vec()));
-    opts.branch_rename = Some((b"feature-".to_vec(), b"feat-".to_vec()));
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        tag_rename: Some((b"v".to_vec(), b"release-".to_vec())),
+        branch_rename: Some((b"feature-".to_vec(), b"feat-".to_vec())),
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -335,12 +345,14 @@ fn dry_run_mode_functionality() {
     fs::write(&rules_file, rules_content).unwrap();
 
     // Test dry run mode
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.dry_run = true;
-    opts.replace_text_file = Some(rules_file);
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        dry_run: true,
+        replace_text_file: Some(rules_file),
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());

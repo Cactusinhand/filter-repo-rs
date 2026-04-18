@@ -11,11 +11,13 @@ fn unit_test_commit_message_processing() {
     run_git(&repo, &["commit", "-m", "Original commit message"]);
     let message_file = repo.join("message_replacements.txt");
     std::fs::write(&message_file, "Original==>Replacement").unwrap();
-    let mut opts = fr::Options::default();
-    opts.replace_message_file = Some(message_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let opts = fr::Options {
+        replace_message_file: Some(message_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, log, _e) = run_git(&repo, &["log", "--oneline", "-1"]);
@@ -34,12 +36,14 @@ fn unit_test_tag_processing() {
         &repo,
         &["tag", "-a", "annotated-tag", "-m", "Annotated tag message"],
     );
-    let mut opts = fr::Options::default();
-    opts.tag_rename = Some((b"lightweight-".to_vec(), b"renamed-lightweight-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        tag_rename: Some((b"lightweight-".to_vec(), b"renamed-lightweight-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tags, _e) = run_git(&repo, &["tag", "-l"]);
@@ -62,12 +66,14 @@ fn annotated_tag_message_replacement() {
     let rules = repo.join("message_rules_tags.txt");
     std::fs::write(&rules, "café==>CAFE\n🚀==>ROCKET\n").unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_message_file = Some(rules);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
-    opts.refs = vec!["--all".to_string()]; // include tags
+    let opts = fr::Options {
+        replace_message_file: Some(rules),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        refs: vec!["--all".to_string()], // include tags
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
 
@@ -185,13 +191,15 @@ fn tag_rename_and_message_rewrite_combined() {
     std::fs::write(&rules, "café==>CAFE\n🚀==>ROCKET\n").unwrap();
 
     // Run with both tag rename and message replacement enabled
-    let mut opts = fr::Options::default();
-    opts.replace_message_file = Some(rules);
-    opts.tag_rename = Some((b"orig-".to_vec(), b"renamed-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        replace_message_file: Some(rules),
+        tag_rename: Some((b"orig-".to_vec(), b"renamed-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
 
@@ -248,13 +256,15 @@ fn branch_rename_with_tag_message_rewrite() {
     std::fs::write(&rules, "café==>CAFE\n🚀==>ROCKET\n").unwrap();
 
     // Run with branch rename and message replacement; include all refs (branches + tags)
-    let mut opts = fr::Options::default();
-    opts.replace_message_file = Some(rules);
-    opts.branch_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        replace_message_file: Some(rules),
+        branch_rename: Some((b"original-".to_vec(), b"renamed-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
 
@@ -294,12 +304,14 @@ fn head_moves_on_branch_rename() {
     assert!(head_before.trim().ends_with("refs/heads/original-topic"));
 
     // Run pipeline with branch rename
-    let mut opts = fr::Options::default();
-    opts.branch_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        branch_rename: Some((b"original-".to_vec(), b"renamed-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
 

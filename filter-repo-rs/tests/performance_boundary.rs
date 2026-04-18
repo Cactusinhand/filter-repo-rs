@@ -29,11 +29,13 @@ fn large_binary_file_handling() {
     run_git(&repo, &["commit", "-m", "Add large binary files"]);
 
     // Test filtering with size limits
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(5 * 1024 * 1024); // 5MB limit
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        max_blob_size: Some(5 * 1024 * 1024), // 5MB limit
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);
@@ -93,11 +95,13 @@ fn many_small_files_performance() {
     );
 
     // Test path filtering on many files
-    let mut opts = fr::Options::default();
-    opts.paths = vec![b"file_01".to_vec()]; // Should match files 0100-0199
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec![b"file_01".to_vec()], // Should match files 0100-0199
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);
@@ -152,12 +156,14 @@ fn deep_directory_structure_performance() {
     run_git(&repo, &["commit", "-m", "Add deep directory structure"]);
 
     // Test filtering on deep paths
-    let mut opts = fr::Options::default();
-    // Match a sequence of nested directories indicative of depth >= 50
-    opts.paths = vec!["a/".repeat(50).into_bytes()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        // Match a sequence of nested directories indicative of depth >= 50
+        paths: vec!["a/".repeat(50).into_bytes()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);
@@ -206,11 +212,13 @@ fn many_commits_performance() {
     let rules_content = "Content==>Rewritten content\n";
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);
@@ -283,11 +291,13 @@ regex:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]==>[TIMESTAMP]
 "#;
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);
@@ -323,11 +333,13 @@ fn memory_usage_stress_test() {
     let rules_content = "A==>B\nB==>C\nC==>D\n"; // Chain replacements
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let start = Instant::now();
     let result = fr::run(&opts);

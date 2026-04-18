@@ -349,9 +349,11 @@ mod tests {
     #[test]
     fn apply_git_capabilities_disables_defaults() {
         let mut opts = Options::default();
-        let mut caps = GitCapabilities::default();
-        caps.fast_export_mark_tags = false;
-        caps.fast_export_reencode = false;
+        let caps = GitCapabilities {
+            fast_export_mark_tags: false,
+            fast_export_reencode: false,
+            ..GitCapabilities::default()
+        };
 
         assert!(opts.apply_git_capabilities(caps.clone()).is_ok());
         assert!(!opts.mark_tags);
@@ -361,10 +363,14 @@ mod tests {
 
     #[test]
     fn apply_git_capabilities_errors_when_mark_tags_requested() {
-        let mut opts = Options::default();
-        opts.mark_tags_requested = Some(true);
-        let mut caps = GitCapabilities::default();
-        caps.fast_export_mark_tags = false;
+        let mut opts = Options {
+            mark_tags_requested: Some(true),
+            ..Options::default()
+        };
+        let caps = GitCapabilities {
+            fast_export_mark_tags: false,
+            ..GitCapabilities::default()
+        };
 
         let err = opts
             .apply_git_capabilities(caps)
@@ -378,10 +384,14 @@ mod tests {
 
     #[test]
     fn apply_git_capabilities_errors_for_sensitive_mode() {
-        let mut opts = Options::default();
-        opts.sensitive = true;
-        let mut caps = GitCapabilities::default();
-        caps.cat_file_batch_command = false;
+        let mut opts = Options {
+            sensitive: true,
+            ..Options::default()
+        };
+        let caps = GitCapabilities {
+            cat_file_batch_command: false,
+            ..GitCapabilities::default()
+        };
 
         let err = opts
             .apply_git_capabilities(caps)

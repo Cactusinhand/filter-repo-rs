@@ -30,11 +30,13 @@ fn blob_filtering_edge_cases() {
     run_git(&repo, &["commit", "-m", "Test boundary sizes"]);
 
     // Test with exactly 1KB limit
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(1000);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        max_blob_size: Some(1000),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -86,11 +88,13 @@ fn empty_and_whitespace_files() {
     let rules_content = " ==>REPLACED\n\t==>TAB\n"; // Try to replace empty string and tabs
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -151,11 +155,13 @@ café==>CAFE
 "#;
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -215,11 +221,13 @@ fn path_filtering_with_special_patterns() {
             ],
         );
 
-        let mut opts = fr::Options::default();
-        opts.paths = vec![pattern.as_bytes().to_vec()];
-        opts.source = repo.clone();
-        opts.target = repo.clone();
-        opts.force = true;
+        let opts = fr::Options {
+            paths: vec![pattern.as_bytes().to_vec()],
+            source: repo.clone(),
+            target: repo.clone(),
+            force: true,
+            ..Default::default()
+        };
 
         // Create branch for each test
         let branch_name = format!("test_{}", description.replace(' ', "_"));
@@ -306,11 +314,13 @@ fn binary_file_handling_edge_cases() {
     let rules_content = "0==>1\n255==>254\n"; // Try to replace binary patterns
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -377,11 +387,13 @@ café==>CAFE
 "#;
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_message_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_message_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -490,11 +502,13 @@ fn concurrent_git_operations_simulation() {
     }
 
     // Test filtering on complex history
-    let mut opts = fr::Options::default();
-    opts.paths = vec![b"file_".to_vec()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec![b"file_".to_vec()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -620,11 +634,13 @@ fn malformed_replacement_rules() {
         let rules_file = repo.join(case.filename);
         fs::write(&rules_file, case.rules_content).unwrap();
 
-        let mut opts = fr::Options::default();
-        opts.replace_text_file = Some(rules_file);
-        opts.source = repo.clone();
-        opts.target = repo.clone();
-        opts.force = true;
+        let opts = fr::Options {
+            replace_text_file: Some(rules_file),
+            source: repo.clone(),
+            target: repo.clone(),
+            force: true,
+            ..Default::default()
+        };
 
         let result = fr::run(&opts);
         assert!(

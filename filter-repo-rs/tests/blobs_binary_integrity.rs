@@ -22,11 +22,13 @@ fn binary_not_modified_when_no_text_match() {
     let rules_file = repo.join("text_rules.txt");
     std::fs::write(&rules_file, "q==>X\nxyz==>XYZ\n").unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());

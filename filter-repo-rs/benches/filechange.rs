@@ -8,22 +8,25 @@ fn make_opts_no_filter() -> Options {
 }
 
 fn make_opts_with_paths(paths: Vec<Vec<u8>>) -> Options {
-    let mut opts = Options::default();
-    opts.paths = paths;
-    opts
+    Options {
+        paths,
+        ..Options::default()
+    }
 }
 
 fn make_opts_with_globs(globs: Vec<Vec<u8>>) -> Options {
-    let mut opts = Options::default();
-    opts.path_globs = globs;
-    opts
+    Options {
+        path_globs: globs,
+        ..Options::default()
+    }
 }
 
 fn make_opts_with_renames(renames: Vec<(Vec<u8>, Vec<u8>)>) -> Options {
-    let mut opts = Options::default();
-    opts.paths = vec![b"src/".to_vec()]; // keep src/
-    opts.path_renames = renames;
-    opts
+    Options {
+        paths: vec![b"src/".to_vec()], // keep src/
+        path_renames: renames,
+        ..Options::default()
+    }
 }
 
 // ---------------------------------------------------------------------------

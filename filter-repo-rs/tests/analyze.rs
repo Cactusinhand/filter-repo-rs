@@ -6,11 +6,13 @@ use common::*;
 #[test]
 fn analyze_mode_produces_human_report() {
     let repo = init_repo();
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     assert!(
         report.metrics.refs_total >= 1,
@@ -26,11 +28,13 @@ fn analyze_mode_produces_human_report() {
 #[test]
 fn analyze_mode_emits_json() {
     let repo = init_repo();
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let mut opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     let json = serde_json::to_string(&report).expect("serialize report");
     let v: serde_json::Value = serde_json::from_str(&json).expect("valid json");
@@ -71,11 +75,13 @@ fn analyze_mode_limits_top_entries_and_populates_paths() {
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
     assert_eq!(run_git(&repo, &["commit", "-m", "populate blobs"]).0, 0);
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let mut opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     opts.analyze.top = 2;
     opts.analyze.thresholds.warn_blob_bytes = 1500;
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
@@ -139,11 +145,13 @@ fn analyze_mode_warns_on_commit_thresholds() {
     let merge_msg = "Merge branch 'feature' with an explanation that exceeds the warn threshold";
     assert_eq!(run_git(&repo, &["merge", "feature", "-m", merge_msg]).0, 0);
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let mut opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     opts.analyze.thresholds.warn_commit_msg_bytes = 32;
     opts.analyze.thresholds.warn_max_parents = 1;
 
@@ -225,11 +233,13 @@ fn analyze_report_does_not_include_placeholder_blob_ids() {
         0
     );
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true;
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true,
+        ..Default::default()
+    };
 
     let report = fr::analysis::generate_report(&opts).expect("generate analysis report");
     assert!(
@@ -267,11 +277,13 @@ fn analyze_report_excludes_unreachable_blobs_from_top_lists() {
         "unreachable blob should not appear in reachable object listing"
     );
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true;
+    let mut opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true,
+        ..Default::default()
+    };
     opts.analyze.top = 1;
     opts.analyze.thresholds.warn_blob_bytes = 1;
 
@@ -305,11 +317,13 @@ fn analyze_mode_with_write_report_creates_report_file() {
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
     assert_eq!(run_git(&repo, &["commit", "-m", "add file"]).0, 0);
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true;
+    let mut opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true,
+        ..Default::default()
+    };
     opts.write_report = true;
 
     fr::analysis::run(&opts).expect("analyze mode with write_report should succeed");
@@ -335,12 +349,14 @@ fn analyze_mode_with_write_report_json_creates_json_report_file() {
     assert_eq!(run_git(&repo, &["add", "."]).0, 0);
     assert_eq!(run_git(&repo, &["commit", "-m", "add another file"]).0, 0);
 
-    let mut opts = fr::Options::default();
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.mode = fr::Mode::Analyze;
-    opts.force = true;
-    opts.write_report_json = true;
+    let opts = fr::Options {
+        source: repo.clone(),
+        target: repo.clone(),
+        mode: fr::Mode::Analyze,
+        force: true,
+        write_report_json: true,
+        ..Default::default()
+    };
 
     fr::analysis::run(&opts).expect("analyze mode with write_report_json should succeed");
 

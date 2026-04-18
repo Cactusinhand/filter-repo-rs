@@ -335,10 +335,12 @@ pub fn run_tool(
     dir: &Path,
     configure: impl FnOnce(&mut fr::Options),
 ) -> Result<(), FilterRepoError> {
-    let mut opts = fr::Options::default();
-    opts.source = dir.to_path_buf();
-    opts.target = dir.to_path_buf();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let mut opts = fr::Options {
+        source: dir.to_path_buf(),
+        target: dir.to_path_buf(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     configure(&mut opts);
     fr::run(&opts)
 }

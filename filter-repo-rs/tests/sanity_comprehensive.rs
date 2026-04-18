@@ -34,8 +34,7 @@ impl SanityTestUtils {
             .output()?;
 
         if !output.status.success() {
-            return Err(FilterRepoError::from(io::Error::new(
-                io::ErrorKind::Other,
+            return Err(FilterRepoError::from(io::Error::other(
                 "Failed to initialize test git repository",
             )));
         }
@@ -100,10 +99,12 @@ mod preflight_tests {
     fn test_preflight_with_force_flag() {
         let temp_dir = SanityTestUtils::temp_dir();
 
-        let mut opts = Options::default();
-        opts.target = temp_dir.path().to_path_buf();
-        opts.force = true;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_dir.path().to_path_buf(),
+            force: true,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         // With force flag, preflight should always succeed
         let result = preflight(&opts);
@@ -114,9 +115,11 @@ mod preflight_tests {
     fn test_preflight_with_force() {
         let temp_dir = SanityTestUtils::temp_dir();
 
-        let mut opts = Options::default();
-        opts.target = temp_dir.path().to_path_buf();
-        opts.force = true; // Use --force to bypass sanity checks
+        let opts = Options {
+            target: temp_dir.path().to_path_buf(),
+            force: true, // Use --force to bypass sanity checks
+            ..Default::default()
+        };
 
         // With force=true, preflight should succeed
         let result = preflight(&opts);
@@ -131,10 +134,12 @@ mod preflight_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         // Create a commit to make it a proper repository
         SanityTestUtils::create_commit(temp_repo.path()).expect("Failed to create commit");
@@ -149,10 +154,12 @@ mod preflight_tests {
 
     #[test]
     fn test_preflight_with_invalid_directory() {
-        let mut opts = Options::default();
-        opts.target = PathBuf::from("/nonexistent/directory");
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: PathBuf::from("/nonexistent/directory"),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -187,8 +194,7 @@ mod error_display_tests {
 
     #[test]
     fn test_io_error_display() {
-        let error =
-            SanityCheckError::IoError(io::Error::new(io::ErrorKind::Other, "Test IO error"));
+        let error = SanityCheckError::IoError(io::Error::other("Test IO error"));
         let display = format!("{}", error);
         assert!(display.contains("Test IO error"));
     }
@@ -262,10 +268,12 @@ mod already_ran_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         // First run should succeed (no already_ran file exists)
         // Note: This tests the integration through preflight, not direct AlreadyRanChecker
@@ -298,10 +306,12 @@ mod already_ran_tests {
         SanityTestUtils::create_marker_file(&already_ran_file, 48)
             .expect("Failed to create already_ran marker");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.force = true; // Force should bypass already_ran detection
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            force: true, // Force should bypass already_ran detection
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -325,12 +335,14 @@ mod sensitive_mode_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.sensitive = true;
-        opts.fe_stream_override = Some(PathBuf::from("test_stream"));
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            sensitive: true,
+            fe_stream_override: Some(PathBuf::from("test_stream")),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -348,12 +360,14 @@ mod sensitive_mode_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.sensitive = true;
-        opts.source = PathBuf::from("/custom/source");
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            sensitive: true,
+            source: PathBuf::from("/custom/source"),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -374,11 +388,13 @@ mod sensitive_mode_tests {
         // Create another temp directory to use as custom target
         let custom_target = SanityTestUtils::temp_dir();
 
-        let mut opts = Options::default();
-        opts.sensitive = true;
-        opts.target = custom_target.path().to_path_buf(); // Use existing directory
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            sensitive: true,
+            target: custom_target.path().to_path_buf(), // Use existing directory
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -402,12 +418,14 @@ mod sensitive_mode_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.sensitive = true;
-        opts.fe_stream_override = Some(PathBuf::from("test_stream"));
-        opts.force = true; // Force should bypass sensitive mode validation
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            sensitive: true,
+            fe_stream_override: Some(PathBuf::from("test_stream")),
+            force: true, // Force should bypass sensitive mode validation
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         let result = preflight(&opts);
         assert!(
@@ -421,13 +439,15 @@ mod sensitive_mode_tests {
         let temp_repo =
             SanityTestUtils::create_test_repo().expect("Failed to create test repository");
 
-        let mut opts = Options::default();
-        opts.target = temp_repo.path().to_path_buf();
-        opts.sensitive = false; // Not in sensitive mode
-        opts.fe_stream_override = Some(PathBuf::from("test_stream"));
-        opts.source = PathBuf::from("/custom/source");
-        opts.force = false;
-        opts.enforce_sanity = true;
+        let opts = Options {
+            target: temp_repo.path().to_path_buf(),
+            sensitive: false, // Not in sensitive mode
+            fe_stream_override: Some(PathBuf::from("test_stream")),
+            source: PathBuf::from("/custom/source"),
+            force: false,
+            enforce_sanity: true,
+            ..Default::default()
+        };
 
         // Create a commit to make it a proper repository
         SanityTestUtils::create_commit(temp_repo.path()).expect("Failed to create commit");
@@ -481,10 +501,12 @@ mod integration_tests {
         ];
 
         for (name, force, enforce_sanity, should_succeed) in test_cases {
-            let mut opts = Options::default();
-            opts.target = temp_repo.path().to_path_buf();
-            opts.force = force;
-            opts.enforce_sanity = enforce_sanity;
+            let opts = Options {
+                target: temp_repo.path().to_path_buf(),
+                force,
+                enforce_sanity,
+                ..Default::default()
+            };
 
             let result = preflight(&opts);
 

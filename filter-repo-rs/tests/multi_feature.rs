@@ -14,12 +14,14 @@ fn multi_feature_blob_size_with_path_filtering() {
     std::fs::write(repo.join("filter/small_file.txt"), "small").unwrap();
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "Add mixed size files"]);
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(1000);
-    opts.paths = vec![b"keep/".to_vec()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let opts = fr::Options {
+        max_blob_size: Some(1000),
+        paths: vec![b"keep/".to_vec()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tree, _e) = run_git(
@@ -53,12 +55,14 @@ fn multi_feature_blob_size_with_path_rename() {
         &repo,
         &["commit", "-m", "Add files for size and rename test"],
     );
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(1000);
-    opts.path_renames = vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
+    let opts = fr::Options {
+        max_blob_size: Some(1000),
+        path_renames: vec![(b"old_dir/".to_vec(), b"new_dir/".to_vec())],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tree, _e) = run_git(
@@ -90,13 +94,15 @@ fn multi_feature_blob_size_with_branch_rename() {
         &["commit", "-m", "Add files for size and branch rename test"],
     );
     run_git(&repo, &["branch", "original-branch"]);
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(1000);
-    opts.branch_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        max_blob_size: Some(1000),
+        branch_rename: Some((b"original-".to_vec(), b"renamed-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, branches, _e) = run_git(&repo, &["branch", "-l"]);
@@ -129,13 +135,15 @@ fn multi_feature_blob_size_with_tag_rename() {
         &["commit", "-m", "Add files for size and tag rename test"],
     );
     run_git(&repo, &["tag", "original-tag", "HEAD"]);
-    let mut opts = fr::Options::default();
-    opts.max_blob_size = Some(1000);
-    opts.tag_rename = Some((b"original-".to_vec(), b"renamed-".to_vec()));
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true; // Use --force to bypass sanity checks for unit tests
-    opts.refs = vec!["--all".to_string()];
+    let opts = fr::Options {
+        max_blob_size: Some(1000),
+        tag_rename: Some((b"original-".to_vec(), b"renamed-".to_vec())),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true, // Use --force to bypass sanity checks for unit tests
+        refs: vec!["--all".to_string()],
+        ..Default::default()
+    };
     let result = fr::run(&opts);
     assert!(result.is_ok());
     let (_c, tags, _e) = run_git(&repo, &["tag", "-l"]);

@@ -101,13 +101,14 @@ fn create_bare_target() -> TempDir {
 }
 
 fn default_opts(source: &Path, target: &Path) -> Options {
-    let mut opts = Options::default();
-    opts.source = source.to_path_buf();
-    opts.target = target.to_path_buf();
-    opts.refs = vec!["--all".to_string()];
-    opts.force = true; // bypass preflight in tests
-    opts.reset = false; // avoid reset in bare repos
-    opts
+    Options {
+        source: source.to_path_buf(),
+        target: target.to_path_buf(),
+        refs: vec!["--all".to_string()],
+        force: true,  // bypass preflight in tests
+        reset: false, // avoid reset in bare repos
+        ..Default::default()
+    }
 }
 
 #[test]

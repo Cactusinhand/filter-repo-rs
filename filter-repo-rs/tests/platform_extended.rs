@@ -37,11 +37,13 @@ fn windows_path_sanitization_reserved_characters() {
     run_git(&repo, &["commit", "-m", "Add files with sanitized names"]);
 
     // Test path filtering works with sanitized paths
-    let mut opts = fr::Options::default();
-    opts.paths = vec![b"sanitized".to_vec()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec![b"sanitized".to_vec()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -73,11 +75,13 @@ fn path_handling_trailing_dots_and_spaces() {
     run_git(&repo, &["commit", "-m", "Test trailing dots and spaces"]);
 
     // Verify path filtering works
-    let mut opts = fr::Options::default();
-    opts.paths = vec![b"file.txt".to_vec()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec![b"file.txt".to_vec()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -104,11 +108,13 @@ fn unicode_path_filtering() {
     run_git(&repo, &["add", "."]);
     run_git(&repo, &["commit", "-m", "Add Unicode files"]);
 
-    let mut opts = fr::Options::default();
-    opts.paths = vec!["文件".as_bytes().to_vec()];
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec!["文件".as_bytes().to_vec()],
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -141,11 +147,13 @@ fn unicode_content_replacement() {
     let rules_content = "café==>cafe\n🚀==>rocket\n文件==>file\n";
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -210,11 +218,13 @@ fn extreme_path_length_handling() {
     run_git(&repo, &["commit", "-m", "Test extreme path lengths"]);
 
     // Test that path filtering works with long paths
-    let mut opts = fr::Options::default();
-    opts.paths = vec![b"a".to_vec()]; // Should match long paths starting with 'a'
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        paths: vec![b"a".to_vec()], // Should match long paths starting with 'a'
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -243,11 +253,13 @@ fn mixed_line_endings_handling() {
     let rules_content = "line1==>replaced_line1\nline2==>replaced_line2\n";
     fs::write(&rules_file, rules_content).unwrap();
 
-    let mut opts = fr::Options::default();
-    opts.replace_text_file = Some(rules_file);
-    opts.source = repo.clone();
-    opts.target = repo.clone();
-    opts.force = true;
+    let opts = fr::Options {
+        replace_text_file: Some(rules_file),
+        source: repo.clone(),
+        target: repo.clone(),
+        force: true,
+        ..Default::default()
+    };
 
     let result = fr::run(&opts);
     assert!(result.is_ok());
@@ -273,11 +285,13 @@ fn case_insensitive_path_handling() {
     let test_cases = vec!["test", "TEST", "TeSt", "test.TXT"];
 
     for case in test_cases {
-        let mut opts = fr::Options::default();
-        opts.paths = vec![case.as_bytes().to_vec()];
-        opts.source = repo.clone();
-        opts.target = repo.clone();
-        opts.force = true;
+        let opts = fr::Options {
+            paths: vec![case.as_bytes().to_vec()],
+            source: repo.clone(),
+            target: repo.clone(),
+            force: true,
+            ..Default::default()
+        };
 
         // Create a new branch for each test to avoid conflicts
         let branch_name = format!("test_{}", case.to_lowercase());

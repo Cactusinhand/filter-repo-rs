@@ -47,7 +47,7 @@ fn bench_mailmap_rewrite(c: &mut Criterion) {
         );
 
         // Committer line (different prefix)
-        let committer_line = format!("committer Committer <old0@example.com> 1700000000 +0000");
+        let committer_line = "committer Committer <old0@example.com> 1700000000 +0000".to_string();
         group.bench_with_input(
             BenchmarkId::new("rewrite_line/committer", n),
             committer_line.as_bytes(),
