@@ -168,32 +168,19 @@ pub fn process_tag_block(first_line: &[u8], mut ctx: TagProcessContext<'_>) -> i
     Ok(())
 }
 
-// If a previous 'reset refs/tags/<name>' was seen, capture the following
-// 'from ' line into the buffered_tag_resets list and indicate the line was handled.
-pub fn maybe_capture_pending_tag_reset(
-    pending_tag_reset: &mut Option<Vec<u8>>,
-    line: &[u8],
-    buffered_tag_resets: &mut Vec<(Vec<u8>, Vec<u8>)>,
-) -> bool {
-    if let Some(ref_full) = pending_tag_reset.take() {
-        if line.starts_with(b"from ") {
-            buffered_tag_resets.push((ref_full, line.to_vec()));
-            return true;
-        }
-    }
-    false
-}
-
-// Handle 'reset refs/tags/<name>' lines for lightweight tags: apply --tag-rename
-// mapping, record ref_renames, and set pending_tag_reset to capture the next 'from '.
+/// Classify a `reset refs/tags/<name>` header.
+///
+/// Returns `Some(ref_full)` when the line targets a tag ref (already rewritten
+/// through `--tag-rename`); the caller is then responsible for parking in the
+/// lightweight-tag reset state and waiting for the follow-up `from ...` line.
+/// Returns `None` for non-reset or non-tag-reset lines.
 pub fn process_reset_header(
     line: &[u8],
     opts: &Options,
     ref_renames: &mut BTreeSet<(Vec<u8>, Vec<u8>)>,
-    pending_tag_reset: &mut Option<Vec<u8>>,
-) -> bool {
+) -> Option<Vec<u8>> {
     if !line.starts_with(b"reset ") {
-        return false;
+        return None;
     }
     let mut name = &line[b"reset ".len()..];
     if let Some(&last) = name.last() {
@@ -202,7 +189,7 @@ pub fn process_reset_header(
         }
     }
     if !name.starts_with(b"refs/tags/") {
-        return false;
+        return None;
     }
     let mut ref_full = name.to_vec();
     if let Some((ref old, ref new_)) = opts.tag_rename {
@@ -213,6 +200,5 @@ pub fn process_reset_header(
             ref_full = new_full;
         }
     }
-    *pending_tag_reset = Some(ref_full);
-    true
+    Some(ref_full)
 }

@@ -2,6 +2,9 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use std::io::BufReader;
 
 use filter_repo_rs::commit::{AuthorRewriter, MailmapRewriter};
+use filter_repo_rs::{
+    benchmark_rewrite_commit_identity_line, benchmark_rewrite_timestamp_line, Options,
+};
 
 // ---------------------------------------------------------------------------
 // AuthorRewriter (AhoCorasick-based email/name rewriting)
@@ -145,10 +148,78 @@ fn bench_commit_line_batch(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Stream rewrite helpers: benchmark the Cow fast path added in M-3
+// ---------------------------------------------------------------------------
+
+fn bench_stream_rewrite_helpers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("stream_rewrite_helpers");
+
+    let author_line = b"author Example User <user@example.com> 1700000000 +0000\n";
+    let committer_line = b"committer Example User <user@example.com> 1700000000 +0000\n";
+    let opts_noop = Options::default();
+    let opts_shift = Options {
+        date_shift: Some(3600),
+        ..Default::default()
+    };
+    let email_rules = b"user@example.com==>rewritten@example.com\n";
+    let email_rewriter = AuthorRewriter::from_reader(BufReader::new(&email_rules[..])).unwrap();
+
+    group.bench_function("timestamp/noop_borrowed", |b| {
+        b.iter(|| benchmark_rewrite_timestamp_line(black_box(author_line), black_box(&opts_noop)))
+    });
+
+    group.bench_function("timestamp/date_shift_owned", |b| {
+        b.iter(|| benchmark_rewrite_timestamp_line(black_box(author_line), black_box(&opts_shift)))
+    });
+
+    group.bench_function("identity/noop", |b| {
+        b.iter(|| {
+            benchmark_rewrite_commit_identity_line(
+                black_box(author_line),
+                black_box(&opts_noop),
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+    });
+
+    group.bench_function("identity/date_shift", |b| {
+        b.iter(|| {
+            benchmark_rewrite_commit_identity_line(
+                black_box(committer_line),
+                black_box(&opts_shift),
+                None,
+                None,
+                None,
+                None,
+            )
+        })
+    });
+
+    group.bench_function("identity/email_rewrite", |b| {
+        b.iter(|| {
+            benchmark_rewrite_commit_identity_line(
+                black_box(author_line),
+                black_box(&opts_noop),
+                None,
+                None,
+                Some(black_box(&email_rewriter)),
+                None,
+            )
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_author_rewriter,
     bench_mailmap_large_scale,
-    bench_commit_line_batch
+    bench_commit_line_batch,
+    bench_stream_rewrite_helpers
 );
 criterion_main!(benches);

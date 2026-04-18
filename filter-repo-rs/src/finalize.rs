@@ -11,7 +11,6 @@ use crate::error::{FilterRepoError, Result};
 use crate::gitutil;
 use crate::migrate;
 use crate::opts::Options;
-use crate::stream::BlobSizeTracker;
 
 #[derive(Debug, Serialize)]
 pub struct Summary {
@@ -75,6 +74,19 @@ pub struct ReportData {
     pub metadata: Metadata,
 }
 
+pub struct FinalizeContext<'a> {
+    pub opts: &'a Options,
+    pub debug_dir: &'a Path,
+    pub ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)>,
+    pub commit_pairs: Vec<(Vec<u8>, Option<u32>)>,
+    pub buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)>,
+    pub annotated_tag_refs: BTreeSet<Vec<u8>>,
+    pub updated_branch_refs: BTreeSet<Vec<u8>>,
+    pub branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
+    pub import_broken: bool,
+    pub allow_flush_tag_resets: bool,
+}
+
 // Flush buffered lightweight tag resets to outputs prior to sending 'done'.
 pub fn flush_lightweight_tag_resets(
     buffered_tag_resets: &mut Vec<(Vec<u8>, Vec<u8>)>,
@@ -123,25 +135,26 @@ pub fn flush_lightweight_tag_resets(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn finalize(
-    opts: &Options,
-    debug_dir: &Path,
-    ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)>,
-    commit_pairs: Vec<(Vec<u8>, Option<u32>)>,
-    buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)>,
-    annotated_tag_refs: BTreeSet<Vec<u8>>,
-    updated_branch_refs: BTreeSet<Vec<u8>>,
-    mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
+    ctx: FinalizeContext<'_>,
     filt_file: &mut dyn Write,
     mut fi_in: Option<Box<dyn Write>>,
     fe: &mut Child,
     fi: Option<&mut Child>,
-    mut import_broken: bool,
-    allow_flush_tag_resets: bool,
     report: Option<ReportData>,
-    _blob_sizes: &BlobSizeTracker,
 ) -> Result<()> {
+    let FinalizeContext {
+        opts,
+        debug_dir,
+        ref_renames,
+        commit_pairs,
+        buffered_tag_resets,
+        annotated_tag_refs,
+        updated_branch_refs,
+        mut branch_reset_targets,
+        mut import_broken,
+        allow_flush_tag_resets,
+    } = ctx;
     // Emit buffered lightweight tag resets if any remain (ideally flushed before 'done')
     if allow_flush_tag_resets {
         let mut buffered = buffered_tag_resets;
@@ -951,14 +964,15 @@ mod tests {
         )
         .expect("write target marks");
 
-        let mut opts = Options::default();
-        opts.source = repo.path().to_path_buf();
-        opts.target = repo.path().to_path_buf();
-        opts.dry_run = true;
-        opts.quiet = true;
-        opts.write_report = true;
-        opts.write_report_json = true;
-        let blob_sizes = BlobSizeTracker::new(&opts);
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            target: repo.path().to_path_buf(),
+            dry_run: true,
+            quiet: true,
+            write_report: true,
+            write_report_json: true,
+            ..Default::default()
+        };
 
         let report = ReportData {
             summary: Summary {
@@ -990,22 +1004,26 @@ mod tests {
             .expect("spawn git --version");
         let mut filtered = Vec::<u8>::new();
         finalize(
-            &opts,
-            debug_dir.path(),
-            BTreeSet::from([(b"refs/heads/old".to_vec(), b"refs/heads/new".to_vec())]),
-            vec![(old1.clone(), Some(1)), (old2.clone(), None)],
-            vec![(b"refs/tags/v1".to_vec(), b"from :1\n".to_vec())],
-            BTreeSet::new(),
-            BTreeSet::new(),
-            Vec::new(),
+            FinalizeContext {
+                opts: &opts,
+                debug_dir: debug_dir.path(),
+                ref_renames: BTreeSet::from([(
+                    b"refs/heads/old".to_vec(),
+                    b"refs/heads/new".to_vec(),
+                )]),
+                commit_pairs: vec![(old1.clone(), Some(1)), (old2.clone(), None)],
+                buffered_tag_resets: vec![(b"refs/tags/v1".to_vec(), b"from :1\n".to_vec())],
+                annotated_tag_refs: BTreeSet::new(),
+                updated_branch_refs: BTreeSet::new(),
+                branch_reset_targets: Vec::new(),
+                import_broken: false,
+                allow_flush_tag_resets: true,
+            },
             &mut filtered,
             Some(Box::new(Vec::<u8>::new())),
             &mut fe,
             None,
-            false,
-            true,
             Some(report),
-            &blob_sizes,
         )
         .expect("finalize should succeed");
 
@@ -1057,12 +1075,13 @@ mod tests {
         )
         .expect("write filtered stream");
 
-        let mut opts = Options::default();
-        opts.source = repo.path().to_path_buf();
-        opts.target = repo.path().to_path_buf();
-        opts.dry_run = true;
-        opts.quiet = true;
-        let blob_sizes = BlobSizeTracker::new(&opts);
+        let opts = Options {
+            source: repo.path().to_path_buf(),
+            target: repo.path().to_path_buf(),
+            dry_run: true,
+            quiet: true,
+            ..Default::default()
+        };
 
         let mut fe = Command::new("git")
             .arg("--version")
@@ -1071,22 +1090,23 @@ mod tests {
             .expect("spawn git --version");
         let mut filtered_out = Vec::<u8>::new();
         finalize(
-            &opts,
-            debug_dir.path(),
-            BTreeSet::new(),
-            Vec::new(),
-            Vec::new(),
-            BTreeSet::new(),
-            BTreeSet::new(),
-            Vec::new(),
+            FinalizeContext {
+                opts: &opts,
+                debug_dir: debug_dir.path(),
+                ref_renames: BTreeSet::new(),
+                commit_pairs: Vec::new(),
+                buffered_tag_resets: Vec::new(),
+                annotated_tag_refs: BTreeSet::new(),
+                updated_branch_refs: BTreeSet::new(),
+                branch_reset_targets: Vec::new(),
+                import_broken: false,
+                allow_flush_tag_resets: false,
+            },
             &mut filtered_out,
             None,
             &mut fe,
             None,
-            false,
-            false,
             None,
-            &blob_sizes,
         )
         .expect("finalize should succeed");
 

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -21,14 +22,14 @@ const REPORT_SAMPLE_LIMIT: usize = 20;
 const SHA_HEX_LEN: usize = 40;
 const SHA_BIN_LEN: usize = 20;
 
-fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
+fn rewrite_timestamp_line<'a>(line: &'a [u8], opts: &Options) -> Cow<'a, [u8]> {
     if opts.date_shift.is_none() && opts.date_set.is_none() {
-        return line.to_vec();
+        return Cow::Borrowed(line);
     }
 
     let line_str = match std::str::from_utf8(line) {
         Ok(s) => s,
-        Err(_) => return line.to_vec(),
+        Err(_) => return Cow::Borrowed(line),
     };
 
     let prefix = if line_str.starts_with("author ") {
@@ -36,14 +37,14 @@ fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
     } else if line_str.starts_with("committer ") {
         "committer "
     } else {
-        return line.to_vec();
+        return Cow::Borrowed(line);
     };
 
     let rest = &line_str[prefix.len()..];
 
     let email_end = match rest.rfind('>') {
         Some(pos) => pos,
-        None => return line.to_vec(),
+        None => return Cow::Borrowed(line),
     };
 
     let after_email = &rest[email_end + 1..].trim_start();
@@ -51,16 +52,16 @@ fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
     let mut parts = after_email.split_whitespace();
     let timestamp_str = match parts.next() {
         Some(t) => t,
-        None => return line.to_vec(),
+        None => return Cow::Borrowed(line),
     };
     let timezone = match parts.next() {
         Some(tz) => tz,
-        None => return line.to_vec(),
+        None => return Cow::Borrowed(line),
     };
 
     let timestamp: i64 = match timestamp_str.parse() {
         Ok(t) => t,
-        Err(_) => return line.to_vec(),
+        Err(_) => return Cow::Borrowed(line),
     };
 
     let new_timestamp = if let Some(fixed_ts) = opts.date_set {
@@ -72,11 +73,13 @@ fn rewrite_timestamp_line(line: &[u8], opts: &Options) -> Vec<u8> {
     };
 
     let identity_part = &rest[..email_end + 1];
-    format!(
-        "{}{} {} {}\n",
-        prefix, identity_part, new_timestamp, timezone
+    Cow::Owned(
+        format!(
+            "{}{} {} {}\n",
+            prefix, identity_part, new_timestamp, timezone
+        )
+        .into_bytes(),
     )
-    .into_bytes()
 }
 
 fn rewrite_commit_identity_line(
@@ -112,7 +115,31 @@ fn rewrite_commit_identity_line(
         }
     }
 
-    rewrite_timestamp_line(&rewritten, opts)
+    rewrite_timestamp_line(&rewritten, opts).into_owned()
+}
+
+#[doc(hidden)]
+pub fn benchmark_rewrite_timestamp_line<'a>(line: &'a [u8], opts: &Options) -> Cow<'a, [u8]> {
+    rewrite_timestamp_line(line, opts)
+}
+
+#[doc(hidden)]
+pub fn benchmark_rewrite_commit_identity_line(
+    line: &[u8],
+    opts: &Options,
+    author_rewriter: Option<&AuthorRewriter>,
+    committer_rewriter: Option<&AuthorRewriter>,
+    email_rewriter: Option<&AuthorRewriter>,
+    mailmap_rewriter: Option<&MailmapRewriter>,
+) -> Vec<u8> {
+    rewrite_commit_identity_line(
+        line,
+        opts,
+        author_rewriter,
+        committer_rewriter,
+        email_rewriter,
+        mailmap_rewriter,
+    )
 }
 
 /// Add a path sample to the collection if under limit and not already present.
@@ -129,6 +156,163 @@ struct PathCompatStats {
     skipped: usize,
     sanitized_samples: Vec<String>,
     skipped_samples: Vec<String>,
+}
+
+struct FinalizeStreamArgs {
+    tracker: FilterTracker,
+    samples: ReportSamples,
+    total_commits: usize,
+    total_blobs: usize,
+    path_compat_stats: PathCompatStats,
+}
+
+struct StreamIo {
+    filt_file: BufWriter<File>,
+    orig_file_opt: Option<BufWriter<File>>,
+    fe: std::process::Child,
+    fi: Option<std::process::Child>,
+    fe_out: BufReader<std::process::ChildStdout>,
+    fi_in_opt: Option<BufWriter<std::process::ChildStdin>>,
+    fi_out_opt: Option<BufReader<std::process::ChildStdout>>,
+}
+
+struct Rewriters {
+    replacer: Option<MessageReplacer>,
+    msg_regex_replacer: Option<MsgRegexReplacer>,
+    short_hash_mapper: Option<ShortHashMapper>,
+    content_replacer: Option<MessageReplacer>,
+    content_regex_replacer: Option<BlobRegexReplacer>,
+    author_rewriter: Option<AuthorRewriter>,
+    committer_rewriter: Option<AuthorRewriter>,
+    email_rewriter: Option<AuthorRewriter>,
+    mailmap_rewriter: Option<MailmapRewriter>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResetStateKind {
+    Tag,
+    Branch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParseState {
+    Idle,
+    InBlob {
+        mark: Option<u32>,
+        header_lines: Vec<Vec<u8>>,
+    },
+    InCommit {
+        mark: Option<u32>,
+        header_buf: Vec<u8>,
+        has_file_changes: bool,
+        commit_ref: Vec<u8>,
+    },
+    SkippingTagBlock,
+    InReset {
+        ref_name: Vec<u8>,
+        kind: ResetStateKind,
+    },
+}
+
+impl ParseState {
+    fn enter_blob(line: &[u8]) -> Self {
+        Self::InBlob {
+            mark: None,
+            header_lines: vec![line.to_vec()],
+        }
+    }
+
+    fn record_blob_mark(self, line: &[u8]) -> Option<Self> {
+        let Self::InBlob {
+            mut mark,
+            mut header_lines,
+        } = self
+        else {
+            return None;
+        };
+
+        if !line.starts_with(b"mark :") {
+            return None;
+        }
+
+        let mut num: u32 = 0;
+        let mut seen = false;
+        for &b in line[b"mark :".len()..].iter() {
+            if b.is_ascii_digit() {
+                seen = true;
+                num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
+            } else {
+                break;
+            }
+        }
+        if seen {
+            mark = Some(num);
+        }
+        header_lines.push(line.to_vec());
+        Some(Self::InBlob { mark, header_lines })
+    }
+
+    fn enter_commit(line: &[u8]) -> Self {
+        let mut commit_ref = line[b"commit ".len()..].to_vec();
+        if commit_ref.last() == Some(&b'\n') {
+            commit_ref.pop();
+        }
+        Self::InCommit {
+            mark: None,
+            header_buf: line.to_vec(),
+            has_file_changes: false,
+            commit_ref,
+        }
+    }
+
+    fn should_end_commit_before(&self, line: &[u8]) -> bool {
+        matches!(self, Self::InCommit { .. })
+            && (line.starts_with(b"commit ")
+                || line.starts_with(b"tag ")
+                || line.starts_with(b"reset ")
+                || line.starts_with(b"blob")
+                || line == b"done\n")
+    }
+
+    fn consumes_tag_data_header(&self, line: &[u8]) -> bool {
+        matches!(self, Self::SkippingTagBlock) && line.starts_with(b"data ")
+    }
+
+    /// Classify the next line while persistently parked in `InReset`.
+    ///
+    /// The fast-export stream may place arbitrary content after a `reset` header
+    /// (either a matching `from <target>` line or the start of the next object).
+    /// This method consumes `self` so callers must handle both outcomes explicitly
+    /// and cannot accidentally keep stale reset state.
+    fn dispatch_reset_line(self, line: &[u8]) -> ResetDispatch {
+        let Self::InReset { ref_name, kind } = self else {
+            return ResetDispatch::Replay;
+        };
+
+        if line.starts_with(b"from ") {
+            let mut target = line[b"from ".len()..].to_vec();
+            if target.last() == Some(&b'\n') {
+                target.pop();
+            }
+            ResetDispatch::Captured {
+                ref_name,
+                kind,
+                target,
+            }
+        } else {
+            ResetDispatch::Replay
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ResetDispatch {
+    Captured {
+        ref_name: Vec<u8>,
+        kind: ResetStateKind,
+        target: Vec<u8>,
+    },
+    Replay,
 }
 
 fn path_compat_sample_label(event: &crate::pathutil::PathCompatEvent) -> String {
@@ -1010,17 +1194,7 @@ impl<'a> StreamProcessor<'a> {
         Ok(Self { opts, debug_dir })
     }
 
-    fn init_stream_io(
-        &self,
-    ) -> io::Result<(
-        BufWriter<File>,
-        Option<BufWriter<File>>,
-        std::process::Child,
-        Option<std::process::Child>,
-        BufReader<std::process::ChildStdout>,
-        Option<BufWriter<std::process::ChildStdin>>,
-        Option<BufReader<std::process::ChildStdout>>,
-    )> {
+    fn init_stream_io(&self) -> io::Result<StreamIo> {
         let opts = self.opts;
         let debug_dir = &self.debug_dir;
         let filt_file = BufWriter::new(File::create(debug_dir.join("fast-export.filtered"))?);
@@ -1067,7 +1241,7 @@ impl<'a> StreamProcessor<'a> {
                 None
             };
 
-        Ok((
+        Ok(StreamIo {
             filt_file,
             orig_file_opt,
             fe,
@@ -1075,22 +1249,10 @@ impl<'a> StreamProcessor<'a> {
             fe_out,
             fi_in_opt,
             fi_out_opt,
-        ))
+        })
     }
 
-    fn init_rewriters(
-        &self,
-    ) -> io::Result<(
-        Option<MessageReplacer>,
-        Option<MsgRegexReplacer>,
-        Option<ShortHashMapper>,
-        Option<MessageReplacer>,
-        Option<BlobRegexReplacer>,
-        Option<AuthorRewriter>,
-        Option<AuthorRewriter>,
-        Option<AuthorRewriter>,
-        Option<MailmapRewriter>,
-    )> {
+    fn init_rewriters(&self) -> io::Result<Rewriters> {
         let opts = self.opts;
         let debug_dir = &self.debug_dir;
 
@@ -1148,7 +1310,7 @@ impl<'a> StreamProcessor<'a> {
             None => None,
         };
 
-        Ok((
+        Ok(Rewriters {
             replacer,
             msg_regex_replacer,
             short_hash_mapper,
@@ -1158,133 +1320,142 @@ impl<'a> StreamProcessor<'a> {
             committer_rewriter,
             email_rewriter,
             mailmap_rewriter,
-        ))
+        })
     }
 
     fn finalize_stream(
         &self,
-        opts: &Options,
+        ctx: crate::finalize::FinalizeContext<'_>,
         filt_file: &mut BufWriter<File>,
-        orig_file_opt: &mut Option<BufWriter<File>>,
         fi_in_opt: &mut Option<BufWriter<std::process::ChildStdin>>,
         fe: &mut std::process::Child,
         fi: &mut Option<std::process::Child>,
-        import_broken: bool,
-        ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)>,
-        commit_pairs: Vec<(Vec<u8>, Option<u32>)>,
-        buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)>,
-        annotated_tag_refs: BTreeSet<Vec<u8>>,
-        updated_branch_refs: BTreeSet<Vec<u8>>,
-        branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)>,
-        tracker: FilterTracker,
-        samples: ReportSamples,
-        total_commits: usize,
-        total_blobs: usize,
-        path_compat_stats: PathCompatStats,
-        blob_size_tracker: &BlobSizeTracker,
+        stream_args: FinalizeStreamArgs,
     ) -> FilterRepoResult<()> {
-        if let Some(ref mut of) = orig_file_opt {
-            of.flush()?;
-        }
-        let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
+        let FinalizeStreamArgs {
+            tracker,
+            samples,
+            total_commits,
+            total_blobs,
+            path_compat_stats,
+        } = stream_args;
         let fi_writer_for_finalize: Option<Box<dyn Write>> =
             fi_in_opt.take().map(|bw| Box::new(bw) as Box<dyn Write>);
-        let total_refs_rewritten = ref_renames.len();
+        let total_refs_rewritten = ctx.ref_renames.len();
+
+        let report = {
+            use crate::finalize::{
+                Metadata, ReportData, Samples, Statistics, Summary, WindowsPathReport,
+                WindowsPathSamples, WindowsPathSummary,
+            };
+            Some(ReportData {
+                summary: Summary {
+                    blobs_stripped_by_size: tracker
+                        .suppressed_shas_by_size
+                        .len()
+                        .max(tracker.suppressed_marks_by_size.len()),
+                    blobs_stripped_by_sha: tracker
+                        .suppressed_shas_by_sha
+                        .len()
+                        .max(tracker.suppressed_marks_by_sha.len()),
+                    blobs_modified: tracker.modified_marks.len()
+                        + samples.inline_modified_paths.len(),
+                },
+                statistics: Statistics {
+                    commits_processed: total_commits,
+                    blobs_processed: total_blobs,
+                    refs_rewritten: total_refs_rewritten,
+                },
+                samples: Samples {
+                    by_size: samples
+                        .size
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                    by_sha: samples
+                        .sha
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                    modified: samples
+                        .modified
+                        .into_iter()
+                        .map(|p| String::from_utf8_lossy(&p).into_owned())
+                        .collect(),
+                },
+                windows_path: if path_compat_stats.sanitized + path_compat_stats.skipped > 0 {
+                    Some(WindowsPathReport {
+                        summary: WindowsPathSummary {
+                            policy: path_compat_stats.policy,
+                            sanitized: path_compat_stats.sanitized,
+                            skipped: path_compat_stats.skipped,
+                        },
+                        samples: if path_compat_stats.sanitized_samples.is_empty()
+                            && path_compat_stats.skipped_samples.is_empty()
+                        {
+                            None
+                        } else {
+                            Some(WindowsPathSamples {
+                                sanitized: path_compat_stats.sanitized_samples,
+                                skipped: path_compat_stats.skipped_samples,
+                            })
+                        },
+                    })
+                } else {
+                    None
+                },
+                metadata: Metadata {
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs().to_string())
+                        .unwrap_or_default(),
+                },
+            })
+        };
 
         crate::finalize::finalize(
-            opts,
-            &self.debug_dir,
-            ref_renames,
-            commit_pairs,
-            buffered_tag_resets,
-            annotated_tag_refs,
-            updated_branch_refs,
-            branch_reset_targets,
+            ctx,
             filt_file as &mut dyn Write,
             fi_writer_for_finalize,
             fe,
             fi.as_mut(),
-            import_broken,
-            allow_flush_tag_resets,
-            {
-                use crate::finalize::{
-                    Metadata, ReportData, Samples, Statistics, Summary, WindowsPathReport,
-                    WindowsPathSamples, WindowsPathSummary,
-                };
-                Some(ReportData {
-                    summary: Summary {
-                        blobs_stripped_by_size: tracker
-                            .suppressed_shas_by_size
-                            .len()
-                            .max(tracker.suppressed_marks_by_size.len()),
-                        blobs_stripped_by_sha: tracker
-                            .suppressed_shas_by_sha
-                            .len()
-                            .max(tracker.suppressed_marks_by_sha.len()),
-                        blobs_modified: tracker.modified_marks.len()
-                            + samples.inline_modified_paths.len(),
-                    },
-                    statistics: Statistics {
-                        commits_processed: total_commits,
-                        blobs_processed: total_blobs,
-                        refs_rewritten: total_refs_rewritten,
-                    },
-                    samples: Samples {
-                        by_size: samples
-                            .size
-                            .into_iter()
-                            .map(|p| String::from_utf8_lossy(&p).into_owned())
-                            .collect(),
-                        by_sha: samples
-                            .sha
-                            .into_iter()
-                            .map(|p| String::from_utf8_lossy(&p).into_owned())
-                            .collect(),
-                        modified: samples
-                            .modified
-                            .into_iter()
-                            .map(|p| String::from_utf8_lossy(&p).into_owned())
-                            .collect(),
-                    },
-                    windows_path: if path_compat_stats.sanitized + path_compat_stats.skipped > 0 {
-                        Some(WindowsPathReport {
-                            summary: WindowsPathSummary {
-                                policy: path_compat_stats.policy,
-                                sanitized: path_compat_stats.sanitized,
-                                skipped: path_compat_stats.skipped,
-                            },
-                            samples: if path_compat_stats.sanitized_samples.is_empty()
-                                && path_compat_stats.skipped_samples.is_empty()
-                            {
-                                None
-                            } else {
-                                Some(WindowsPathSamples {
-                                    sanitized: path_compat_stats.sanitized_samples,
-                                    skipped: path_compat_stats.skipped_samples,
-                                })
-                            },
-                        })
-                    } else {
-                        None
-                    },
-                    metadata: Metadata {
-                        version: env!("CARGO_PKG_VERSION").to_string(),
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs().to_string())
-                            .unwrap_or_default(),
-                    },
-                })
-            },
-            blob_size_tracker,
+            report,
         )?;
 
         Ok(())
     }
 
+    fn record_emitted_commit_mark(
+        tracker: &mut FilterTracker,
+        short_hash_mapper: &mut Option<ShortHashMapper>,
+        fi_in_opt: &mut Option<BufWriter<std::process::ChildStdin>>,
+        fi_out_opt: &mut Option<BufReader<std::process::ChildStdout>>,
+        commit_pairs: &[(Vec<u8>, Option<u32>)],
+        commit_mark: Option<u32>,
+    ) -> FilterRepoResult<()> {
+        if let Some(m) = commit_mark {
+            tracker.emitted_marks.insert(m);
+            if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
+                short_hash_mapper.as_mut(),
+                fi_in_opt.as_mut(),
+                fi_out_opt.as_mut(),
+            ) {
+                if let Some((old, Some(mark))) = commit_pairs.last() {
+                    if *mark == m {
+                        if let Some(new_id) = resolve_mark_oid(fi_in, fi_out, *mark)? {
+                            mapper.update_mapping(old, &new_id);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn process(&self) -> FilterRepoResult<()> {
         let opts = self.opts;
-        let (
+        let StreamIo {
             mut filt_file,
             mut orig_file_opt,
             mut fe,
@@ -1292,8 +1463,8 @@ impl<'a> StreamProcessor<'a> {
             mut fe_out,
             mut fi_in_opt,
             mut fi_out_opt,
-        ) = self.init_stream_io()?;
-        let (
+        } = self.init_stream_io()?;
+        let Rewriters {
             replacer,
             msg_regex_replacer,
             mut short_hash_mapper,
@@ -1303,14 +1474,9 @@ impl<'a> StreamProcessor<'a> {
             committer_rewriter,
             email_rewriter,
             mailmap_rewriter,
-        ) = self.init_rewriters()?;
+        } = self.init_rewriters()?;
 
-        // minimal stream state is tracked via local booleans and buffers
-        // Commit buffering state for pruning
-        let mut in_commit = false;
-        let mut commit_buf: Vec<u8> = Vec::with_capacity(8192);
-        let mut commit_has_changes = false;
-        let mut commit_mark: Option<u32> = None;
+        let mut state = ParseState::Idle;
         let mut first_parent_mark: Option<u32> = None;
         let mut commit_original_oid: Option<Vec<u8>> = None;
         let mut parent_count: usize = 0;
@@ -1318,8 +1484,6 @@ impl<'a> StreamProcessor<'a> {
         let mut parent_lines: Vec<crate::commit::ParentLine> = Vec::new();
         let mut alias_map: HashMap<u32, u32> = HashMap::new();
         let mut import_broken = false;
-        // If we skip a duplicate annotated tag header, swallow the rest of its block
-        let mut skipping_tag_block: bool = false;
         let mut ref_renames: BTreeSet<(Vec<u8>, Vec<u8>)> = BTreeSet::new();
         // Track which refs we have updated (to avoid multiple updates of same ref via tag blocks)
         let mut updated_refs: BTreeSet<Vec<u8>> = BTreeSet::new();
@@ -1331,14 +1495,6 @@ impl<'a> StreamProcessor<'a> {
         let mut branch_reset_targets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
         // Buffer lightweight tag resets (ref, from-line)
         let mut buffered_tag_resets: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        // After seeing a reset refs/tags/<name>, capture the following 'from ...' line
-        let mut pending_tag_reset: Option<Vec<u8>> = None;
-        // After seeing a branch reset, capture the following 'from ...' line
-        let mut pending_branch_reset: Option<Vec<u8>> = None;
-        // Blob filtering state for --max-blob-size
-        let mut in_blob: bool = false;
-        let mut blob_buf: Vec<Vec<u8>> = Vec::new();
-        let mut last_blob_mark: Option<u32> = None;
         let strip_sha_lookup = match &opts.strip_blobs_with_ids {
             Some(path) => StripShaLookup::from_path(path).map_err(|e| {
                 io::Error::other(format!("failed to load --strip-blobs-with-ids: {e}"))
@@ -1357,516 +1513,521 @@ impl<'a> StreamProcessor<'a> {
             ..PathCompatStats::default()
         };
         let mut line = Vec::with_capacity(8192);
+        let mut replay_line: Option<Vec<u8>> = None;
         // Track if the previous M-line used inline content; store commit_buf position and path bytes
         let mut pending_inline: Option<(usize, Vec<u8>)> = None;
 
         loop {
-            line.clear();
-            let read = fe_out.read_until(b'\n', &mut line)?;
-            if read == 0 {
-                break;
+            let replaying = replay_line.is_some();
+            let current_line = if let Some(replayed) = replay_line.take() {
+                replayed
+            } else {
+                line.clear();
+                let read = fe_out.read_until(b'\n', &mut line)?;
+                if read == 0 {
+                    break;
+                }
+                line.clone()
+            };
+
+            if !replaying {
+                if let Some(ref mut f) = orig_file_opt {
+                    f.write_all(&current_line)?;
+                }
             }
 
-            // Mirror original header/line when enabled
-            if let Some(ref mut f) = orig_file_opt {
-                f.write_all(&line)?;
-            }
-
-            // If swallowing a skipped annotated tag block, consume its lines and payload
-            if skipping_tag_block {
-                if line.starts_with(b"data ") {
-                    let n = parse_data_size_header(&line)?;
+            if matches!(state, ParseState::SkippingTagBlock) {
+                if state.consumes_tag_data_header(&current_line) {
+                    let n = parse_data_size_header(&current_line)?;
                     let mut payload = vec![0u8; n];
                     fe_out.read_exact(&mut payload)?;
-                    // Mirror original payload to debug file (when enabled)
                     if let Some(ref mut f) = orig_file_opt {
                         f.write_all(&payload)?;
                     }
-                    // Done skipping this tag block
-                    skipping_tag_block = false;
+                    state = ParseState::Idle;
                 }
                 continue;
             }
 
-            // Pre-check for duplicate annotated tag: if target ref already updated, swallow this tag block
-            if crate::tag::precheck_duplicate_tag(&line, opts, &updated_refs) {
-                skipping_tag_block = true;
+            if crate::tag::precheck_duplicate_tag(&current_line, opts, &updated_refs) {
+                state = ParseState::SkippingTagBlock;
                 continue;
             }
 
-            // In blob header: record and ignore original-oid lines (fast-import does not accept them outside commits/tags)
-            if in_blob && line.starts_with(b"original-oid ") {
-                let mut v = line[b"original-oid ".len()..].to_vec();
-                if let Some(last) = v.last() {
-                    if *last == b'\n' {
-                        v.pop();
-                    }
-                }
-                for b in &mut v {
-                    if *b >= b'A' && *b <= b'F' {
-                        *b += 32;
-                    }
-                }
-                last_blob_orig_sha = Some(v);
-                continue;
-            }
-
-            // Blob begin
-            if line == b"blob\n" {
-                in_blob = true;
-                blob_buf.clear();
-                blob_buf.push(line.clone());
-                last_blob_mark = None;
-                total_blobs += 1;
-                continue;
-            }
-            // Blob mark
-            if in_blob && line.starts_with(b"mark :") {
-                let mut num: u32 = 0;
-                let mut seen = false;
-                for &b in line[b"mark :".len()..].iter() {
-                    if b.is_ascii_digit() {
-                        seen = true;
-                        num = num.saturating_mul(10).saturating_add((b - b'0') as u32);
-                    } else {
-                        break;
-                    }
-                }
-                if seen {
-                    last_blob_mark = Some(num);
-                }
-                blob_buf.push(line.clone());
-                continue;
-            }
-
-            // If a lightweight tag reset is pending, capture its 'from ' line
-            if crate::tag::maybe_capture_pending_tag_reset(
-                &mut pending_tag_reset,
-                &line,
-                &mut buffered_tag_resets,
-            ) {
-                continue;
-            }
-
-            // Capture branch reset targets (reset refs/heads/<name> -> from ...)
-            if let Some(ref_name) = pending_branch_reset.take() {
-                if !in_commit && line.starts_with(b"from ") {
-                    let mut target = line[b"from ".len()..].to_vec();
-                    if let Some(last) = target.last() {
-                        if *last == b'\n' {
-                            target.pop();
-                        }
-                    }
-                    if !target.is_empty() {
-                        branch_reset_targets.push((ref_name, target));
-                    }
-                } else {
-                    pending_branch_reset = Some(ref_name);
-                }
-            }
-
-            // Buffer annotated tag blocks and emit once (rename/dedupe-safe)
-            if line.starts_with(b"tag ") {
-                let short_mapper = short_hash_mapper.as_ref();
-                crate::tag::process_tag_block(
-                    &line,
-                    crate::tag::TagProcessContext {
-                        fe_out: &mut fe_out,
-                        orig_file: orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                        filt_file: &mut filt_file as &mut dyn Write,
-                        fi_in: if let Some(ref mut fi_in) = fi_in_opt {
-                            Some(fi_in as &mut dyn Write)
-                        } else {
-                            None
-                        },
-                        replacer: &replacer,
-                        msg_regex: msg_regex_replacer.as_ref(),
-                        short_mapper,
-                        opts,
-                        updated_refs: &mut updated_refs,
-                        annotated_tag_refs: &mut annotated_tag_refs,
-                        ref_renames: &mut ref_renames,
-                        emitted_marks: &mut tracker.emitted_marks,
-                    },
-                )?;
-                continue;
-            }
-
-            if line.starts_with(b"commit ") {
-                // Start buffering a commit using possibly renamed header
-                in_commit = true;
-                commit_buf.clear();
-                commit_has_changes = false;
-                commit_mark = None;
-                first_parent_mark = None;
-                parent_lines.clear();
-                total_commits += 1;
-                let hdr = crate::commit::rename_commit_header_ref(&line, opts, &mut ref_renames);
-                commit_buf.extend_from_slice(&hdr);
-                // Track final branch ref (post-rename) for HEAD updates
-                let mut refname = &hdr[b"commit ".len()..];
-                if let Some(&last) = refname.last() {
-                    if last == b'\n' {
-                        refname = &refname[..refname.len() - 1];
-                    }
-                }
-                if refname.starts_with(b"refs/heads/") {
-                    updated_branch_refs.insert(refname.to_vec());
-                }
-                continue;
-            }
-
-            // If we are buffering a commit, process its content
-            if in_commit {
-                // End of commit is implicit: a new object starts.
-                if line.starts_with(b"commit ")
-                    || line.starts_with(b"tag ")
-                    || line.starts_with(b"reset ")
-                    || line.starts_with(b"blob")
-                    || line == b"done\n"
-                {
-                    let short_mapper = short_hash_mapper.as_ref();
-                    let mut path_events = Vec::new();
-                    match crate::commit::process_commit_line(
-                        b"\n",
-                        opts,
-                        &mut fe_out,
-                        orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                        &mut filt_file as &mut dyn Write,
-                        if let Some(ref mut fi_in) = fi_in_opt {
-                            Some(fi_in as &mut dyn Write)
-                        } else {
-                            None
-                        },
-                        &replacer,
-                        msg_regex_replacer.as_ref(),
-                        short_mapper,
-                        &mut commit_buf,
-                        &mut commit_has_changes,
-                        &mut commit_mark,
-                        &mut first_parent_mark,
-                        &mut commit_original_oid,
-                        &mut parent_count,
-                        &mut commit_pairs,
-                        &mut import_broken,
-                        &mut parent_lines,
-                        &mut alias_map,
-                        &tracker.emitted_marks,
-                        &mut path_events,
-                    )? {
-                        crate::commit::CommitAction::Consumed => {} // Should not happen with synthetic newline
-                        crate::commit::CommitAction::Ended => {
-                            // Record emitted commit mark
-                            if let Some(m) = commit_mark {
-                                tracker.emitted_marks.insert(m);
-                                if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
-                                    short_hash_mapper.as_mut(),
-                                    fi_in_opt.as_mut(),
-                                    fi_out_opt.as_mut(),
-                                ) {
-                                    if let Some((old, Some(mark))) = commit_pairs.last() {
-                                        if *mark == m {
-                                            if let Some(new_id) =
-                                                resolve_mark_oid(fi_in, fi_out, *mark)?
-                                            {
-                                                mapper.update_mapping(old, &new_id);
-                                            }
-                                        }
-                                    }
+            if matches!(state, ParseState::InReset { .. }) {
+                let parked = std::mem::replace(&mut state, ParseState::Idle);
+                match parked.dispatch_reset_line(&current_line) {
+                    ResetDispatch::Captured {
+                        ref_name,
+                        kind,
+                        target,
+                    } => {
+                        match kind {
+                            ResetStateKind::Tag => {
+                                let mut from_line = b"from ".to_vec();
+                                from_line.extend_from_slice(&target);
+                                from_line.push(b'\n');
+                                buffered_tag_resets.push((ref_name, from_line));
+                            }
+                            ResetStateKind::Branch => {
+                                if !target.is_empty() {
+                                    branch_reset_targets.push((ref_name, target));
                                 }
                             }
-                            in_commit = false;
-                        }
-                    }
-                    for event in path_events {
-                        record_path_compat_event(&mut path_compat_stats, event);
-                    }
-                }
-            }
-            if in_commit {
-                let mut pending_inline_ctx = PendingInlineDataCtx {
-                    opts,
-                    fe_out: &mut fe_out,
-                    orig_file_opt: &mut orig_file_opt,
-                    commit_buf: &mut commit_buf,
-                    commit_has_changes: &mut commit_has_changes,
-                    pending_inline: &mut pending_inline,
-                    samples: &mut samples,
-                    path_compat_stats: &mut path_compat_stats,
-                    content_replacer: &content_replacer,
-                    content_regex_replacer: &content_regex_replacer,
-                };
-                if process_pending_inline_data_line(&line, &mut pending_inline_ctx)? {
-                    continue;
-                }
-                if line.starts_with(b"M ") && {
-                    let mut ctx = CommitMPrecheckCtx {
-                        opts,
-                        commit_buf: &mut commit_buf,
-                        commit_has_changes: &mut commit_has_changes,
-                        pending_inline: &mut pending_inline,
-                        tracker: &mut tracker,
-                        samples: &mut samples,
-                        path_compat_stats: &mut path_compat_stats,
-                        strip_sha_lookup: &strip_sha_lookup,
-                        blob_size_tracker: &mut blob_size_tracker,
-                    };
-                    process_commit_m_line_precheck(&line, &mut ctx)?
-                } {
-                    continue;
-                }
-
-                let processed_line = if in_commit {
-                    rewrite_commit_identity_line(
-                        &line,
-                        opts,
-                        author_rewriter.as_ref(),
-                        committer_rewriter.as_ref(),
-                        email_rewriter.as_ref(),
-                        mailmap_rewriter.as_ref(),
-                    )
-                } else {
-                    line.clone()
-                };
-
-                let short_mapper = short_hash_mapper.as_ref();
-                let mut path_events = Vec::new();
-                match crate::commit::process_commit_line(
-                    &processed_line,
-                    opts,
-                    &mut fe_out,
-                    orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
-                    &mut filt_file as &mut dyn Write,
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        Some(fi_in)
-                    } else {
-                        None
-                    },
-                    &replacer,
-                    msg_regex_replacer.as_ref(),
-                    short_mapper,
-                    &mut commit_buf,
-                    &mut commit_has_changes,
-                    &mut commit_mark,
-                    &mut first_parent_mark,
-                    &mut commit_original_oid,
-                    &mut parent_count,
-                    &mut commit_pairs,
-                    &mut import_broken,
-                    &mut parent_lines,
-                    &mut alias_map,
-                    &tracker.emitted_marks,
-                    &mut path_events,
-                )? {
-                    crate::commit::CommitAction::Consumed => {
-                        for event in path_events {
-                            record_path_compat_event(&mut path_compat_stats, event);
                         }
                         continue;
                     }
-                    crate::commit::CommitAction::Ended => {
-                        for event in path_events {
-                            record_path_compat_event(&mut path_compat_stats, event);
+                    ResetDispatch::Replay => {
+                        // The line after the reset header is not `from ...`; fall through
+                        // so the Idle dispatcher can classify it (commit/tag/blob/...).
+                        // orig_file already recorded this line above, so we continue inline
+                        // rather than re-queue via replay_line.
+                    }
+                }
+            }
+
+            let should_end_commit = state.should_end_commit_before(&current_line);
+            state = match state {
+                ParseState::Idle | ParseState::InReset { .. } => {
+                    if current_line == b"blob\n" {
+                        total_blobs += 1;
+                        ParseState::enter_blob(&current_line)
+                    } else if current_line.starts_with(b"tag ") {
+                        let short_mapper = short_hash_mapper.as_ref();
+                        crate::tag::process_tag_block(
+                            &current_line,
+                            crate::tag::TagProcessContext {
+                                fe_out: &mut fe_out,
+                                orig_file: orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                                filt_file: &mut filt_file as &mut dyn Write,
+                                fi_in: if let Some(ref mut fi_in) = fi_in_opt {
+                                    Some(fi_in as &mut dyn Write)
+                                } else {
+                                    None
+                                },
+                                replacer: &replacer,
+                                msg_regex: msg_regex_replacer.as_ref(),
+                                short_mapper,
+                                opts,
+                                updated_refs: &mut updated_refs,
+                                annotated_tag_refs: &mut annotated_tag_refs,
+                                ref_renames: &mut ref_renames,
+                                emitted_marks: &mut tracker.emitted_marks,
+                            },
+                        )?;
+                        ParseState::Idle
+                    } else if current_line.starts_with(b"commit ") {
+                        first_parent_mark = None;
+                        commit_original_oid = None;
+                        parent_count = 0;
+                        parent_lines.clear();
+                        total_commits += 1;
+                        let hdr = crate::commit::rename_commit_header_ref(
+                            &current_line,
+                            opts,
+                            &mut ref_renames,
+                        );
+                        let next_state = ParseState::enter_commit(&hdr);
+                        if let ParseState::InCommit { commit_ref, .. } = &next_state {
+                            if commit_ref.starts_with(b"refs/heads/") {
+                                updated_branch_refs.insert(commit_ref.clone());
+                            }
                         }
-                        if let Some(m) = commit_mark {
-                            tracker.emitted_marks.insert(m);
-                            if let (Some(mapper), Some(ref mut fi_in), Some(ref mut fi_out)) = (
-                                short_hash_mapper.as_mut(),
-                                fi_in_opt.as_mut(),
-                                fi_out_opt.as_mut(),
-                            ) {
-                                if let Some((old, Some(mark))) = commit_pairs.last() {
-                                    if *mark == m {
-                                        if let Some(new_id) =
-                                            resolve_mark_oid(fi_in, fi_out, *mark)?
-                                        {
-                                            mapper.update_mapping(old, &new_id);
+                        next_state
+                    } else if current_line.starts_with(b"data ") {
+                        let n = parse_data_size_header(&current_line)?;
+                        let mut payload = vec![0u8; n];
+                        fe_out.read_exact(&mut payload)?;
+                        if let Some(ref mut f) = orig_file_opt {
+                            f.write_all(&payload)?;
+                        }
+                        filt_file.write_all(&current_line)?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(&current_line) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                    break;
+                                } else {
+                                    return Err(e.into());
+                                }
+                            }
+                        }
+                        filt_file.write_all(&payload)?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(&payload) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                    break;
+                                } else {
+                                    return Err(e.into());
+                                }
+                            }
+                        }
+                        ParseState::Idle
+                    } else if current_line == b"done\n" {
+                        crate::finalize::flush_lightweight_tag_resets(
+                            &mut buffered_tag_resets,
+                            &annotated_tag_refs,
+                            &mut filt_file as &mut dyn Write,
+                            fi_in_opt.as_mut().map(|w| w as &mut dyn Write),
+                            &mut import_broken,
+                        )?;
+                        filt_file.write_all(&current_line)?;
+                        if let Some(ref mut fi_in) = fi_in_opt {
+                            if let Err(e) = fi_in.write_all(&current_line) {
+                                if e.kind() == io::ErrorKind::BrokenPipe {
+                                    import_broken = true;
+                                    break;
+                                } else {
+                                    return Err(e.into());
+                                }
+                            }
+                        }
+                        ParseState::Idle
+                    } else if let Some(tag_ref) =
+                        crate::tag::process_reset_header(&current_line, opts, &mut ref_renames)
+                    {
+                        ParseState::InReset {
+                            ref_name: tag_ref,
+                            kind: ResetStateKind::Tag,
+                        }
+                    } else if current_line.starts_with(b"reset ") {
+                        let mut name = &current_line[b"reset ".len()..];
+                        if let Some(&last) = name.last() {
+                            if last == b'\n' {
+                                name = &name[..name.len() - 1];
+                            }
+                        }
+                        if name.starts_with(b"refs/heads/") {
+                            let mut out = current_line.clone();
+                            let mut final_ref = name.to_vec();
+                            if let Some((ref old, ref new_)) = opts.branch_rename {
+                                let bname = &name[b"refs/heads/".len()..];
+                                if bname.starts_with(&old[..]) {
+                                    let mut rebuilt = Vec::with_capacity(
+                                        7 + b"refs/heads/".len()
+                                            + new_.len()
+                                            + (bname.len() - old.len())
+                                            + 1,
+                                    );
+                                    rebuilt.extend_from_slice(b"reset ");
+                                    rebuilt.extend_from_slice(b"refs/heads/");
+                                    rebuilt.extend_from_slice(new_);
+                                    rebuilt.extend_from_slice(&bname[old.len()..]);
+                                    rebuilt.push(b'\n');
+                                    let new_full =
+                                        [b"refs/heads/".as_ref(), new_, &bname[old.len()..]]
+                                            .concat();
+                                    ref_renames.insert((name.to_vec(), new_full.clone()));
+                                    final_ref = new_full;
+                                    out = rebuilt;
+                                }
+                            }
+                            updated_branch_refs.insert(final_ref.clone());
+                            filt_file.write_all(&out)?;
+                            if let Some(ref mut fi_in) = fi_in_opt {
+                                if let Err(e) = fi_in.write_all(&out) {
+                                    if e.kind() == io::ErrorKind::BrokenPipe {
+                                        import_broken = true;
+                                    } else {
+                                        return Err(e.into());
+                                    }
+                                }
+                            }
+                            ParseState::InReset {
+                                ref_name: final_ref,
+                                kind: ResetStateKind::Branch,
+                            }
+                        } else {
+                            if current_line != b"\n" {
+                                filt_file.write_all(&current_line)?;
+                                if let Some(ref mut fi_in) = fi_in_opt {
+                                    if let Err(e) = fi_in.write_all(&current_line) {
+                                        if e.kind() == io::ErrorKind::BrokenPipe {
+                                            import_broken = true;
+                                            break;
+                                        } else {
+                                            return Err(e.into());
                                         }
                                     }
                                 }
                             }
+                            ParseState::Idle
                         }
-                        in_commit = false;
+                    } else {
+                        if current_line != b"\n" {
+                            filt_file.write_all(&current_line)?;
+                            if let Some(ref mut fi_in) = fi_in_opt {
+                                if let Err(e) = fi_in.write_all(&current_line) {
+                                    if e.kind() == io::ErrorKind::BrokenPipe {
+                                        import_broken = true;
+                                        break;
+                                    } else {
+                                        return Err(e.into());
+                                    }
+                                }
+                            }
+                        }
+                        ParseState::Idle
                     }
                 }
-            }
-
-            // Generic data blocks (e.g., blob): forward exact payload bytes
-            if line.starts_with(b"data ") {
-                let n = parse_data_size_header(&line)?;
-                let mut payload = vec![0u8; n];
-                fe_out.read_exact(&mut payload)?;
-                // Always mirror to original (when enabled)
-                if let Some(ref mut f) = orig_file_opt {
-                    f.write_all(&payload)?;
+                ParseState::InBlob { mark, header_lines } => {
+                    let blob_state = ParseState::InBlob { mark, header_lines };
+                    if current_line.starts_with(b"original-oid ") {
+                        let mut v = current_line[b"original-oid ".len()..].to_vec();
+                        if let Some(last) = v.last() {
+                            if *last == b'\n' {
+                                v.pop();
+                            }
+                        }
+                        for b in &mut v {
+                            if *b >= b'A' && *b <= b'F' {
+                                *b += 32;
+                            }
+                        }
+                        last_blob_orig_sha = Some(v);
+                        blob_state
+                    } else if let Some(next_state) =
+                        blob_state.clone().record_blob_mark(&current_line)
+                    {
+                        next_state
+                    } else {
+                        let ParseState::InBlob {
+                            mark,
+                            mut header_lines,
+                        } = blob_state
+                        else {
+                            unreachable!();
+                        };
+                        if current_line.starts_with(b"data ") {
+                            let n = parse_data_size_header(&current_line)?;
+                            let mut payload = vec![0u8; n];
+                            fe_out.read_exact(&mut payload)?;
+                            if let Some(ref mut f) = orig_file_opt {
+                                f.write_all(&payload)?;
+                            }
+                            let mut in_blob = true;
+                            let mut blob_buf = header_lines;
+                            let mut last_blob_mark = mark;
+                            let mut ctx = BlobPayloadCtx {
+                                opts,
+                                filt_file: &mut filt_file,
+                                fi_in_opt: &mut fi_in_opt,
+                                content_replacer: &content_replacer,
+                                content_regex_replacer: &content_regex_replacer,
+                                in_blob: &mut in_blob,
+                                blob_buf: &mut blob_buf,
+                                last_blob_mark: &mut last_blob_mark,
+                                last_blob_orig_sha: &mut last_blob_orig_sha,
+                                tracker: &mut tracker,
+                                import_broken: &mut import_broken,
+                                strip_sha_lookup: &strip_sha_lookup,
+                            };
+                            process_blob_data_payload(payload, &mut ctx)?;
+                            if in_blob {
+                                ParseState::InBlob {
+                                    mark: last_blob_mark,
+                                    header_lines: blob_buf,
+                                }
+                            } else {
+                                ParseState::Idle
+                            }
+                        } else {
+                            header_lines.push(current_line.clone());
+                            ParseState::InBlob { mark, header_lines }
+                        }
+                    }
                 }
-                if in_blob {
-                    let mut ctx = BlobPayloadCtx {
+                ParseState::InCommit {
+                    mut mark,
+                    mut header_buf,
+                    mut has_file_changes,
+                    commit_ref,
+                } => {
+                    if should_end_commit {
+                        let short_mapper = short_hash_mapper.as_ref();
+                        let mut path_events = Vec::new();
+                        let action = crate::commit::process_commit_line(
+                            b"\n",
+                            opts,
+                            &mut fe_out,
+                            orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                            &mut filt_file as &mut dyn Write,
+                            if let Some(ref mut fi_in) = fi_in_opt {
+                                Some(fi_in as &mut dyn Write)
+                            } else {
+                                None
+                            },
+                            &replacer,
+                            msg_regex_replacer.as_ref(),
+                            short_mapper,
+                            &mut header_buf,
+                            &mut has_file_changes,
+                            &mut mark,
+                            &mut first_parent_mark,
+                            &mut commit_original_oid,
+                            &mut parent_count,
+                            &mut commit_pairs,
+                            &mut import_broken,
+                            &mut parent_lines,
+                            &mut alias_map,
+                            &tracker.emitted_marks,
+                            &mut path_events,
+                        )?;
+                        for event in path_events {
+                            record_path_compat_event(&mut path_compat_stats, event);
+                        }
+                        if matches!(action, crate::commit::CommitAction::Ended) {
+                            Self::record_emitted_commit_mark(
+                                &mut tracker,
+                                &mut short_hash_mapper,
+                                &mut fi_in_opt,
+                                &mut fi_out_opt,
+                                &commit_pairs,
+                                mark,
+                            )?;
+                        }
+                        state = ParseState::Idle;
+                        replay_line = Some(current_line);
+                        continue;
+                    }
+
+                    let mut pending_inline_ctx = PendingInlineDataCtx {
                         opts,
-                        filt_file: &mut filt_file,
-                        fi_in_opt: &mut fi_in_opt,
+                        fe_out: &mut fe_out,
+                        orig_file_opt: &mut orig_file_opt,
+                        commit_buf: &mut header_buf,
+                        commit_has_changes: &mut has_file_changes,
+                        pending_inline: &mut pending_inline,
+                        samples: &mut samples,
+                        path_compat_stats: &mut path_compat_stats,
                         content_replacer: &content_replacer,
                         content_regex_replacer: &content_regex_replacer,
-                        in_blob: &mut in_blob,
-                        blob_buf: &mut blob_buf,
-                        last_blob_mark: &mut last_blob_mark,
-                        last_blob_orig_sha: &mut last_blob_orig_sha,
-                        tracker: &mut tracker,
-                        import_broken: &mut import_broken,
-                        strip_sha_lookup: &strip_sha_lookup,
                     };
-                    process_blob_data_payload(payload, &mut ctx)?;
-                    continue;
-                } else {
-                    // Not a blob payload (should be rare here); forward as-is
-                    filt_file.write_all(&line)?;
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        if let Err(e) = fi_in.write_all(&line) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                import_broken = true;
-                                break;
-                            } else {
-                                return Err(e.into());
-                            }
+                    let handled_inline_or_m =
+                        process_pending_inline_data_line(&current_line, &mut pending_inline_ctx)?
+                            || (current_line.starts_with(b"M ") && {
+                                let mut ctx = CommitMPrecheckCtx {
+                                    opts,
+                                    commit_buf: &mut header_buf,
+                                    commit_has_changes: &mut has_file_changes,
+                                    pending_inline: &mut pending_inline,
+                                    tracker: &mut tracker,
+                                    samples: &mut samples,
+                                    path_compat_stats: &mut path_compat_stats,
+                                    strip_sha_lookup: &strip_sha_lookup,
+                                    blob_size_tracker: &mut blob_size_tracker,
+                                };
+                                process_commit_m_line_precheck(&current_line, &mut ctx)?
+                            });
+                    if handled_inline_or_m {
+                        ParseState::InCommit {
+                            mark,
+                            header_buf,
+                            has_file_changes,
+                            commit_ref,
                         }
-                    }
-                    filt_file.write_all(&payload)?;
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        if let Err(e) = fi_in.write_all(&payload) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                import_broken = true;
-                                break;
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                    }
-                    continue;
-                }
-                // Do not consume or inject an extra newline; next header line follows in stream.
-            }
-
-            // Handle end-of-stream marker; flush buffered lightweight tag resets before 'done'
-            if line == b"done\n" {
-                crate::finalize::flush_lightweight_tag_resets(
-                    &mut buffered_tag_resets,
-                    &annotated_tag_refs,
-                    &mut filt_file as &mut dyn Write,
-                    fi_in_opt.as_mut().map(|w| w as &mut dyn Write),
-                    &mut import_broken,
-                )?;
-                // Forward 'done' after flushing
-                filt_file.write_all(&line)?;
-                if let Some(ref mut fi_in) = fi_in_opt {
-                    if let Err(e) = fi_in.write_all(&line) {
-                        if e.kind() == io::ErrorKind::BrokenPipe {
-                            import_broken = true;
-                            break;
-                        } else {
-                            return Err(e.into());
-                        }
-                    }
-                }
-                continue;
-            }
-
-            // Lightweight tag renames: reset refs/tags/<name>
-            if crate::tag::process_reset_header(
-                &line,
-                opts,
-                &mut ref_renames,
-                &mut pending_tag_reset,
-            ) {
-                continue;
-            }
-
-            // Branch reset renames: reset refs/heads/<name>
-            if line.starts_with(b"reset ") {
-                let mut name = &line[b"reset ".len()..];
-                if let Some(&last) = name.last() {
-                    if last == b'\n' {
-                        name = &name[..name.len() - 1];
-                    }
-                }
-                if name.starts_with(b"refs/heads/") {
-                    let mut out = line.clone();
-                    let mut final_ref = name.to_vec();
-                    if let Some((ref old, ref new_)) = opts.branch_rename {
-                        let bname = &name[b"refs/heads/".len()..];
-                        if bname.starts_with(&old[..]) {
-                            let mut rebuilt = Vec::with_capacity(
-                                7 + b"refs/heads/".len()
-                                    + new_.len()
-                                    + (bname.len() - old.len())
-                                    + 1,
-                            );
-                            rebuilt.extend_from_slice(b"reset ");
-                            rebuilt.extend_from_slice(b"refs/heads/");
-                            rebuilt.extend_from_slice(new_);
-                            rebuilt.extend_from_slice(&bname[old.len()..]);
-                            rebuilt.push(b'\n');
-                            let new_full =
-                                [b"refs/heads/".as_ref(), new_, &bname[old.len()..]].concat();
-                            ref_renames.insert((name.to_vec(), new_full.clone()));
-                            final_ref = new_full;
-                            out = rebuilt;
-                        }
-                    }
-                    updated_branch_refs.insert(final_ref.clone());
-                    pending_branch_reset = Some(final_ref);
-                    // forward
-                    filt_file.write_all(&out)?;
-                    if let Some(ref mut fi_in) = fi_in_opt {
-                        if let Err(e) = fi_in.write_all(&out) {
-                            if e.kind() == io::ErrorKind::BrokenPipe {
-                                import_broken = true;
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                    }
-                    continue;
-                }
-            }
-
-            // Forward non-message lines as-is to filtered + import (drop stray blanks)
-            if line == b"\n" {
-                continue;
-            }
-            filt_file.write_all(&line)?;
-            if let Some(ref mut fi_in) = fi_in_opt {
-                if let Err(e) = fi_in.write_all(&line) {
-                    if e.kind() == io::ErrorKind::BrokenPipe {
-                        import_broken = true;
-                        break;
                     } else {
-                        return Err(e.into());
+                        let processed_line = rewrite_commit_identity_line(
+                            &current_line,
+                            opts,
+                            author_rewriter.as_ref(),
+                            committer_rewriter.as_ref(),
+                            email_rewriter.as_ref(),
+                            mailmap_rewriter.as_ref(),
+                        );
+                        let short_mapper = short_hash_mapper.as_ref();
+                        let mut path_events = Vec::new();
+                        match crate::commit::process_commit_line(
+                            &processed_line,
+                            opts,
+                            &mut fe_out,
+                            orig_file_opt.as_mut().map(|w| w as &mut dyn Write),
+                            &mut filt_file as &mut dyn Write,
+                            if let Some(ref mut fi_in) = fi_in_opt {
+                                Some(fi_in)
+                            } else {
+                                None
+                            },
+                            &replacer,
+                            msg_regex_replacer.as_ref(),
+                            short_mapper,
+                            &mut header_buf,
+                            &mut has_file_changes,
+                            &mut mark,
+                            &mut first_parent_mark,
+                            &mut commit_original_oid,
+                            &mut parent_count,
+                            &mut commit_pairs,
+                            &mut import_broken,
+                            &mut parent_lines,
+                            &mut alias_map,
+                            &tracker.emitted_marks,
+                            &mut path_events,
+                        )? {
+                            crate::commit::CommitAction::Consumed => {
+                                for event in path_events {
+                                    record_path_compat_event(&mut path_compat_stats, event);
+                                }
+                                ParseState::InCommit {
+                                    mark,
+                                    header_buf,
+                                    has_file_changes,
+                                    commit_ref,
+                                }
+                            }
+                            crate::commit::CommitAction::Ended => {
+                                for event in path_events {
+                                    record_path_compat_event(&mut path_compat_stats, event);
+                                }
+                                Self::record_emitted_commit_mark(
+                                    &mut tracker,
+                                    &mut short_hash_mapper,
+                                    &mut fi_in_opt,
+                                    &mut fi_out_opt,
+                                    &commit_pairs,
+                                    mark,
+                                )?;
+                                ParseState::Idle
+                            }
+                        }
                     }
                 }
-            }
+                ParseState::SkippingTagBlock => unreachable!(),
+            };
         }
 
         drop(fi_out_opt);
-        self.finalize_stream(
+        if let Some(ref mut of) = orig_file_opt {
+            of.flush()?;
+        }
+        let allow_flush_tag_resets = !buffered_tag_resets.is_empty();
+        let ctx = crate::finalize::FinalizeContext {
             opts,
-            &mut filt_file,
-            &mut orig_file_opt,
-            &mut fi_in_opt,
-            &mut fe,
-            &mut fi,
-            import_broken,
+            debug_dir: &self.debug_dir,
             ref_renames,
             commit_pairs,
             buffered_tag_resets,
             annotated_tag_refs,
             updated_branch_refs,
             branch_reset_targets,
+            import_broken,
+            allow_flush_tag_resets,
+        };
+        let stream_args = FinalizeStreamArgs {
             tracker,
             samples,
             total_commits,
             total_blobs,
             path_compat_stats,
-            &blob_size_tracker,
+        };
+        self.finalize_stream(
+            ctx,
+            &mut filt_file,
+            &mut fi_in_opt,
+            &mut fe,
+            &mut fi,
+            stream_args,
         )?;
 
         // Wait for child processes to finish
@@ -2133,5 +2294,107 @@ mod tests {
         let mut tracker = BlobSizeTracker::new(&opts);
         assert!(!tracker.prefetch_success());
         assert!(!tracker.is_oversize(b"0000000000000000000000000000000000000000"));
+    }
+
+    #[test]
+    fn parse_state_idle_enters_blob_with_header_buffered() {
+        let state = ParseState::enter_blob(b"blob\n");
+
+        assert_eq!(
+            state,
+            ParseState::InBlob {
+                mark: None,
+                header_lines: vec![b"blob\n".to_vec()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_state_in_blob_records_mark_without_leaving_blob() {
+        let state = ParseState::InBlob {
+            mark: None,
+            header_lines: vec![b"blob\n".to_vec()],
+        }
+        .record_blob_mark(b"mark :42\n")
+        .expect("blob mark line should update state");
+
+        assert_eq!(
+            state,
+            ParseState::InBlob {
+                mark: Some(42),
+                header_lines: vec![b"blob\n".to_vec(), b"mark :42\n".to_vec()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_state_commit_header_tracks_ref_and_empty_change_set() {
+        let state = ParseState::enter_commit(b"commit refs/heads/main\n");
+
+        assert_eq!(
+            state,
+            ParseState::InCommit {
+                mark: None,
+                header_buf: b"commit refs/heads/main\n".to_vec(),
+                has_file_changes: false,
+                commit_ref: b"refs/heads/main".to_vec(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_state_in_commit_detects_object_boundaries() {
+        let state = ParseState::InCommit {
+            mark: Some(7),
+            header_buf: b"commit refs/heads/main\n".to_vec(),
+            has_file_changes: true,
+            commit_ref: b"refs/heads/main".to_vec(),
+        };
+
+        assert!(state.should_end_commit_before(b"blob\n"));
+        assert!(state.should_end_commit_before(b"tag release-1\n"));
+        assert!(state.should_end_commit_before(b"reset refs/heads/main\n"));
+        assert!(state.should_end_commit_before(b"done\n"));
+        assert!(!state.should_end_commit_before(b"author Tester <tester@example.com> 0 +0000\n"));
+    }
+
+    #[test]
+    fn parse_state_skipping_tag_block_consumes_data_header() {
+        assert!(ParseState::SkippingTagBlock.consumes_tag_data_header(b"data 12\n"));
+        assert!(!ParseState::SkippingTagBlock.consumes_tag_data_header(b"from :1\n"));
+    }
+
+    #[test]
+    fn parse_state_in_reset_consumes_from_line_and_returns_to_idle() {
+        let state = ParseState::InReset {
+            ref_name: b"refs/tags/v1".to_vec(),
+            kind: ResetStateKind::Tag,
+        };
+
+        match state.dispatch_reset_line(b"from :3\n") {
+            ResetDispatch::Captured {
+                ref_name,
+                kind,
+                target,
+            } => {
+                assert_eq!(ref_name, b"refs/tags/v1");
+                assert_eq!(kind, ResetStateKind::Tag);
+                assert_eq!(target, b":3");
+            }
+            other => panic!("expected Captured, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_state_in_reset_replays_non_from_line() {
+        let state = ParseState::InReset {
+            ref_name: b"refs/heads/main".to_vec(),
+            kind: ResetStateKind::Branch,
+        };
+
+        match state.dispatch_reset_line(b"commit refs/heads/main\n") {
+            ResetDispatch::Replay => {}
+            other => panic!("expected Replay, got {other:?}"),
+        }
     }
 }
