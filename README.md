@@ -315,6 +315,10 @@ Inspired by [git-filter-repo](https://github.com/newren/git-filter-repo) by [Eli
 - [Discussions](https://github.com/Cactusinhand/filter-repo-rs/discussions)
 - [Testing Policy](TESTING.md)
 
+## Star history
+
+![Star history Card](https://githubcard.com/Cactusinhand/filter-repo-rs.svg?d=RPfVinUWOvU7)
+
 ---
 
 <p align="center">
